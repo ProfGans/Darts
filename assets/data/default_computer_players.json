@@ -1,0 +1,591 @@
+﻿{
+    "tagDefinitions":  [
+                           "Echter Spieler"
+                       ],
+    "nationalityDefinitions":  [
+                                   "Afghanistan",
+                                   "Albania",
+                                   "Algeria",
+                                   "Andorra",
+                                   "Angola",
+                                   "Antigua and Barbuda",
+                                   "Argentina",
+                                   "Armenia",
+                                   "Australia",
+                                   "Austria",
+                                   "Azerbaijan",
+                                   "Bahamas",
+                                   "Bahrain",
+                                   "Bangladesh",
+                                   "Barbados",
+                                   "Belarus",
+                                   "Belgium",
+                                   "Belize",
+                                   "Benin",
+                                   "Bhutan",
+                                   "Bolivia",
+                                   "Bosnia and Herzegovina",
+                                   "Botswana",
+                                   "Brazil",
+                                   "Brunei",
+                                   "Bulgaria",
+                                   "Burkina Faso",
+                                   "Burundi",
+                                   "Cabo Verde",
+                                   "Cambodia",
+                                   "Cameroon",
+                                   "Canada",
+                                   "Central African Republic",
+                                   "Chad",
+                                   "Chile",
+                                   "China",
+                                   "Colombia",
+                                   "Comoros",
+                                   "Costa Rica",
+                                   "Cote d\u0027Ivoire",
+                                   "Croatia",
+                                   "Cuba",
+                                   "Cyprus",
+                                   "Czech Republic",
+                                   "Democratic Republic of the Congo",
+                                   "Denmark",
+                                   "Djibouti",
+                                   "Dominica",
+                                   "Dominican Republic",
+                                   "Ecuador",
+                                   "Egypt",
+                                   "El Salvador",
+                                   "Equatorial Guinea",
+                                   "Eritrea",
+                                   "Estonia",
+                                   "Eswatini",
+                                   "Ethiopia",
+                                   "Fiji",
+                                   "Finland",
+                                   "France",
+                                   "Gabon",
+                                   "Gambia",
+                                   "Georgia",
+                                   "Germany",
+                                   "Ghana",
+                                   "Greece",
+                                   "Grenada",
+                                   "Guatemala",
+                                   "Guinea",
+                                   "Guinea-Bissau",
+                                   "Guyana",
+                                   "Haiti",
+                                   "Honduras",
+                                   "Hungary",
+                                   "Iceland",
+                                   "India",
+                                   "Indonesia",
+                                   "Iran",
+                                   "Iraq",
+                                   "Ireland",
+                                   "Israel",
+                                   "Italy",
+                                   "Jamaica",
+                                   "Japan",
+                                   "Jordan",
+                                   "Kazakhstan",
+                                   "Kenya",
+                                   "Kiribati",
+                                   "Kuwait",
+                                   "Kyrgyzstan",
+                                   "Laos",
+                                   "Latvia",
+                                   "Lebanon",
+                                   "Lesotho",
+                                   "Liberia",
+                                   "Libya",
+                                   "Liechtenstein",
+                                   "Lithuania",
+                                   "Luxembourg",
+                                   "Madagascar",
+                                   "Malawi",
+                                   "Malaysia",
+                                   "Maldives",
+                                   "Mali",
+                                   "Malta",
+                                   "Marshall Islands",
+                                   "Mauritania",
+                                   "Mauritius",
+                                   "Mexico",
+                                   "Micronesia",
+                                   "Moldova",
+                                   "Monaco",
+                                   "Mongolia",
+                                   "Montenegro",
+                                   "Morocco",
+                                   "Mozambique",
+                                   "Myanmar",
+                                   "Namibia",
+                                   "Nauru",
+                                   "Nepal",
+                                   "Netherlands",
+                                   "New Zealand",
+                                   "Nicaragua",
+                                   "Niger",
+                                   "Nigeria",
+                                   "North Korea",
+                                   "North Macedonia",
+                                   "Norway",
+                                   "Oman",
+                                   "Pakistan",
+                                   "Palau",
+                                   "Panama",
+                                   "Papua New Guinea",
+                                   "Paraguay",
+                                   "Peru",
+                                   "Philippines",
+                                   "Poland",
+                                   "Portugal",
+                                   "Qatar",
+                                   "Republic of the Congo",
+                                   "Romania",
+                                   "Russia",
+                                   "Rwanda",
+                                   "Saint Kitts and Nevis",
+                                   "Saint Lucia",
+                                   "Saint Vincent and the Grenadines",
+                                   "Samoa",
+                                   "San Marino",
+                                   "Sao Tome and Principe",
+                                   "Saudi Arabia",
+                                   "Senegal",
+                                   "Serbia",
+                                   "Seychelles",
+                                   "Sierra Leone",
+                                   "Singapore",
+                                   "Slovakia",
+                                   "Slovenia",
+                                   "Solomon Islands",
+                                   "Somalia",
+                                   "South Africa",
+                                   "South Korea",
+                                   "South Sudan",
+                                   "Spain",
+                                   "Sri Lanka",
+                                   "Sudan",
+                                   "Suriname",
+                                   "Sweden",
+                                   "Switzerland",
+                                   "Syria",
+                                   "Tajikistan",
+                                   "Tanzania",
+                                   "Thailand",
+                                   "Timor-Leste",
+                                   "Togo",
+                                   "Tonga",
+                                   "Trinidad and Tobago",
+                                   "Tunisia",
+                                   "Turkey",
+                                   "Turkmenistan",
+                                   "Tuvalu",
+                                   "Uganda",
+                                   "Ukraine",
+                                   "United Arab Emirates",
+                                   "United Kingdom",
+                                   "United States",
+                                   "Uruguay",
+                                   "Uzbekistan",
+                                   "Vanuatu",
+                                   "Venezuela",
+                                   "Vietnam",
+                                   "Yemen",
+                                   "Zambia",
+                                   "Zimbabwe",
+                                   "Holy See",
+                                   "England",
+                                   "Scotland",
+                                   "Wales",
+                                   "Northern Ireland"
+                               ],
+    "players":  [
+                    {
+                        "id":  "db-player-73951"
+                    },
+                    {
+                        "id":  "db-player-11822"
+                    },
+                    {
+                        "id":  "db-player-181"
+                    },
+                    {
+                        "id":  "db-player-16492"
+                    },
+                    {
+                        "id":  "db-player-192"
+                    },
+                    {
+                        "id":  "db-player-1395"
+                    },
+                    {
+                        "id":  "db-player-74975"
+                    },
+                    {
+                        "id":  "db-player-16076"
+                    },
+                    {
+                        "id":  "db-player-1596"
+                    },
+                    {
+                        "id":  "db-player-18934"
+                    },
+                    {
+                        "id":  "db-player-6861"
+                    },
+                    {
+                        "id":  "db-player-10070"
+                    },
+                    {
+                        "id":  "db-player-21491"
+                    },
+                    {
+                        "id":  "db-player-13326"
+                    },
+                    {
+                        "id":  "db-player-10584"
+                    },
+                    {
+                        "id":  "db-player-4842"
+                    },
+                    {
+                        "id":  "db-player-13202"
+                    },
+                    {
+                        "id":  "db-player-27979"
+                    },
+                    {
+                        "id":  "db-player-5422"
+                    },
+                    {
+                        "id":  "db-player-11"
+                    },
+                    {
+                        "id":  "db-player-7462"
+                    },
+                    {
+                        "id":  "db-player-16749"
+                    },
+                    {
+                        "id":  "db-player-6025"
+                    },
+                    {
+                        "id":  "db-player-16530"
+                    },
+                    {
+                        "id":  "db-player-8798"
+                    },
+                    {
+                        "id":  "db-player-2479"
+                    },
+                    {
+                        "id":  "db-player-4101"
+                    },
+                    {
+                        "id":  "db-player-5202"
+                    },
+                    {
+                        "id":  "db-player-25544"
+                    },
+                    {
+                        "id":  "db-player-10168"
+                    },
+                    {
+                        "id":  "db-player-16151"
+                    },
+                    {
+                        "id":  "db-player-16676"
+                    },
+                    {
+                        "id":  "db-player-17734"
+                    },
+                    {
+                        "id":  "db-player-3097"
+                    },
+                    {
+                        "id":  "db-player-10621"
+                    },
+                    {
+                        "id":  "db-player-66017"
+                    },
+                    {
+                        "id":  "db-player-66008"
+                    },
+                    {
+                        "id":  "db-player-6487"
+                    },
+                    {
+                        "id":  "db-player-16776"
+                    },
+                    {
+                        "id":  "db-player-2"
+                    },
+                    {
+                        "id":  "db-player-1734"
+                    },
+                    {
+                        "id":  "db-player-1933"
+                    },
+                    {
+                        "id":  "db-player-4885"
+                    },
+                    {
+                        "id":  "db-player-74395"
+                    },
+                    {
+                        "id":  "db-player-1463"
+                    },
+                    {
+                        "id":  "db-player-11656"
+                    },
+                    {
+                        "id":  "db-player-16652"
+                    },
+                    {
+                        "id":  "db-player-17485"
+                    },
+                    {
+                        "id":  "db-player-71914"
+                    },
+                    {
+                        "id":  "db-player-10396"
+                    },
+                    {
+                        "id":  "db-player-78282"
+                    },
+                    {
+                        "id":  "db-player-1607"
+                    },
+                    {
+                        "id":  "db-player-10595"
+                    },
+                    {
+                        "id":  "db-player-9017"
+                    },
+                    {
+                        "id":  "db-player-8348"
+                    },
+                    {
+                        "id":  "db-player-2201"
+                    },
+                    {
+                        "id":  "db-player-25506"
+                    },
+                    {
+                        "id":  "db-player-1683"
+                    },
+                    {
+                        "id":  "db-player-4083"
+                    },
+                    {
+                        "id":  "db-player-1633"
+                    },
+                    {
+                        "id":  "db-player-2213"
+                    },
+                    {
+                        "id":  "db-player-15759"
+                    },
+                    {
+                        "id":  "db-player-8797"
+                    },
+                    {
+                        "id":  "db-player-74029"
+                    },
+                    {
+                        "id":  "db-player-18296"
+                    },
+                    {
+                        "id":  "db-player-17360"
+                    },
+                    {
+                        "id":  "db-player-75148"
+                    },
+                    {
+                        "id":  "db-player-16502"
+                    },
+                    {
+                        "id":  "db-player-10013"
+                    },
+                    {
+                        "id":  "db-player-23137"
+                    },
+                    {
+                        "id":  "db-player-77408"
+                    },
+                    {
+                        "id":  "db-player-15499"
+                    },
+                    {
+                        "id":  "db-player-168"
+                    },
+                    {
+                        "id":  "db-player-21704"
+                    },
+                    {
+                        "id":  "db-player-76209"
+                    },
+                    {
+                        "id":  "db-player-98"
+                    },
+                    {
+                        "id":  "db-player-25478"
+                    },
+                    {
+                        "id":  "db-player-17723"
+                    },
+                    {
+                        "id":  "db-player-10399"
+                    },
+                    {
+                        "id":  "db-player-4957"
+                    },
+                    {
+                        "id":  "db-player-11969"
+                    },
+                    {
+                        "id":  "db-player-59366"
+                    },
+                    {
+                        "id":  "db-player-4333"
+                    },
+                    {
+                        "id":  "db-player-76740"
+                    },
+                    {
+                        "id":  "db-player-18014"
+                    },
+                    {
+                        "id":  "db-player-12671"
+                    },
+                    {
+                        "id":  "db-player-16051"
+                    },
+                    {
+                        "id":  "db-player-15284"
+                    },
+                    {
+                        "id":  "db-player-10365"
+                    },
+                    {
+                        "id":  "db-player-75206"
+                    },
+                    {
+                        "id":  "db-player-13204"
+                    },
+                    {
+                        "id":  "db-player-15112"
+                    },
+                    {
+                        "id":  "db-player-74218"
+                    },
+                    {
+                        "id":  "db-player-18403"
+                    },
+                    {
+                        "id":  "db-player-11579"
+                    },
+                    {
+                        "id":  "db-player-18325"
+                    },
+                    {
+                        "id":  "db-player-74010"
+                    },
+                    {
+                        "id":  "db-player-13782"
+                    },
+                    {
+                        "id":  "db-player-55198"
+                    },
+                    {
+                        "id":  "db-player-22988"
+                    },
+                    {
+                        "id":  "db-player-45760"
+                    },
+                    {
+                        "id":  "db-player-15093"
+                    },
+                    {
+                        "id":  "db-player-67269"
+                    },
+                    {
+                        "id":  "db-player-45851"
+                    },
+                    {
+                        "id":  "db-player-74981"
+                    },
+                    {
+                        "id":  "db-player-16665"
+                    },
+                    {
+                        "id":  "db-player-11716"
+                    },
+                    {
+                        "id":  "db-player-18456"
+                    },
+                    {
+                        "id":  "db-player-16370"
+                    },
+                    {
+                        "id":  "db-player-74032"
+                    },
+                    {
+                        "id":  "db-player-22971"
+                    },
+                    {
+                        "id":  "db-player-76814"
+                    },
+                    {
+                        "id":  "db-player-17146"
+                    },
+                    {
+                        "id":  "db-player-76979"
+                    },
+                    {
+                        "id":  "db-player-2691"
+                    },
+                    {
+                        "id":  "db-player-66148"
+                    },
+                    {
+                        "id":  "db-player-75785"
+                    },
+                    {
+                        "id":  "db-player-17944"
+                    },
+                    {
+                        "id":  "db-player-13396"
+                    },
+                    {
+                        "id":  "db-player-64791"
+                    },
+                    {
+                        "id":  "db-player-9487"
+                    },
+                    {
+                        "id":  "db-player-78163"
+                    },
+                    {
+                        "id":  "db-player-8954"
+                    },
+                    {
+                        "id":  "db-player-18182"
+                    },
+                    {
+                        "id":  "db-player-75126"
+                    },
+                    {
+                        "id":  "db-player-76488"
+                    },
+                    {
+                        "id":  "db-player-77021"
+                    },
+                    {
+                        "id":  "db-player-76449"
+                    }
+                ]
+}
