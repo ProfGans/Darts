@@ -269,9 +269,9 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
       _isSimulatingTournament = true;
       _simulationStatus = 'Simuliere ${item.name}...';
     });
-    AppDebug.instance.info(
+    final action = AppDebug.instance.startAction(
       'Karriere',
-      'Starte Turnier-Simulation fuer "${item.name}".',
+      'Turnier-Simulation "${item.name}"',
     );
     try {
       final tournamentRepository = TournamentRepository.instance;
@@ -289,6 +289,10 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
           'Turnier "${item.name}" wurde nicht abgeschlossen.',
         );
       }
+      action.complete();
+    } catch (error) {
+      action.fail(error);
+      rethrow;
     } finally {
       if (mounted) {
         setState(() {
@@ -511,9 +515,9 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       _isSimulatingTournament = true;
       _simulationStatus = 'Simuliere ${item.name}...';
     });
-    AppDebug.instance.info(
+    final action = AppDebug.instance.startAction(
       'Karriere',
-      'Starte Turnier-Simulation fuer "${item.name}".',
+      'Turnier-Simulation "${item.name}"',
     );
     try {
       final tournamentRepository = TournamentRepository.instance;
@@ -531,6 +535,10 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
           'Turnier "${item.name}" wurde nicht abgeschlossen.',
         );
       }
+      action.complete();
+    } catch (error) {
+      action.fail(error);
+      rethrow;
     } finally {
       if (mounted) {
         setState(() {
@@ -566,6 +574,10 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       _isSimulatingSeason = true;
       _simulationStatus = 'Saison-Simulation gestartet...';
     });
+    final action = AppDebug.instance.startAction(
+      'Karriere',
+      'Komplette Saison-Simulation',
+    );
     try {
       final total = career.currentSeason.calendar.length;
       while (mounted) {
@@ -590,6 +602,10 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
         }
         await Future<void>.delayed(const Duration(milliseconds: 1));
       }
+      action.complete();
+    } catch (error) {
+      action.fail(error);
+      rethrow;
     } finally {
       if (mounted) {
         setState(() {
@@ -1508,39 +1524,57 @@ class _CareerRankingsScreen extends StatelessWidget {
             title: const Text('Komplette Ranglisten'),
           ),
           body: SafeArea(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              itemCount: career.rankings.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final ranking = career.rankings[index];
-                return _SectionCard(
-                  title: ranking.name,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Gueltig ueber ${ranking.validSeasons} Saison(en)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF5D7285),
+            child: career.rankings.isEmpty
+                ? const Center(
+                    child: Text('Noch keine Ranglisten angelegt.'),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    itemCount: career.rankings.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final ranking = career.rankings[index];
+                      return Card(
+                        child: ExpansionTile(
+                          initiallyExpanded: false,
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            16,
+                          ),
+                          title: Text(
+                            ranking.name,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          subtitle: Text(
+                            'Gueltig ueber ${ranking.validSeasons} Saison(en)',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFF5D7285),
+                                ),
+                          ),
+                          children: <Widget>[
+                            _SimpleStandingsTable(
+                              leaders: repository.standingsForRanking(ranking.id),
+                              onPlayerTap: (playerId) {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => CareerPlayerDetailScreen(
+                                      playerId: playerId,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                      ),
-                      const SizedBox(height: 12),
-                      _SimpleStandingsTable(
-                        leaders: repository.standingsForRanking(ranking.id),
-                        onPlayerTap: (playerId) {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => CareerPlayerDetailScreen(playerId: playerId),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                          ],
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         );
       },

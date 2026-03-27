@@ -623,13 +623,38 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
       body: AnimatedBuilder(
         animation: _repository,
         builder: (context, _) {
-          final players = _repository.players;
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: <Widget>[
+        final players = _repository.players;
+        final activePlayer = _repository.activePlayer;
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
+            if (activePlayer != null)
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Aktiver Spieler',
+                        style: theme.textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${activePlayer.preferences.displayName ?? activePlayer.name} | ${_sourceLabel(activePlayer.source)}',
+                      ),
+                      Text(
+                        'Avg ${activePlayer.stats.average.toStringAsFixed(1)} | First 9 ${activePlayer.stats.firstNineAverage.toStringAsFixed(1)} | Checkout ${activePlayer.stats.checkoutQuote.toStringAsFixed(1)} %',
+                      ),
+                      Text('Aktives Equipment: ${_activeEquipmentName(activePlayer)}'),
+                    ],
+                  ),
+                ),
+              ),
+            if (activePlayer != null) const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
@@ -655,7 +680,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String?>(
-                        value: _selectedNationality,
+                        initialValue: _selectedNationality,
                         decoration: const InputDecoration(labelText: 'Nationalitaet'),
                         items: <DropdownMenuItem<String?>>[
                           const DropdownMenuItem<String?>(
@@ -675,7 +700,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<PlayerProfileSource>(
-                        value: _selectedSource,
+                        initialValue: _selectedSource,
                         decoration: const InputDecoration(labelText: 'Quelle'),
                         items: PlayerProfileSource.values
                             .map(
@@ -750,38 +775,328 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
                         ],
                       ),
                     ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (activePlayer != null)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('Equipment', style: theme.textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: activePlayer.activeEquipmentId ?? '',
+                        decoration: const InputDecoration(labelText: 'Aktives Setup'),
+                        items: <DropdownMenuItem<String>>[
+                          const DropdownMenuItem<String>(
+                            value: '',
+                            child: Text('Kein aktives Setup'),
+                          ),
+                          ...activePlayer.equipmentSetups.map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.id,
+                              child: Text(entry.name),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          _repository.setActiveEquipment(
+                            activePlayer.id,
+                            value == null || value.isEmpty ? null : value,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentNameController,
+                        decoration: const InputDecoration(labelText: 'Setup-Name'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentWeightController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Barrelgewicht'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentBarrelController,
+                        decoration: const InputDecoration(labelText: 'Barrel-Modell'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentMaterialController,
+                        decoration: const InputDecoration(labelText: 'Barrel-Material'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentPointController,
+                        decoration: const InputDecoration(labelText: 'Points'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentPointLengthController,
+                        decoration: const InputDecoration(labelText: 'Point-Laenge'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentShaftController,
+                        decoration: const InputDecoration(labelText: 'Shaft-System'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentShaftLengthController,
+                        decoration: const InputDecoration(labelText: 'Shaft-Laenge'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentFlightController,
+                        decoration: const InputDecoration(labelText: 'Flight-Shape'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentFlightSystemController,
+                        decoration: const InputDecoration(labelText: 'Flight-System'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentGripController,
+                        decoration: const InputDecoration(labelText: 'Grip / Wax / Tape'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _equipmentNotesController,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(labelText: 'Equipment-Notizen'),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          FilledButton(
+                            onPressed: () => _saveEquipment(activePlayer),
+                            child: Text(
+                              _editingEquipmentId == null ? 'Setup speichern' : 'Setup aktualisieren',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _clearEquipmentForm,
+                            child: const Text('Leeren'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (activePlayer.equipmentSetups.isEmpty)
+                        const Text('Noch kein Equipment gespeichert.')
+                      else
+                        ...activePlayer.equipmentSetups.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: theme.colorScheme.outlineVariant,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    entry.name,
+                                    style: theme.textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(entry.summary),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: <Widget>[
+                                      if (activePlayer.activeEquipmentId == entry.id)
+                                        const Chip(label: Text('Aktiv')),
+                                      OutlinedButton(
+                                        onPressed: () => _editEquipment(entry),
+                                        child: const Text('Bearbeiten'),
+                                      ),
+                                      OutlinedButton(
+                                        onPressed: () => _repository.deleteEquipment(
+                                          activePlayer.id,
+                                          entry.id,
+                                        ),
+                                        child: const Text('Loeschen'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              Text('Profile', style: theme.textTheme.titleLarge),
+            if (activePlayer != null) const SizedBox(height: 16),
+            if (activePlayer != null)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('Training', style: theme.textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _trainingModeController,
+                        decoration: const InputDecoration(labelText: 'Trainingsmodus'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _trainingScoreController,
+                        decoration: const InputDecoration(labelText: 'Ergebnis / Punkte'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _trainingAverageController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Average optional'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _trainingNotesController,
+                        decoration: const InputDecoration(labelText: 'Notiz optional'),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: () => _recordTraining(activePlayer),
+                        child: const Text('Training speichern'),
+                      ),
+                      const SizedBox(height: 12),
+                      if (activePlayer.trainingHistory.isEmpty)
+                        const Text('Noch keine Trainingseintraege vorhanden.')
+                      else
+                        ...activePlayer.trainingHistory.take(5).map(
+                          (entry) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('${entry.mode} - ${entry.scoreLabel}'),
+                            subtitle: Text(
+                              '${_formatDateTime(entry.playedAt)}${entry.average == null ? '' : ' - Avg ${entry.average!.toStringAsFixed(1)}'}${entry.equipmentName == null ? '' : ' - ${entry.equipmentName}'}',
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            if (activePlayer != null) const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Profilvergleich', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _compareFirstPlayerId,
+                      decoration: const InputDecoration(labelText: 'Spieler A'),
+                      items: <DropdownMenuItem<String?>>[
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Spieler A waehlen'),
+                        ),
+                        ...players.map(
+                          (player) => DropdownMenuItem<String?>(
+                            value: player.id,
+                            child: Text(player.preferences.displayName ?? player.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setState(() => _compareFirstPlayerId = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _compareSecondPlayerId,
+                      decoration: const InputDecoration(labelText: 'Spieler B'),
+                      items: <DropdownMenuItem<String?>>[
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Spieler B waehlen'),
+                        ),
+                        ...players.map(
+                          (player) => DropdownMenuItem<String?>(
+                            value: player.id,
+                            child: Text(player.preferences.displayName ?? player.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setState(() => _compareSecondPlayerId = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    if (_compareFirstPlayerId != null &&
+                        _compareSecondPlayerId != null &&
+                        _compareFirstPlayerId != _compareSecondPlayerId &&
+                        _repository.playerById(_compareFirstPlayerId!) != null &&
+                        _repository.playerById(_compareSecondPlayerId!) != null)
+                      _ProfileComparison(
+                        left: _repository.playerById(_compareFirstPlayerId!)!,
+                        right: _repository.playerById(_compareSecondPlayerId!)!,
+                      )
+                    else
+                      const Text('Waehle zwei unterschiedliche Spieler.'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Profile', style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
               ...players.map(
                 (player) => Card(
-                  child: ListTile(
-                    title: Text(player.preferences.displayName ?? player.name),
-                    subtitle: Text(
-                      '${_sourceLabel(player.source)} | Avg ${player.stats.average.toStringAsFixed(1)} | Legs ${player.stats.legsWon}/${player.stats.legsPlayed}',
-                    ),
-                    trailing: Wrap(
-                      spacing: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        IconButton(
-                          tooltip: 'Details',
-                          onPressed: () => _openDetails(player),
-                          icon: const Icon(Icons.insights_outlined),
+                        Text(
+                          player.preferences.displayName ?? player.name,
+                          style: theme.textTheme.titleMedium,
                         ),
-                        IconButton(
-                          tooltip: 'Bearbeiten',
-                          onPressed: () => _edit(player),
-                          icon: const Icon(Icons.edit_outlined),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_sourceLabel(player.source)} | Avg ${player.stats.average.toStringAsFixed(1)} | Legs ${player.stats.legsWon}/${player.stats.legsPlayed}',
                         ),
-                        IconButton(
-                          tooltip: 'Loeschen',
-                          onPressed: player.isProtected
-                              ? null
-                              : () => _repository.deletePlayer(player.id),
-                          icon: const Icon(Icons.delete_outline),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: <Widget>[
+                            OutlinedButton(
+                              onPressed: () => _openDetails(player),
+                              child: const Text('Details'),
+                            ),
+                            OutlinedButton(
+                              onPressed: () => _edit(player),
+                              child: const Text('Bearbeiten'),
+                            ),
+                            OutlinedButton(
+                              onPressed: player.isProtected
+                                  ? null
+                                  : () => _repository.deletePlayer(player.id),
+                              child: const Text('Loeschen'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -886,5 +1201,77 @@ class _TrendPainter extends CustomPainter {
         oldDelegate.lineColor != lineColor ||
         oldDelegate.guideColor != guideColor ||
         oldDelegate.textColor != textColor;
+  }
+}
+
+class _ProfileComparison extends StatelessWidget {
+  const _ProfileComparison({
+    required this.left,
+    required this.right,
+  });
+
+  final PlayerProfile left;
+  final PlayerProfile right;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget row(String label, String leftValue, String rightValue) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: <Widget>[
+            Expanded(child: Text(leftValue)),
+            Expanded(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                rightValue,
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: <Widget>[
+        row(
+          'Name',
+          left.preferences.displayName ?? left.name,
+          right.preferences.displayName ?? right.name,
+        ),
+        row(
+          'X01 Avg',
+          left.stats.average.toStringAsFixed(1),
+          right.stats.average.toStringAsFixed(1),
+        ),
+        row(
+          'First 9',
+          left.stats.firstNineAverage.toStringAsFixed(1),
+          right.stats.firstNineAverage.toStringAsFixed(1),
+        ),
+        row(
+          'Checkout %',
+          left.stats.checkoutQuote.toStringAsFixed(1),
+          right.stats.checkoutQuote.toStringAsFixed(1),
+        ),
+        row(
+          '100+ Finishes',
+          '${left.stats.hundredPlusCheckouts}',
+          '${right.stats.hundredPlusCheckouts}',
+        ),
+        row(
+          '180er',
+          '${left.stats.scores180}',
+          '${right.stats.scores180}',
+        ),
+      ],
+    );
   }
 }

@@ -84,6 +84,7 @@ class ComputerRepository extends ChangeNotifier {
   final List<String> _tagDefinitions = <String>[];
   final List<String> _nationalityDefinitions = <String>[];
   final List<_RepositorySnapshot> _undoStack = <_RepositorySnapshot>[];
+  int _changeToken = 0;
 
   List<ComputerPlayer> get players =>
       List<ComputerPlayer>.unmodifiable(_players);
@@ -91,6 +92,13 @@ class ComputerRepository extends ChangeNotifier {
   List<String> get nationalityDefinitions =>
       List<String>.unmodifiable(_nationalityDefinitions);
   bool get canUndo => _undoStack.isNotEmpty;
+  int get changeToken => _changeToken;
+
+  @override
+  void notifyListeners() {
+    _changeToken += 1;
+    super.notifyListeners();
+  }
 
   Future<void> initialize() async {
     final storedJson = await AppStorage.instance.readJsonMap(_storageKey);

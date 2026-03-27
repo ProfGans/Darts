@@ -91,6 +91,258 @@ class _ParticipantRuntime {
       firstNineDarts <= 0 ? 0 : (firstNinePoints / firstNineDarts) * 3;
   double get doubleQuote =>
       checkoutAttempts <= 0 ? 0 : (successfulCheckouts / checkoutAttempts) * 100;
+
+  _ParticipantRuntimeSnapshot snapshot() {
+    return _ParticipantRuntimeSnapshot(
+      score: score,
+      hasOpenedLeg: hasOpenedLeg,
+      legs: legs,
+      sets: sets,
+      totalLegsWon: totalLegsWon,
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
+      visits: visits,
+      legsPlayed: legsPlayed,
+      legsStarted: legsStarted,
+      legsWonAsStarter: legsWonAsStarter,
+      legsWonWithoutStarter: legsWonWithoutStarter,
+      scores0To40: scores0To40,
+      scores41To59: scores41To59,
+      scores60Plus: scores60Plus,
+      scores100Plus: scores100Plus,
+      scores140Plus: scores140Plus,
+      scores171Plus: scores171Plus,
+      scores180: scores180,
+      checkoutAttempts: checkoutAttempts,
+      successfulCheckouts: successfulCheckouts,
+      checkoutAttempts1Dart: checkoutAttempts1Dart,
+      checkoutAttempts2Dart: checkoutAttempts2Dart,
+      checkoutAttempts3Dart: checkoutAttempts3Dart,
+      successfulCheckouts1Dart: successfulCheckouts1Dart,
+      successfulCheckouts2Dart: successfulCheckouts2Dart,
+      successfulCheckouts3Dart: successfulCheckouts3Dart,
+      thirdDartCheckoutAttempts: thirdDartCheckoutAttempts,
+      thirdDartCheckouts: thirdDartCheckouts,
+      bullCheckoutAttempts: bullCheckoutAttempts,
+      bullCheckouts: bullCheckouts,
+      functionalDoubleAttempts: functionalDoubleAttempts,
+      functionalDoubleSuccesses: functionalDoubleSuccesses,
+      firstNinePoints: firstNinePoints,
+      firstNineDarts: firstNineDarts,
+      highestFinish: highestFinish,
+      bestLegDarts: bestLegDarts,
+      totalFinishValue: totalFinishValue,
+      withThrowPoints: withThrowPoints,
+      withThrowDarts: withThrowDarts,
+      againstThrowPoints: againstThrowPoints,
+      againstThrowDarts: againstThrowDarts,
+      decidingLegPoints: decidingLegPoints,
+      decidingLegDarts: decidingLegDarts,
+      decidingLegsPlayed: decidingLegsPlayed,
+      decidingLegsWon: decidingLegsWon,
+      won12Darters: won12Darters,
+      won15Darters: won15Darters,
+      won18Darters: won18Darters,
+    );
+  }
+
+  void restore(_ParticipantRuntimeSnapshot snapshot) {
+    score = snapshot.score;
+    hasOpenedLeg = snapshot.hasOpenedLeg;
+    legs = snapshot.legs;
+    sets = snapshot.sets;
+    totalLegsWon = snapshot.totalLegsWon;
+    pointsScored = snapshot.pointsScored;
+    dartsThrown = snapshot.dartsThrown;
+    visits = snapshot.visits;
+    legsPlayed = snapshot.legsPlayed;
+    legsStarted = snapshot.legsStarted;
+    legsWonAsStarter = snapshot.legsWonAsStarter;
+    legsWonWithoutStarter = snapshot.legsWonWithoutStarter;
+    scores0To40 = snapshot.scores0To40;
+    scores41To59 = snapshot.scores41To59;
+    scores60Plus = snapshot.scores60Plus;
+    scores100Plus = snapshot.scores100Plus;
+    scores140Plus = snapshot.scores140Plus;
+    scores171Plus = snapshot.scores171Plus;
+    scores180 = snapshot.scores180;
+    checkoutAttempts = snapshot.checkoutAttempts;
+    successfulCheckouts = snapshot.successfulCheckouts;
+    checkoutAttempts1Dart = snapshot.checkoutAttempts1Dart;
+    checkoutAttempts2Dart = snapshot.checkoutAttempts2Dart;
+    checkoutAttempts3Dart = snapshot.checkoutAttempts3Dart;
+    successfulCheckouts1Dart = snapshot.successfulCheckouts1Dart;
+    successfulCheckouts2Dart = snapshot.successfulCheckouts2Dart;
+    successfulCheckouts3Dart = snapshot.successfulCheckouts3Dart;
+    thirdDartCheckoutAttempts = snapshot.thirdDartCheckoutAttempts;
+    thirdDartCheckouts = snapshot.thirdDartCheckouts;
+    bullCheckoutAttempts = snapshot.bullCheckoutAttempts;
+    bullCheckouts = snapshot.bullCheckouts;
+    functionalDoubleAttempts = snapshot.functionalDoubleAttempts;
+    functionalDoubleSuccesses = snapshot.functionalDoubleSuccesses;
+    firstNinePoints = snapshot.firstNinePoints;
+    firstNineDarts = snapshot.firstNineDarts;
+    highestFinish = snapshot.highestFinish;
+    bestLegDarts = snapshot.bestLegDarts;
+    totalFinishValue = snapshot.totalFinishValue;
+    withThrowPoints = snapshot.withThrowPoints;
+    withThrowDarts = snapshot.withThrowDarts;
+    againstThrowPoints = snapshot.againstThrowPoints;
+    againstThrowDarts = snapshot.againstThrowDarts;
+    decidingLegPoints = snapshot.decidingLegPoints;
+    decidingLegDarts = snapshot.decidingLegDarts;
+    decidingLegsPlayed = snapshot.decidingLegsPlayed;
+    decidingLegsWon = snapshot.decidingLegsWon;
+    won12Darters = snapshot.won12Darters;
+    won15Darters = snapshot.won15Darters;
+    won18Darters = snapshot.won18Darters;
+  }
+}
+
+class _ParticipantRuntimeSnapshot {
+  const _ParticipantRuntimeSnapshot({
+    required this.score,
+    required this.hasOpenedLeg,
+    required this.legs,
+    required this.sets,
+    required this.totalLegsWon,
+    required this.pointsScored,
+    required this.dartsThrown,
+    required this.visits,
+    required this.legsPlayed,
+    required this.legsStarted,
+    required this.legsWonAsStarter,
+    required this.legsWonWithoutStarter,
+    required this.scores0To40,
+    required this.scores41To59,
+    required this.scores60Plus,
+    required this.scores100Plus,
+    required this.scores140Plus,
+    required this.scores171Plus,
+    required this.scores180,
+    required this.checkoutAttempts,
+    required this.successfulCheckouts,
+    required this.checkoutAttempts1Dart,
+    required this.checkoutAttempts2Dart,
+    required this.checkoutAttempts3Dart,
+    required this.successfulCheckouts1Dart,
+    required this.successfulCheckouts2Dart,
+    required this.successfulCheckouts3Dart,
+    required this.thirdDartCheckoutAttempts,
+    required this.thirdDartCheckouts,
+    required this.bullCheckoutAttempts,
+    required this.bullCheckouts,
+    required this.functionalDoubleAttempts,
+    required this.functionalDoubleSuccesses,
+    required this.firstNinePoints,
+    required this.firstNineDarts,
+    required this.highestFinish,
+    required this.bestLegDarts,
+    required this.totalFinishValue,
+    required this.withThrowPoints,
+    required this.withThrowDarts,
+    required this.againstThrowPoints,
+    required this.againstThrowDarts,
+    required this.decidingLegPoints,
+    required this.decidingLegDarts,
+    required this.decidingLegsPlayed,
+    required this.decidingLegsWon,
+    required this.won12Darters,
+    required this.won15Darters,
+    required this.won18Darters,
+  });
+
+  final int score;
+  final bool hasOpenedLeg;
+  final int legs;
+  final int sets;
+  final int totalLegsWon;
+  final int pointsScored;
+  final int dartsThrown;
+  final int visits;
+  final int legsPlayed;
+  final int legsStarted;
+  final int legsWonAsStarter;
+  final int legsWonWithoutStarter;
+  final int scores0To40;
+  final int scores41To59;
+  final int scores60Plus;
+  final int scores100Plus;
+  final int scores140Plus;
+  final int scores171Plus;
+  final int scores180;
+  final int checkoutAttempts;
+  final int successfulCheckouts;
+  final int checkoutAttempts1Dart;
+  final int checkoutAttempts2Dart;
+  final int checkoutAttempts3Dart;
+  final int successfulCheckouts1Dart;
+  final int successfulCheckouts2Dart;
+  final int successfulCheckouts3Dart;
+  final int thirdDartCheckoutAttempts;
+  final int thirdDartCheckouts;
+  final int bullCheckoutAttempts;
+  final int bullCheckouts;
+  final int functionalDoubleAttempts;
+  final int functionalDoubleSuccesses;
+  final double firstNinePoints;
+  final int firstNineDarts;
+  final int highestFinish;
+  final int bestLegDarts;
+  final int totalFinishValue;
+  final int withThrowPoints;
+  final int withThrowDarts;
+  final int againstThrowPoints;
+  final int againstThrowDarts;
+  final int decidingLegPoints;
+  final int decidingLegDarts;
+  final int decidingLegsPlayed;
+  final int decidingLegsWon;
+  final int won12Darters;
+  final int won15Darters;
+  final int won18Darters;
+}
+
+class _MatchUndoSnapshot {
+  const _MatchUndoSnapshot({
+    required this.participants,
+    required this.currentTurnIndex,
+    required this.starterIndex,
+    required this.matchFinished,
+    required this.showScoreStats,
+    required this.status,
+    required this.currentInput,
+    required this.visitLog,
+    required this.completedLegs,
+    required this.currentLegVisits,
+    required this.currentLegDarts,
+    required this.currentLegScored,
+    required this.turnCounter,
+    required this.isBullOffActive,
+    required this.bullOffRound,
+    required this.bullOffTurnIndex,
+    required this.bullOffOrder,
+    required this.bullOffResults,
+  });
+
+  final List<_ParticipantRuntimeSnapshot> participants;
+  final int currentTurnIndex;
+  final int starterIndex;
+  final bool matchFinished;
+  final bool showScoreStats;
+  final String status;
+  final String currentInput;
+  final List<String> visitLog;
+  final List<MatchLegEntry> completedLegs;
+  final List<MatchVisitEntry> currentLegVisits;
+  final Map<String, int> currentLegDarts;
+  final Map<String, int> currentLegScored;
+  final int turnCounter;
+  final bool isBullOffActive;
+  final int bullOffRound;
+  final int bullOffTurnIndex;
+  final List<String> bullOffOrder;
+  final Map<String, _BullOffResult> bullOffResults;
 }
 
 enum _ManualFinishType {
@@ -150,6 +402,7 @@ class _MatchScreenState extends State<MatchScreen> {
   final List<String> _visitLog = <String>[];
   final List<MatchLegEntry> _completedLegs = <MatchLegEntry>[];
   List<MatchVisitEntry> _currentLegVisits = <MatchVisitEntry>[];
+  final List<_MatchUndoSnapshot> _undoStack = <_MatchUndoSnapshot>[];
   final Map<String, int> _currentLegDarts = <String, int>{};
   final Map<String, int> _currentLegScored = <String, int>{};
   int _turnCounter = 0;
@@ -437,11 +690,16 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 
   Future<void> _submitHumanScore() async {
+    await _submitHumanScoreValue();
+  }
+
+  Future<void> _submitHumanScoreValue({int? valueOverride}) async {
     if (!_isHumanTurn || _matchFinished) {
       return;
     }
 
-    final value = int.tryParse(_currentInput.isEmpty ? '0' : _currentInput);
+    final value = valueOverride ??
+        int.tryParse(_currentInput.isEmpty ? '0' : _currentInput);
     if (value == null) {
       return;
     }
@@ -583,6 +841,7 @@ class _MatchScreenState extends State<MatchScreen> {
     int? manualDoubleAttempts,
     DartThrowResult? finishingThrow,
   }) {
+    _pushUndoSnapshot();
     final dartsUsed = manualDartsUsed ?? throws.length;
     final visitEndedLeg = !visitResult.didBust && visitResult.remainingScore == 0;
     final finishingDart =
@@ -1073,14 +1332,78 @@ class _MatchScreenState extends State<MatchScreen> {
     if (!_isHumanTurn || _matchFinished) {
       return;
     }
-    setState(() {
-      _currentInput = '$value';
-    });
+    unawaited(_submitHumanScoreValue(valueOverride: value));
   }
 
   void _clearInput() {
     setState(() {
       _currentInput = '';
+    });
+  }
+
+  bool get _canUndo => _undoStack.isNotEmpty && !_isBullOffActive;
+
+  void _pushUndoSnapshot() {
+    _undoStack.add(
+      _MatchUndoSnapshot(
+        participants: _participants
+            .map((participant) => participant.snapshot())
+            .toList(),
+        currentTurnIndex: _currentTurnIndex,
+        starterIndex: _starterIndex,
+        matchFinished: _matchFinished,
+        showScoreStats: _showScoreStats,
+        status: _status,
+        currentInput: _currentInput,
+        visitLog: List<String>.from(_visitLog),
+        completedLegs: List<MatchLegEntry>.from(_completedLegs),
+        currentLegVisits: List<MatchVisitEntry>.from(_currentLegVisits),
+        currentLegDarts: Map<String, int>.from(_currentLegDarts),
+        currentLegScored: Map<String, int>.from(_currentLegScored),
+        turnCounter: _turnCounter,
+        isBullOffActive: _isBullOffActive,
+        bullOffRound: _bullOffRound,
+        bullOffTurnIndex: _bullOffTurnIndex,
+        bullOffOrder: List<String>.from(_bullOffOrder),
+        bullOffResults: Map<String, _BullOffResult>.from(_bullOffResults),
+      ),
+    );
+  }
+
+  void _undoLastVisit() {
+    if (!_canUndo) {
+      return;
+    }
+    final snapshot = _undoStack.removeLast();
+    setState(() {
+      for (var index = 0; index < _participants.length; index += 1) {
+        _participants[index].restore(snapshot.participants[index]);
+      }
+      _currentTurnIndex = snapshot.currentTurnIndex;
+      _starterIndex = snapshot.starterIndex;
+      _matchFinished = snapshot.matchFinished;
+      _showScoreStats = snapshot.showScoreStats;
+      _status = snapshot.status;
+      _currentInput = snapshot.currentInput;
+      _visitLog
+        ..clear()
+        ..addAll(snapshot.visitLog);
+      _completedLegs
+        ..clear()
+        ..addAll(snapshot.completedLegs);
+      _currentLegVisits = List<MatchVisitEntry>.from(snapshot.currentLegVisits);
+      _currentLegDarts
+        ..clear()
+        ..addAll(snapshot.currentLegDarts);
+      _currentLegScored
+        ..clear()
+        ..addAll(snapshot.currentLegScored);
+      _turnCounter = snapshot.turnCounter;
+      _isBullOffActive = snapshot.isBullOffActive;
+      _bullOffRound = snapshot.bullOffRound;
+      _bullOffTurnIndex = snapshot.bullOffTurnIndex;
+      _bullOffOrder = List<String>.from(snapshot.bullOffOrder);
+      _bullOffResults = Map<String, _BullOffResult>.from(snapshot.bullOffResults);
     });
   }
 
@@ -1380,27 +1703,19 @@ class _MatchScreenState extends State<MatchScreen> {
     required int dartsUsed,
     required _ManualFinishType finishType,
   }) {
-    final routes = _checkoutPlanner.allCheckoutRoutes(
+    final route = _checkoutPlanner.bestFinishRouteForFinishType(
       score: score,
       dartsLeft: dartsUsed,
       checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-    );
-    if (routes.isEmpty) {
-      return false;
-    }
-
-    return routes.any((route) {
-      if (route.isEmpty) {
-        return false;
-      }
-      final lastThrow = route.last;
-      return switch (finishType) {
+      matcherKey: finishType.name,
+      matcher: (lastThrow) => switch (finishType) {
         _ManualFinishType.single => lastThrow.isFinishSingle,
         _ManualFinishType.doubleValue => lastThrow.isDouble,
         _ManualFinishType.triple => lastThrow.isTriple,
         _ManualFinishType.bull => lastThrow.isBull,
-      };
-    });
+      },
+    );
+    return route != null && route.isNotEmpty;
   }
 
   void _recordMilestones({
@@ -1788,94 +2103,6 @@ class _MatchScreenState extends State<MatchScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      _currentParticipant.config.name,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _currentParticipant.config.isHuman
-                          ? (_currentParticipant.hasOpenedLeg
-                              ? 'Score fuer diesen Besuch eingeben'
-                              : 'Double In offen: nur Punkte nach Eroeffnungsdouble zaehlen')
-                          : 'Computerzug wird automatisch gespielt',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFF667685),
-                          ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              _buildQuickScoreColumn(
-                values: _quickScoreValues.take(2).toList(),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _currentInput.isEmpty ? '0' : _currentInput,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: const Color(0xFF152C45),
-                    ),
-              ),
-              const SizedBox(width: 10),
-              _buildQuickScoreColumn(
-                values: _quickScoreValues.skip(2).take(2).toList(),
-              ),
-            ],
-          ),
-          SizedBox(height: compact ? 10 : 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3F6F9),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Row(
-              children: <Widget>[
-                Icon(
-                  _currentParticipant.config.isHuman
-                      ? Icons.touch_app_rounded
-                      : Icons.smart_toy_rounded,
-                  color: const Color(0xFF4E6274),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _currentParticipant.config.isHuman
-                        ? 'Direkte Eingabe, danach OK'
-                        : 'Bitte kurz warten',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF344657),
-                        ),
-                  ),
-                ),
-                Text(
-                  '3 Darts',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: const Color(0xFF5D6B78),
-                      ),
-                ),
-              ],
-            ),
-          ),
-          if (_buildCheckoutSuggestionBanner() case final banner?) ...<Widget>[
-            SizedBox(height: compact ? 8 : 10),
-            banner,
-          ],
-          SizedBox(height: compact ? 10 : 14),
           Expanded(
             child: _buildKeypadGrid(compact: compact),
           ),
@@ -1905,36 +2132,103 @@ class _MatchScreenState extends State<MatchScreen> {
   List<int> get _quickScoreValues =>
       SettingsRepository.instance.settings.x01QuickScores;
 
-  Widget _buildQuickScoreColumn({
-    required List<int> values,
+  String? _checkoutSuggestionSummary() {
+    if (_matchFinished ||
+        _isBullOffActive ||
+        !_currentParticipant.hasOpenedLeg ||
+        _currentParticipant.score <= 1) {
+      return null;
+    }
+
+    final finishRoute = _bestCheckoutSuggestionRoute(
+      score: _currentParticipant.score,
+      dartsLeft: 3,
+    );
+    final continuation = finishRoute == null
+        ? _checkoutPlanner.bestContinuationPlan(
+            score: _currentParticipant.score,
+            dartsLeft: 3,
+            checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+            playStyle: CheckoutPlayStyle.balanced,
+            outerBullPreference: 50,
+            bullPreference: 50,
+          )
+        : null;
+
+    final route = finishRoute ?? continuation?.throws;
+    if (route == null || route.isEmpty) {
+      return null;
+    }
+    return route.take(3).map((entry) => entry.label).join(' - ');
+  }
+
+  Widget _buildPadMetaTile({
+    required String title,
+    required String value,
+    IconData? icon,
+    bool disabled = false,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: values.asMap().entries.map((entry) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: entry.key == values.length - 1 ? 0 : 8),
-          child: _buildQuickScoreButton(entry.value),
-        );
-      }).toList(),
+    final foreground = disabled
+        ? const Color(0xFF93A1AE)
+        : const Color(0xFF152C45);
+    return Container(
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: disabled ? const Color(0xFFE9EEF3) : const Color(0xFFE5EBF1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          if (icon != null) ...<Widget>[
+            Icon(icon, size: 16, color: foreground),
+            const SizedBox(height: 4),
+          ],
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
+                ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildQuickScoreButton(int value) {
+    final backgroundColor =
+        _isHumanTurn ? const Color(0xFFD9E2EA) : const Color(0xFFE4EAF0);
+    final foregroundColor =
+        _isHumanTurn ? const Color(0xFF152C45) : const Color(0xFF93A1AE);
     return SizedBox(
-      width: 54,
-      height: 40,
+      height: double.infinity,
       child: FilledButton(
         style: FilledButton.styleFrom(
-          backgroundColor:
-              _isHumanTurn ? const Color(0xFFE8EEF4) : const Color(0xFFE0E6EC),
-          foregroundColor:
-              _isHumanTurn ? const Color(0xFF17324D) : const Color(0xFF93A1AE),
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
           elevation: 0,
           padding: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+          textStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
         ),
@@ -1944,86 +2238,77 @@ class _MatchScreenState extends State<MatchScreen> {
     );
   }
 
-  Widget? _buildCheckoutSuggestionBanner() {
-    if (_matchFinished ||
-        _isBullOffActive ||
-        !_currentParticipant.hasOpenedLeg ||
-        _currentParticipant.score <= 1) {
-      return null;
-    }
-
-    final finishRoute = _checkoutPlanner.bestFinishRoute(
-      score: _currentParticipant.score,
-      dartsLeft: 3,
-      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-    );
-    final continuation = finishRoute == null
-        ? _checkoutPlanner.bestContinuationPlan(
-            score: _currentParticipant.score,
-            dartsLeft: 3,
-            checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-          )
-        : null;
-
-    final title = finishRoute != null && finishRoute.isNotEmpty
-        ? 'Checkout'
-        : continuation != null && continuation.throws.isNotEmpty
-            ? 'Empfehlung'
-            : null;
-    final route = finishRoute ?? continuation?.throws;
-    if (title == null || route == null || route.isEmpty) {
-      return null;
-    }
-
-    final routeText = route.take(3).map((entry) => entry.label).join(' - ');
-    final subtitle = finishRoute != null && finishRoute.isNotEmpty
-        ? 'Direkter Finish-Weg fuer ${_currentParticipant.score}'
-        : 'Bester naechster Weg ab ${_currentParticipant.score}';
-
+  Widget _buildDisplayTile({required bool compact}) {
+    final suggestion = _checkoutSuggestionSummary();
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      height: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFFF7FAFD),
-        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFFF4F7FA),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFFDCE7F1),
+          color: const Color(0xFFD9E3EC),
         ),
       ),
-      child: Row(
-        children: <Widget>[
-          const Icon(
-            Icons.alt_route_rounded,
-            color: Color(0xFF35516E),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  '$title: $routeText',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF223447),
-                        fontWeight: FontWeight.w700,
-                      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 6 : 8,
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final canShowSubtitle = constraints.maxHeight >= 62;
+          final subtitle = suggestion ??
+              (_currentParticipant.config.isHuman
+                  ? 'Direkte Eingabe'
+                  : 'Computer am Zug');
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _currentInput.isEmpty ? '0' : _currentInput,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFF152C45),
+                          ),
+                    ),
+                  ),
                 ),
+              ),
+              if (canShowSubtitle) ...<Widget>[
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
+                  textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF667685),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF5B6C7C),
+                        fontWeight: FontWeight.w600,
                       ),
                 ),
               ],
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  List<DartThrowResult>? _bestCheckoutSuggestionRoute({
+    required int score,
+    required int dartsLeft,
+  }) {
+    return _checkoutPlanner.bestFinishRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      playStyle: CheckoutPlayStyle.balanced,
+      outerBullPreference: 50,
+      bullPreference: 50,
     );
   }
 
@@ -2317,7 +2602,7 @@ class _MatchScreenState extends State<MatchScreen> {
           foregroundColor: foregroundColor,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(12),
           ),
           padding: EdgeInsets.zero,
           textStyle: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -2353,7 +2638,7 @@ class _MatchScreenState extends State<MatchScreen> {
           elevation: 0,
           padding: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(12),
           ),
           textStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
@@ -2367,15 +2652,25 @@ class _MatchScreenState extends State<MatchScreen> {
 
   Widget _buildKeypadGrid({required bool compact}) {
     final spacing = compact ? 8.0 : 10.0;
+    final quickScores = _quickScoreValues;
     return Column(
       children: <Widget>[
         Expanded(
+          child: _buildTopKeypadRow(
+            spacing: spacing,
+            compact: compact,
+          ),
+        ),
+        SizedBox(height: spacing),
+        Expanded(
           child: _buildKeypadRow(
             spacing: spacing,
             children: <Widget>[
+              _buildQuickScoreButton(quickScores[0]),
               _buildDigitButton('1'),
               _buildDigitButton('2'),
               _buildDigitButton('3'),
+              _buildQuickScoreButton(quickScores[3]),
             ],
           ),
         ),
@@ -2384,9 +2679,11 @@ class _MatchScreenState extends State<MatchScreen> {
           child: _buildKeypadRow(
             spacing: spacing,
             children: <Widget>[
+              _buildQuickScoreButton(quickScores[1]),
               _buildDigitButton('4'),
               _buildDigitButton('5'),
               _buildDigitButton('6'),
+              _buildQuickScoreButton(quickScores[4]),
             ],
           ),
         ),
@@ -2395,28 +2692,111 @@ class _MatchScreenState extends State<MatchScreen> {
           child: _buildKeypadRow(
             spacing: spacing,
             children: <Widget>[
+              _buildQuickScoreButton(quickScores[2]),
               _buildDigitButton('7'),
               _buildDigitButton('8'),
               _buildDigitButton('9'),
+              _buildQuickScoreButton(quickScores[5]),
             ],
           ),
         ),
         SizedBox(height: spacing),
         Expanded(
-          child: _buildKeypadRow(
+          child: _buildBottomKeypadRow(
             spacing: spacing,
-            children: <Widget>[
-              _buildActionButton(
-                label: 'C',
-                onPressed: _clearInput,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopKeypadRow({
+    required double spacing,
+    required bool compact,
+  }) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: spacing),
+            child: SizedBox(
+              height: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE5EBF1),
+                  foregroundColor: const Color(0xFF35516E),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _canUndo ? _undoLastVisit : null,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    const Icon(Icons.undo_rounded, size: 20),
+                    const SizedBox(height: 4),
+                    Text(
+                      'UNDO',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ],
+                ),
               ),
-              _buildDigitButton('0'),
-              _buildActionButton(
-                label: 'OK',
-                onPressed: _submitHumanScore,
-                isPrimary: true,
-              ),
-            ],
+            ),
+          ),
+        ),
+        Expanded(
+          flex: compact ? 3 : 4,
+          child: Padding(
+            padding: EdgeInsets.only(right: spacing),
+            child: _buildDisplayTile(compact: compact),
+          ),
+        ),
+        Expanded(
+          child: _buildPadMetaTile(
+            title: 'REST',
+            value: '${_currentParticipant.score}',
+            disabled: !_currentParticipant.config.isHuman,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomKeypadRow({
+    required double spacing,
+  }) {
+    final hasInput = _currentInput.isNotEmpty;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          flex: 2,
+          child: Padding(
+            padding: EdgeInsets.only(right: spacing),
+            child: _buildActionButton(
+              label: 'C',
+              onPressed: _clearInput,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: spacing),
+            child: _buildDigitButton('0'),
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: _buildActionButton(
+            label: hasInput ? 'OK' : '180',
+            onPressed: hasInput
+                ? _submitHumanScore
+                : () => _setQuickScore(180),
+            isPrimary: true,
           ),
         ),
       ],

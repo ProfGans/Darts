@@ -32,6 +32,16 @@ class _DatabasePreset {
   final Map<String, dynamic> data;
 }
 
+class _VisiblePlayersCacheEntry {
+  const _VisiblePlayersCacheEntry({
+    required this.key,
+    required this.players,
+  });
+
+  final String key;
+  final List<ComputerPlayer> players;
+}
+
 class _HeadToHeadSummary {
   const _HeadToHeadSummary({
     required this.opponentName,
@@ -133,6 +143,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   int _bulkTablePage = 0;
   int _manualRowsPerPage = 10;
   int _bulkRowsPerPage = 10;
+  _VisiblePlayersCacheEntry? _manualVisiblePlayersCache;
+  _VisiblePlayersCacheEntry? _bulkVisiblePlayersCache;
 
   @override
   void initState() {
@@ -1135,6 +1147,28 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         : ((minAge ?? maxAge ?? 0) <= (maxAge ?? minAge ?? 0)
             ? (maxAge ?? minAge ?? 0)
             : (minAge ?? maxAge ?? 0));
+    final cacheKey = <Object?>[
+      bulkOnly,
+      _repository.changeToken,
+      query,
+      lowTheo,
+      highTheo,
+      lowAge,
+      highAge,
+      _filterNationality,
+      _filterTag?.toLowerCase(),
+      _filterSource,
+      _onlyRealPlayers,
+      _onlyFavorites,
+      _onlyProtected,
+      _sortOption,
+      _sortDescending,
+    ].join('|');
+    final cacheEntry =
+        bulkOnly ? _bulkVisiblePlayersCache : _manualVisiblePlayersCache;
+    if (cacheEntry != null && cacheEntry.key == cacheKey) {
+      return cacheEntry.players;
+    }
 
     final players = _repository.players.where((player) {
       if (bulkOnly && player.source != ComputerPlayerSource.bulk) {
@@ -1201,7 +1235,18 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       return _sortDescending ? -result : result;
     });
 
-    return players;
+    final cachedPlayers = List<ComputerPlayer>.unmodifiable(players);
+    final nextEntry = _VisiblePlayersCacheEntry(
+      key: cacheKey,
+      players: cachedPlayers,
+    );
+    if (bulkOnly) {
+      _bulkVisiblePlayersCache = nextEntry;
+    } else {
+      _manualVisiblePlayersCache = nextEntry;
+    }
+
+    return cachedPlayers;
   }
 
   @override

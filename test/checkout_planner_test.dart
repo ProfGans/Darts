@@ -67,6 +67,13 @@ void main() {
       );
     });
 
+    test('penalizes a checkout path that starts on a double unless it is bull', () {
+      expect(
+        routeScore(40, <String>['D4', 'D16']),
+        lessThan(routeScore(40, <String>['8', 'D16'])),
+      );
+    });
+
     test('prefers T20 D10 over the weaker T16 fallback route on 80', () {
       expect(
         routeScore(80, <String>['T20', 'D10']),
@@ -97,6 +104,53 @@ void main() {
       );
     });
 
+    test('rewards first-dart misses that still leave a direct finish more strongly', () {
+      final route = routeFor(129, <String>['T19', 'T20', 'D5']);
+      final breakdown = planner.routeScoreBreakdown(
+        route: route,
+        startScore: 129,
+        totalDarts: 3,
+      );
+
+      expect(breakdown.robustness, greaterThan(0));
+      expect(
+        breakdown.robustnessDetails.any(
+          (detail) => detail.contains('1. Dart') && detail.contains('+'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('does not penalize last-dart setup-only miss branches on 141', () {
+      final route = routeFor(141, <String>['T20', 'T19', 'D12']);
+      final breakdown = planner.routeScoreBreakdown(
+        route: route,
+        startScore: 141,
+        totalDarts: 3,
+      );
+
+      expect(breakdown.robustness, greaterThanOrEqualTo(0));
+    });
+
+    test('treats bull and triple setup-only fallback cases more consistently', () {
+      final bullRoute = routeFor(141, <String>['BULL', 'T17', 'D20']);
+      final tripleRoute = routeFor(141, <String>['T17', 'BULL', 'D20']);
+
+      final bullBreakdown = planner.routeScoreBreakdown(
+        route: bullRoute,
+        startScore: 141,
+        totalDarts: 3,
+      );
+      final tripleBreakdown = planner.routeScoreBreakdown(
+        route: tripleRoute,
+        startScore: 141,
+        totalDarts: 3,
+      );
+
+      expect((bullBreakdown.robustness - tripleBreakdown.robustness).abs(),
+          lessThanOrEqualTo(20));
+    });
+
     test('keeps T19 Bull competitive on 107', () {
       expect(
         routeScore(107, <String>['T19', 'BULL']),
@@ -105,6 +159,37 @@ void main() {
       expect(
         routeScore(107, <String>['T19', 'BULL']),
         greaterThan(routeScore(107, <String>['19', 'T16', 'D20'])),
+      );
+    });
+
+    test('rewards miss-fallbacks that still lead cleanly to a double', () {
+      final rules = const X01Rules();
+      final doubleLeaveRoute = planner.directDoubleLeaveBonus(
+        route: <DartThrowResult>[
+          rules.createSingle(18),
+          rules.createDouble(16),
+        ],
+        startScore: 50,
+      );
+      final noDoubleLeaveRoute = planner.directDoubleLeaveBonus(
+        route: <DartThrowResult>[
+          rules.createTriple(16),
+          rules.createSingle(2),
+        ],
+        startScore: 50,
+      );
+
+      expect(doubleLeaveRoute, greaterThan(noDoubleLeaveRoute));
+    });
+
+    test('treats double-double endings as a valid boosted finish pattern', () {
+      final rules = const X01Rules();
+      expect(
+        planner.doubleDoubleEndingBonus(<DartThrowResult>[
+          rules.createDouble(8),
+          rules.createDouble(8),
+        ]),
+        greaterThan(0),
       );
     });
 
@@ -135,10 +220,50 @@ void main() {
       );
     });
 
+    test('removes early triple comfort malus when a single-miss fallback exists', () {
+      final route = routeFor(129, <String>['T19', 'T20', 'D5']);
+      final breakdown = planner.routeScoreBreakdown(
+        route: route,
+        startScore: 129,
+        totalDarts: 3,
+      );
+
+      expect(breakdown.comfort, greaterThanOrEqualTo(0));
+    });
+
+    test('gives 25 routes a small robustness bonus because a bull miss still scores', () {
+      final route = routeFor(65, <String>['25', 'D20']);
+      final breakdown = planner.routeScoreBreakdown(
+        route: route,
+        startScore: 65,
+        totalDarts: 2,
+      );
+
+      expect(breakdown.robustness, greaterThan(0));
+    });
+
+    test('gives a robustness bonus when singles or 25 cleanly reach a double', () {
+      final route = routeFor(91, <String>['19', 'D18']);
+      expect(
+        planner.singleOr25DoubleAccessBonus(
+          route: route,
+          startScore: 91,
+        ),
+        greaterThan(0),
+      );
+    });
+
     test('prefers bull bull d16 on 132 because 25 still leaves 107', () {
       expect(
         routeScore(132, <String>['BULL', 'BULL', 'D16']),
         greaterThan(routeScore(132, <String>['T20', '20', 'D16'])),
+      );
+    });
+
+    test('gives early bull only a light malus behind normal triple routes', () {
+      expect(
+        routeScore(129, <String>['T20', 'T19', 'D6']),
+        greaterThan(routeScore(129, <String>['BULL', 'T13', 'D20'])),
       );
     });
 
@@ -166,6 +291,19 @@ void main() {
       expect(
           best!.last.matchesCheckoutRequirement(CheckoutRequirement.masterOut),
           isTrue);
+    });
+
+    test('can find the best finish for a specific final throw type', () {
+      final bullFinish = planner.bestFinishRouteForFinishType(
+        score: 107,
+        dartsLeft: 2,
+        matcherKey: 'bull',
+        matcher: (lastThrow) => lastThrow.isBull,
+      );
+
+      expect(bullFinish, isNotNull);
+      expect(bullFinish!.last.isBull, isTrue);
+      expect(bullFinish.map((entry) => entry.label).join('|'), 'T19|BULL');
     });
 
     test('safe style keeps simple routes ahead of forced narrow setups', () {
@@ -213,6 +351,22 @@ void main() {
       expect(breakdown.comfort, greaterThan(0));
       expect(breakdown.doubleQuality, greaterThan(0));
       expect(breakdown.bullPenalty, 0);
+      expect(breakdown.comfortDetails, isNotEmpty);
+      expect(breakdown.segmentFlowDetails, isNotEmpty);
+    });
+
+    test('treats all early triples equally in comfort scoring', () {
+      final rules = const X01Rules();
+      expect(
+        planner.comfortScore(<DartThrowResult>[
+          rules.createTriple(20),
+          rules.createDouble(20),
+        ]),
+        planner.comfortScore(<DartThrowResult>[
+          rules.createTriple(18),
+          rules.createDouble(20),
+        ]),
+      );
     });
 
     test('setup calculator prefers the simplest route to the target score', () {

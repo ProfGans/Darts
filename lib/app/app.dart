@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/debug/app_debug.dart';
 import 'app_debug_overlay.dart';
 import 'routes.dart';
 
@@ -18,8 +19,11 @@ class DartFlutterApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'Dart Flutter App',
+      title: 'Dart Karriere',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: <NavigatorObserver>[
+        AppDebugNavigatorObserver(),
+      ],
       theme: base.copyWith(
         scaffoldBackgroundColor: const Color(0xFFF6F3ED),
         cardTheme: const CardThemeData(

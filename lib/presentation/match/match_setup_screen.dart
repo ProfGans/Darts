@@ -33,7 +33,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
       <TextEditingController>[];
 
   int _humanOpponents = 0;
-  int _computerOpponents = 1;
+  int _computerOpponents = 0;
   bool _useBullOff = true;
   String? _selectedStartingParticipantId;
   MatchMode _matchMode = MatchMode.legs;
@@ -44,16 +44,6 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
   bool _bob27ReverseOrder = false;
   final List<String?> _selectedHumanIds = <String?>[];
   final List<String?> _selectedComputerIds = <String?>[];
-
-  String get _opponentMode {
-    if (_humanOpponents > 0 && _computerOpponents > 0) {
-      return 'mixed';
-    }
-    if (_humanOpponents > 0) {
-      return 'human';
-    }
-    return 'computer';
-  }
 
   @override
   void initState() {
@@ -108,20 +98,94 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
 
   String _customComputerValue(int index) => '__custom_computer__$index';
 
-  void _applyOpponentMode(String mode) {
+  void _addOpponent({
+    required bool isHuman,
+  }) {
     setState(() {
-      if (mode == 'human') {
-        _humanOpponents = _humanOpponents == 0 ? 1 : _humanOpponents;
-        _computerOpponents = 0;
-      } else if (mode == 'mixed') {
-        _humanOpponents = _humanOpponents == 0 ? 1 : _humanOpponents;
-        _computerOpponents = _computerOpponents == 0 ? 1 : _computerOpponents;
+      if (isHuman) {
+        _humanOpponents += 1;
       } else {
-        _humanOpponents = 0;
-        _computerOpponents = _computerOpponents == 0 ? 1 : _computerOpponents;
+        _computerOpponents += 1;
       }
       _syncSelections();
     });
+  }
+
+  void _removeHumanOpponent(int index) {
+    if (index < 0 || index >= _selectedHumanIds.length) {
+      return;
+    }
+    setState(() {
+      _humanOpponents -= 1;
+      _selectedHumanIds.removeAt(index);
+    });
+  }
+
+  void _removeComputerOpponent(int index) {
+    if (index < 0 || index >= _selectedComputerIds.length) {
+      return;
+    }
+    setState(() {
+      _computerOpponents -= 1;
+      _selectedComputerIds.removeAt(index);
+      _customComputerAverageControllers.removeAt(index).dispose();
+    });
+  }
+
+  Future<void> _showAddOpponentSheet() {
+    return showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Gegner hinzufuegen',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Waehle aus, ob du ein Spielerprofil oder einen Computergegner hinzufuegen moechtest.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF5B6A79),
+                      ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _addOpponent(isHuman: true);
+                    },
+                    icon: const Icon(Icons.people_alt_rounded),
+                    label: const Text('Menschlicher Gegner'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _addOpponent(isHuman: false);
+                    },
+                    icon: const Icon(Icons.smart_toy_rounded),
+                    label: const Text('Computergegner'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _startMatch() {
@@ -415,34 +479,13 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    'Modus',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      _ModeChip(
-                        label: 'Menschen',
-                        icon: Icons.people_alt_rounded,
-                        selected: _opponentMode == 'human',
-                        onTap: () => _applyOpponentMode('human'),
-                      ),
-                      _ModeChip(
-                        label: 'Computer',
-                        icon: Icons.smart_toy_rounded,
-                        selected: _opponentMode == 'computer',
-                        onTap: () => _applyOpponentMode('computer'),
-                      ),
-                      _ModeChip(
-                        label: 'Gemischt',
-                        icon: Icons.shuffle_rounded,
-                        selected: _opponentMode == 'mixed',
-                        onTap: () => _applyOpponentMode('mixed'),
-                      ),
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonalIcon(
+                      onPressed: _showAddOpponentSheet,
+                      icon: const Icon(Icons.person_add_alt_1_rounded),
+                      label: const Text('Gegner hinzufuegen'),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Container(
@@ -462,52 +505,6 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                           ),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<int>(
-                    initialValue: _humanOpponents,
-                    decoration: const InputDecoration(
-                      labelText: 'Menschliche Gegner',
-                    ),
-                    items: List<DropdownMenuItem<int>>.generate(
-                      4,
-                      (index) => DropdownMenuItem<int>(
-                        value: index,
-                        child: Text('$index'),
-                      ),
-                    ),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _humanOpponents = value;
-                        _syncSelections();
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    initialValue: _computerOpponents,
-                    decoration: const InputDecoration(
-                      labelText: 'Computergegner',
-                    ),
-                    items: List<DropdownMenuItem<int>>.generate(
-                      4,
-                      (index) => DropdownMenuItem<int>(
-                        value: index,
-                        child: Text('$index'),
-                      ),
-                    ),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _computerOpponents = value;
-                        _syncSelections();
-                      });
-                    },
-                  ),
                   if (_humanOpponents > 0) ...<Widget>[
                     const SizedBox(height: 16),
                     Text(
@@ -518,24 +515,37 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                     ...List<Widget>.generate(_humanOpponents, (index) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: DropdownButtonFormField<String>(
-                          initialValue: _selectedHumanIds[index],
-                          decoration: InputDecoration(
-                            labelText: 'Spieler ${index + 2}',
-                          ),
-                          items: availableHumans
-                              .map(
-                                (player) => DropdownMenuItem<String>(
-                                  value: player.id,
-                                  child: Text(player.name),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _selectedHumanIds[index],
+                                decoration: InputDecoration(
+                                  labelText: 'Spieler ${index + 2}',
                                 ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedHumanIds[index] = value;
-                            });
-                          },
+                                items: availableHumans
+                                    .map(
+                                      (player) => DropdownMenuItem<String>(
+                                        value: player.id,
+                                        child: Text(player.name),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedHumanIds[index] = value;
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.filledTonal(
+                              onPressed: () => _removeHumanOpponent(index),
+                              icon: const Icon(Icons.close_rounded),
+                              tooltip: 'Gegner entfernen',
+                            ),
+                          ],
                         ),
                       );
                     }),
@@ -555,30 +565,43 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Column(
                           children: <Widget>[
-                            DropdownButtonFormField<String>(
-                              initialValue: _selectedComputerIds[index],
-                              decoration: InputDecoration(
-                                labelText: 'Computer ${index + 1}',
-                              ),
-                              items: <DropdownMenuItem<String>>[
-                                ...availableComputers.map(
-                                  (computer) => DropdownMenuItem<String>(
-                                    value: computer.id,
-                                    child: Text(
-                                      '${computer.name} (${computer.theoreticalAverage.toStringAsFixed(1)})',
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _selectedComputerIds[index],
+                                    decoration: InputDecoration(
+                                      labelText: 'Computer ${index + 1}',
                                     ),
+                                    items: <DropdownMenuItem<String>>[
+                                      ...availableComputers.map(
+                                        (computer) => DropdownMenuItem<String>(
+                                          value: computer.id,
+                                          child: Text(
+                                            '${computer.name} (${computer.theoreticalAverage.toStringAsFixed(1)})',
+                                          ),
+                                        ),
+                                      ),
+                                      DropdownMenuItem<String>(
+                                        value: customValue,
+                                        child: const Text('Freier Computer (Average waehlen)'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      setState(() {
+                                        _selectedComputerIds[index] = value;
+                                      });
+                                    },
                                   ),
                                 ),
-                                DropdownMenuItem<String>(
-                                  value: customValue,
-                                  child: const Text('Freier Computer (Average waehlen)'),
+                                const SizedBox(width: 8),
+                                IconButton.filledTonal(
+                                  onPressed: () => _removeComputerOpponent(index),
+                                  icon: const Icon(Icons.close_rounded),
+                                  tooltip: 'Gegner entfernen',
                                 ),
                               ],
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedComputerIds[index] = value;
-                                });
-                              },
                             ),
                             if (isCustomComputer) ...<Widget>[
                               const SizedBox(height: 10),
@@ -696,7 +719,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                         labelText: _matchMode == MatchMode.legs
                             ? 'Legs zum Sieg'
                             : 'Legs pro Satz',
-                      ),
+                          ),
                     ),
                     if (_matchMode == MatchMode.sets) ...<Widget>[
                       const SizedBox(height: 12),

@@ -88,7 +88,7 @@ class SettingsRepository extends ChangeNotifier {
         minSimulationSpreadPercent,
         maxSimulationSpreadPercent,
       ),
-      x01QuickScores: List<int>.generate(4, (index) {
+      x01QuickScores: List<int>.generate(6, (index) {
         final value = index < settings.x01QuickScores.length
             ? settings.x01QuickScores[index]
             : AppSettings.defaultX01QuickScores[index];

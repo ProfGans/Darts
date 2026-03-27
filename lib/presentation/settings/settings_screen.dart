@@ -8,6 +8,15 @@ import '../../data/repositories/settings_repository.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  static const List<String> _x01QuickScoreLabels = <String>[
+    'Links oben',
+    'Links mitte',
+    'Links unten',
+    'Rechts oben',
+    'Rechts mitte',
+    'Rechts unten',
+  ];
+
   @override
   Widget build(BuildContext context) {
     final repository = SettingsRepository.instance;
@@ -129,47 +138,47 @@ class SettingsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Diese vier Hotkeys erscheinen links und rechts neben dem Eingabewert im X01-Matchscreen.',
+                          'Diese sechs Hotkeys erscheinen links und rechts im X01-Scoring-Pad.',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 12,
                           runSpacing: 12,
-                          children: List<Widget>.generate(4, (index) {
-                            return SizedBox(
-                              width: 140,
-                              child: TextFormField(
-                                key: ValueKey<String>(
-                                  'x01-quick-score-$index-${settings.x01QuickScores[index]}',
-                                ),
-                                initialValue: '${settings.x01QuickScores[index]}',
-                                keyboardType: TextInputType.number,
-                                decoration: InputDecoration(
-                                  labelText: switch (index) {
-                                    0 => 'Links oben',
-                                    1 => 'Links unten',
-                                    2 => 'Rechts oben',
-                                    _ => 'Rechts unten',
+                          children: List<Widget>.generate(
+                            _x01QuickScoreLabels.length,
+                            (index) {
+                              return SizedBox(
+                                width: 170,
+                                child: TextFormField(
+                                  key: ValueKey<String>(
+                                    'x01-quick-score-$index-${settings.x01QuickScores[index]}',
+                                  ),
+                                  initialValue:
+                                      '${settings.x01QuickScores[index]}',
+                                  keyboardType: TextInputType.number,
+                                  decoration: InputDecoration(
+                                    labelText: _x01QuickScoreLabels[index],
+                                  ),
+                                  onChanged: (value) {
+                                    final parsed = int.tryParse(value.trim());
+                                    if (parsed == null) {
+                                      return;
+                                    }
+                                    final nextQuickScores =
+                                        List<int>.from(settings.x01QuickScores);
+                                    nextQuickScores[index] =
+                                        parsed.clamp(0, 180);
+                                    repository.update(
+                                      settings.copyWith(
+                                        x01QuickScores: nextQuickScores,
+                                      ),
+                                    );
                                   },
                                 ),
-                                onChanged: (value) {
-                                  final parsed = int.tryParse(value.trim());
-                                  if (parsed == null) {
-                                    return;
-                                  }
-                                  final nextQuickScores =
-                                      List<int>.from(settings.x01QuickScores);
-                                  nextQuickScores[index] = parsed.clamp(0, 180);
-                                  repository.update(
-                                    settings.copyWith(
-                                      x01QuickScores: nextQuickScores,
-                                    ),
-                                  );
-                                },
-                              ),
-                            );
-                          }),
+                              );
+                            },
+                          ),
                         ),
                       ],
                     ),

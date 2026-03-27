@@ -1,9 +1,16 @@
 class AppSettings {
-  static const int currentSettingsVersion = 3;
+  static const int currentSettingsVersion = 5;
   static const int defaultComputerSpeedIndex = 1;
   static const int defaultRadiusCalibrationPercent = 100;
   static const int defaultSimulationSpreadPercent = 100;
-  static const List<int> defaultX01QuickScores = <int>[26, 41, 60, 100];
+  static const List<int> defaultX01QuickScores = <int>[
+    26,
+    41,
+    60,
+    81,
+    100,
+    140,
+  ];
 
   const AppSettings({
     this.settingsVersion = currentSettingsVersion,

@@ -13,69 +13,10 @@ class MainMenuScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 96),
           children: <Widget>[
             Text(
-              'Dart Connect',
+              'Dart Karriere',
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w900,
                   ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Die Flutter-Version soll sich wie eine echte Mobile-App anfühlen. '
-              'Deshalb liegt hier jetzt alles in einer klaren, einhändigen Startansicht.',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: const Color(0xFF51606E),
-                    height: 1.4,
-                  ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                gradient: const LinearGradient(
-                  colors: <Color>[Color(0xFF0E5A52), Color(0xFF163451)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'Schnellstart',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Direkt ins Spiel oder in deine Karriere springen.',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Erst Match, dann Turniere und Karriere. Alles untereinander statt Desktop-Spalten.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          height: 1.4,
-                        ),
-                  ),
-                ],
-              ),
             ),
             const SizedBox(height: 24),
             _MenuSection(
@@ -110,8 +51,7 @@ class MainMenuScreen extends StatelessWidget {
                   title: 'Checkout Rechner',
                   subtitle: 'Restscore und Darts eingeben und mehrere Finishes bekommen.',
                   onTap: () {
-                    Navigator.of(context)
-                        .pushNamed(AppRoutes.checkoutCalculator);
+                    Navigator.of(context).pushNamed(AppRoutes.checkoutCalculator);
                   },
                 ),
               ],
@@ -131,7 +71,7 @@ class MainMenuScreen extends StatelessWidget {
                 _MenuTile(
                   icon: Icons.groups_2,
                   title: 'Computer-Datenbank',
-                  subtitle: 'CPU-Spieler, Theo Averages und Stärken prüfen.',
+                  subtitle: 'CPU-Spieler, Theo Averages und Staerken pruefen.',
                   onTap: () {
                     Navigator.of(context).pushNamed(AppRoutes.computerDatabase);
                   },
@@ -142,14 +82,6 @@ class MainMenuScreen extends StatelessWidget {
                   subtitle: 'Bot-Logik, Radius und Simulationswerte anpassen.',
                   onTap: () {
                     Navigator.of(context).pushNamed(AppRoutes.settings);
-                  },
-                ),
-                _MenuTile(
-                  icon: Icons.analytics_outlined,
-                  title: 'Bot Match Simulator',
-                  subtitle: 'Zwei Bots gegeneinander testen und Werte vergleichen.',
-                  onTap: () {
-                    Navigator.of(context).pushNamed(AppRoutes.botSimulator);
                   },
                 ),
               ],

@@ -12,54 +12,78 @@ class CheckoutCalculatorScreen extends StatefulWidget {
       _CheckoutCalculatorScreenState();
 }
 
-class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
+class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _scoreController =
       TextEditingController(text: '121');
   final TextEditingController _setupStartController =
       TextEditingController(text: '121');
+  final TextEditingController _preferredDoublesController =
+      TextEditingController();
+  final TextEditingController _avoidedDoublesController =
+      TextEditingController();
   int _dartsLeft = 3;
   CheckoutRequirement _checkoutRequirement = CheckoutRequirement.doubleOut;
-  CheckoutPlayStyle _playStyle = CheckoutPlayStyle.balanced;
   double _leavePreference = 50;
-  double _outerBullAvoidance = 50;
-  double _bullAvoidance = 50;
   List<_CheckoutOption> _options = const <_CheckoutOption>[];
   List<_BestFinishBucket> _bestFinishBuckets = const <_BestFinishBucket>[];
 
+  static const CheckoutPlayStyle _standardPlayStyle =
+      CheckoutPlayStyle.balanced;
+  static const int _standardOuterBullPreference = 50;
+  static const int _standardBullPreference = 50;
+
   final X01Rules _rules = const X01Rules();
   late final CheckoutPlanner _planner;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     _planner = CheckoutPlanner(rules: _rules);
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(_handleTabChange);
     _recalculate();
   }
 
   @override
   void dispose() {
+    _tabController
+      ..removeListener(_handleTabChange)
+      ..dispose();
     _scoreController.dispose();
     _setupStartController.dispose();
+    _preferredDoublesController.dispose();
+    _avoidedDoublesController.dispose();
     super.dispose();
+  }
+
+  void _handleTabChange() {
+    if (_tabController.indexIsChanging) {
+      return;
+    }
+    _recalculate();
   }
 
   void _recalculate() {
     final score = int.tryParse(_scoreController.text.trim()) ?? 0;
     final setupStart = int.tryParse(_setupStartController.text.trim()) ?? 0;
     setState(() {
-      _planner.clearCaches();
-      _options = _buildCheckoutOptions(
-        score: score,
-        dartsLeft: _dartsLeft,
-        checkoutRequirement: _checkoutRequirement,
-        playStyle: _playStyle,
-      );
-      _bestFinishBuckets = _buildBestFinishBuckets(
-        startScore: setupStart,
-        dartsLeft: _dartsLeft,
-        checkoutRequirement: _checkoutRequirement,
-        playStyle: _playStyle,
-      );
+      if (_tabController.index == 0) {
+        _options = _buildCheckoutOptions(
+          score: score,
+          dartsLeft: _dartsLeft,
+          checkoutRequirement: _checkoutRequirement,
+          playStyle: _standardPlayStyle,
+        );
+      } else {
+        _bestFinishBuckets = _buildBestFinishBuckets(
+          startScore: setupStart,
+          dartsLeft: _dartsLeft,
+          checkoutRequirement: _checkoutRequirement,
+          playStyle: _standardPlayStyle,
+        );
+      }
     });
   }
 
@@ -72,6 +96,12 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
     if (score <= 1 || dartsLeft <= 0) {
       return const <_CheckoutOption>[];
     }
+    final preferredDoubles = _parsePreferredDoubleValues(
+      _preferredDoublesController.text,
+    );
+    final dislikedDoubles = _parsePreferredDoubleValues(
+      _avoidedDoublesController.text,
+    );
 
     final finishes = _planner.allCheckoutRoutes(
       score: score,
@@ -82,57 +112,70 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
 
     final options = finishes
         .map(
-          (route) => _CheckoutOption(
-            throws: route,
-            score: _planner.scoreRoute(
+          (route) {
+            final baseScore = _planner.scoreRoute(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-              outerBullPreference: _outerBullAvoidance.round(),
-              bullPreference: _bullAvoidance.round(),
-            ),
-            breakdown: _planner.routeScoreBreakdown(
+              outerBullPreference: _standardOuterBullPreference,
+              bullPreference: _standardBullPreference,
+            );
+            final baseBreakdown = _planner.routeScoreBreakdown(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-              outerBullPreference: _outerBullAvoidance.round(),
-              bullPreference: _bullAvoidance.round(),
-            ),
-            missScenarios: _buildMissScenarios(
+              outerBullPreference: _standardOuterBullPreference,
+              bullPreference: _standardBullPreference,
+            );
+            final adjustment = _doublePreferenceAdjustment(
+              route.isEmpty ? null : route.last,
+              preferredDoubles: preferredDoubles,
+              dislikedDoubles: dislikedDoubles,
+            );
+            return _CheckoutOption(
+              throws: route,
+              score: baseScore + adjustment,
+              breakdown: _applyDoubleAdjustmentToBreakdown(
+                baseBreakdown,
+                route.isEmpty ? null : route.last,
+                adjustment,
+              ),
+              missScenarios: _buildMissScenarios(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-              outerBullPreference: _outerBullAvoidance.round(),
-              bullPreference: _bullAvoidance.round(),
+              outerBullPreference: _standardOuterBullPreference,
+              bullPreference: _standardBullPreference,
             ),
-            fallbackHints: _buildFallbackHints(
+              fallbackHints: _buildFallbackHints(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-            ),
-            rationaleHint: _buildRationaleHint(
+              ),
+              rationaleHint: _buildRationaleHint(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-            ),
-            badges: _buildBadges(
+              ),
+              badges: _buildBadges(
               route: route,
               startScore: score,
               totalDarts: dartsLeft,
               checkoutRequirement: checkoutRequirement,
               playStyle: playStyle,
-            ),
-          ),
+              ),
+            );
+          },
         )
         .toList()
       ..sort((a, b) => b.score.compareTo(a.score));
@@ -149,6 +192,12 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
     if (startScore <= 1 || dartsLeft <= 0) {
       return const <_BestFinishBucket>[];
     }
+    final preferredDoubles = _parsePreferredDoubleValues(
+      _preferredDoublesController.text,
+    );
+    final dislikedDoubles = _parsePreferredDoubleValues(
+      _avoidedDoublesController.text,
+    );
 
     return List<_BestFinishBucket>.generate(4, (index) {
       final options = _planner.topSetupLeavesForNarrowFieldCount(
@@ -158,13 +207,30 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
         checkoutRequirement: checkoutRequirement,
         playStyle: playStyle,
         leavePreference: _leavePreference.round(),
-        outerBullPreference: _outerBullAvoidance.round(),
-        bullPreference: _bullAvoidance.round(),
+        outerBullPreference: _standardOuterBullPreference,
+        bullPreference: _standardBullPreference,
         maxResults: 3,
       );
+      final sortedOptions = options.toList()
+        ..sort(
+          (a, b) => (_doublePreferenceAdjustment(
+                    b.finishRoute.isEmpty ? null : b.finishRoute.last,
+                    preferredDoubles: preferredDoubles,
+                    dislikedDoubles: dislikedDoubles,
+                  ) +
+                  b.score)
+              .compareTo(
+                _doublePreferenceAdjustment(
+                      a.finishRoute.isEmpty ? null : a.finishRoute.last,
+                      preferredDoubles: preferredDoubles,
+                      dislikedDoubles: dislikedDoubles,
+                    ) +
+                    a.score,
+              ),
+        );
       return _BestFinishBucket(
         narrowFieldCount: index,
-        options: options
+        options: sortedOptions
             .map(
               (option) => _SetupLeavePresentation(
                 option: option,
@@ -178,14 +244,71 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
                   totalDarts: dartsLeft,
                   checkoutRequirement: checkoutRequirement,
                   playStyle: playStyle,
-                  outerBullPreference: _outerBullAvoidance.round(),
-                  bullPreference: _bullAvoidance.round(),
+                  outerBullPreference: _standardOuterBullPreference,
+                  bullPreference: _standardBullPreference,
                 ),
               ),
             )
             .toList(),
       );
     });
+  }
+
+  Set<int> _parsePreferredDoubleValues(String text) {
+    return text
+        .split(',')
+        .map((entry) => int.tryParse(entry.trim()))
+        .whereType<int>()
+        .where((value) => value >= 1 && value <= 20)
+        .toSet();
+  }
+
+  int _doublePreferenceAdjustment(
+    DartThrowResult? finalThrow, {
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    if (finalThrow == null || !finalThrow.isFinishDouble || finalThrow.isBull) {
+      return 0;
+    }
+    if (preferredDoubles.contains(finalThrow.baseValue)) {
+      return 150;
+    }
+    if (dislikedDoubles.contains(finalThrow.baseValue)) {
+      return -150;
+    }
+    return 0;
+  }
+
+  CheckoutRouteScoreBreakdown _applyDoubleAdjustmentToBreakdown(
+    CheckoutRouteScoreBreakdown breakdown,
+    DartThrowResult? finalThrow,
+    int adjustment,
+  ) {
+    if (adjustment == 0 || finalThrow == null) {
+      return breakdown;
+    }
+
+    return CheckoutRouteScoreBreakdown(
+      dartPathScore: breakdown.dartPathScore,
+      comfort: breakdown.comfort,
+      robustness: breakdown.robustness,
+      doubleQuality: breakdown.doubleQuality + adjustment,
+      bullPenalty: breakdown.bullPenalty,
+      segmentFlow: breakdown.segmentFlow,
+      dartPathDetails: breakdown.dartPathDetails,
+      comfortDetails: breakdown.comfortDetails,
+      robustnessDetails: breakdown.robustnessDetails,
+      doubleQualityDetails: <String>[
+        ...breakdown.doubleQualityDetails,
+        if (adjustment > 0)
+          'Persoenliche Doppel-Praeferenz fuer ${finalThrow.label}: +$adjustment',
+        if (adjustment < 0)
+          'Persoenlicher Malus fuer ${finalThrow.label}: $adjustment',
+      ],
+      bullPenaltyDetails: breakdown.bullPenaltyDetails,
+      segmentFlowDetails: breakdown.segmentFlowDetails,
+    );
   }
 
   List<_MissScenario> _buildMissScenarios({
@@ -336,14 +459,28 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
     required int startScore,
   }) {
     final setupNarrow = option.setupRoute.where(_planner.isNarrowField).length;
-    final finishBreakdown = _planner.routeScoreBreakdown(
+    final baseFinishBreakdown = _planner.routeScoreBreakdown(
       route: option.finishRoute,
       startScore: option.remainingScore,
       totalDarts: 3,
       checkoutRequirement: _checkoutRequirement,
-      playStyle: _playStyle,
-      outerBullPreference: _outerBullAvoidance.round(),
-      bullPreference: _bullAvoidance.round(),
+      playStyle: _standardPlayStyle,
+      outerBullPreference: _standardOuterBullPreference,
+      bullPreference: _standardBullPreference,
+    );
+    final finishAdjustment = _doublePreferenceAdjustment(
+      option.finishRoute.isEmpty ? null : option.finishRoute.last,
+      preferredDoubles: _parsePreferredDoubleValues(
+        _preferredDoublesController.text,
+      ),
+      dislikedDoubles: _parsePreferredDoubleValues(
+        _avoidedDoublesController.text,
+      ),
+    );
+    final finishBreakdown = _applyDoubleAdjustmentToBreakdown(
+      baseFinishBreakdown,
+      option.finishRoute.isEmpty ? null : option.finishRoute.last,
+      finishAdjustment,
     );
     final setupLabels = option.setupRoute.map((entry) => entry.label).join(' | ');
     final finishLabels = option.finishRoute.map((entry) => entry.label).join(' | ');
@@ -581,18 +718,6 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
     )) {
       badges.add('robuster Miss-Fallback');
     }
-    switch (playStyle) {
-      case CheckoutPlayStyle.safe:
-        badges.add('Stil: sicher');
-        break;
-      case CheckoutPlayStyle.balanced:
-        badges.add('Stil: ausgewogen');
-        break;
-      case CheckoutPlayStyle.aggressive:
-        badges.add('Stil: aggressiv');
-        break;
-    }
-
     return badges.take(4).toList();
   }
 
@@ -608,165 +733,158 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
   @override
   Widget build(BuildContext context) {
     final score = int.tryParse(_scoreController.text.trim()) ?? 0;
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Checkout Rechner'),
-          bottom: const TabBar(
-            tabs: <Widget>[
-              Tab(text: 'Einzeln'),
-              Tab(text: 'Bestes Finish'),
-            ],
-          ),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Checkout Rechner'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const <Widget>[
+            Tab(text: 'Einzeln'),
+            Tab(text: 'Bestes Finish'),
+          ],
         ),
-        body: SafeArea(
-          child: TabBarView(
-            children: <Widget>[
-              ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                children: <Widget>[
-                  _buildSharedControls(includeRangeFields: false),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            'Vorschlaege',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Beste Variante oben. Wenige schmale Felder, passende Schlussfelder und robuste Triple-Wege bekommen Vorrang.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: const Color(0xFF556372),
-                                ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (score <= 1)
-                            const Text(
-                                'Bitte eine gueltige Restpunktzahl eingeben.')
-                          else if (_options.isEmpty)
-                            const Text(
-                                'Kein Finish mit dieser Dartanzahl moeglich.')
-                          else
-                            ..._options.asMap().entries.map(
-                                  (entry) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _CheckoutResultTile(
-                                      rank: entry.key + 1,
-                                      option: entry.value,
-                                    ),
+      ),
+      body: SafeArea(
+        child: TabBarView(
+          controller: _tabController,
+          children: <Widget>[
+            ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+              children: <Widget>[
+                _buildSharedControls(includeRangeFields: false),
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Vorschlaege',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Beste Variante oben. Wenige schmale Felder, passende Schlussfelder und robuste Triple-Wege bekommen Vorrang.',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: const Color(0xFF556372),
                                   ),
-                                ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                children: <Widget>[
-                  _buildSharedControls(includeSetupFields: true),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            'Bestes Finish',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Hier siehst du, welches Finish nach dem Stellweg uebrig bleibt. Pro Kategorie wird der beste Stellweg mit 0, 1, 2 oder 3 schmalen Feldern gezeigt.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: const Color(0xFF556372),
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Regler aktuell: ${_leavePreference <= 33 ? 'einfacher Stellweg' : _leavePreference >= 67 ? 'starkes Restfinish' : 'ausgewogen'}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelLarge
-                                ?.copyWith(
-                                  color: const Color(0xFF0E5A52),
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (_bestFinishBuckets.isEmpty)
-                            const Text('Bitte einen gueltigen Startwert eingeben.')
-                          else
-                            ..._bestFinishBuckets.map(
-                              (bucket) => Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Container(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF7F5F0),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(
-                                        _labelForNarrowFieldCount(
-                                          bucket.narrowFieldCount,
-                                        ),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(fontWeight: FontWeight.w800),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      const SizedBox(height: 8),
-                                      if (bucket.options.isEmpty)
-                                        const Text('Kein Stellweg')
-                                      else
-                                        Wrap(
-                                          spacing: 10,
-                                          runSpacing: 10,
-                                          children: bucket.options
-                                              .asMap()
-                                              .entries
-                                              .map(
-                                                (entry) => SizedBox(
-                                                  width: 260,
-                                                  child: _SetupLeaveCard(
-                                                    rank: entry.key + 1,
-                                                    presentation: entry.value,
-                                                  ),
-                                                ),
-                                              )
-                                              .toList(),
-                                        ),
-                                    ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (score <= 1)
+                          const Text('Bitte eine gueltige Restpunktzahl eingeben.')
+                        else if (_options.isEmpty)
+                          const Text('Kein Finish mit dieser Dartanzahl moeglich.')
+                        else
+                          ..._options.asMap().entries.map(
+                                (entry) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _CheckoutResultTile(
+                                    rank: entry.key + 1,
+                                    option: entry.value,
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+            ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+              children: <Widget>[
+                _buildSharedControls(includeSetupFields: true),
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Bestes Finish',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Hier siehst du, welches Finish nach dem Stellweg uebrig bleibt. Pro Kategorie wird der beste Stellweg mit 0, 1, 2 oder 3 schmalen Feldern gezeigt.',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: const Color(0xFF556372),
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Stelllogik: ${_leavePreference <= 33 ? 'einfacher Stellweg' : _leavePreference >= 67 ? 'starkes Restfinish' : 'ausgewogen'}',
+                          style:
+                              Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: const Color(0xFF0E5A52),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (_bestFinishBuckets.isEmpty)
+                          const Text('Bitte einen gueltigen Startwert eingeben.')
+                        else
+                          ..._bestFinishBuckets.map(
+                                (bucket) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF7F5F0),
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          _labelForNarrowFieldCount(
+                                            bucket.narrowFieldCount,
+                                          ),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        if (bucket.options.isEmpty)
+                                          const Text('Kein Stellweg')
+                                        else
+                                          Wrap(
+                                            spacing: 10,
+                                            runSpacing: 10,
+                                            children: bucket.options
+                                                .asMap()
+                                                .entries
+                                                .map(
+                                                  (entry) => SizedBox(
+                                                    width: 260,
+                                                    child: _SetupLeaveCard(
+                                                      rank: entry.key + 1,
+                                                      presentation: entry.value,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -824,10 +942,7 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
                 max: 100,
                 divisions: 10,
                 label: _leavePreference.round().toString(),
-                onChanged: (value) {
-                  setState(() => _leavePreference = value);
-                  _recalculate();
-                },
+                onChanged: (value) => setState(() => _leavePreference = value),
               ),
               Row(
                 children: <Widget>[
@@ -842,43 +957,6 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (includeSetupFields || !includeRangeFields) ...<Widget>[
-              Text(
-                '25 vermeiden',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              Slider(
-                value: _outerBullAvoidance,
-                min: 0,
-                max: 100,
-                divisions: 10,
-                label: _outerBullAvoidance.round().toString(),
-                onChanged: (value) {
-                  setState(() => _outerBullAvoidance = value);
-                  _recalculate();
-                },
-              ),
-              Text(
-                'BULL vermeiden',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              Slider(
-                value: _bullAvoidance,
-                min: 0,
-                max: 100,
-                divisions: 10,
-                label: _bullAvoidance.round().toString(),
-                onChanged: (value) {
-                  setState(() => _bullAvoidance = value);
-                  _recalculate();
-                },
               ),
               const SizedBox(height: 12),
             ],
@@ -897,7 +975,6 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
                   return;
                 }
                 setState(() => _dartsLeft = value);
-                _recalculate();
               },
             ),
             const SizedBox(height: 12),
@@ -919,30 +996,27 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
                   return;
                 }
                 setState(() => _checkoutRequirement = value);
-                _recalculate();
               },
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<CheckoutPlayStyle>(
-              initialValue: _playStyle,
+            TextField(
+              controller: _preferredDoublesController,
               decoration: const InputDecoration(
-                labelText: 'Spielstil',
+                labelText: 'Lieblingsdoppel',
+                helperText: 'Komma-getrennt, z. B. 16,20,10',
               ),
-              items: CheckoutPlayStyle.values
-                  .map(
-                    (style) => DropdownMenuItem<CheckoutPlayStyle>(
-                      value: style,
-                      child: Text(_labelForPlayStyle(style)),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value == null) {
-                  return;
-                }
-                setState(() => _playStyle = value);
-                _recalculate();
-              },
+              keyboardType: TextInputType.number,
+              onSubmitted: (_) => _recalculate(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _avoidedDoublesController,
+              decoration: const InputDecoration(
+                labelText: 'Ungern gespielte Doppel',
+                helperText: 'Komma-getrennt, z. B. 7,11,19',
+              ),
+              keyboardType: TextInputType.number,
+              onSubmitted: (_) => _recalculate(),
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -966,17 +1040,6 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen> {
         return 'Double Out';
       case CheckoutRequirement.masterOut:
         return 'Master Out';
-    }
-  }
-
-  String _labelForPlayStyle(CheckoutPlayStyle playStyle) {
-    switch (playStyle) {
-      case CheckoutPlayStyle.safe:
-        return 'Sicher';
-      case CheckoutPlayStyle.balanced:
-        return 'Ausgewogen';
-      case CheckoutPlayStyle.aggressive:
-        return 'Aggressiv';
     }
   }
 
@@ -1026,6 +1089,12 @@ class _CheckoutResultTile extends StatelessWidget {
 
     final reasons = <_BreakdownExplanation>[
       _BreakdownExplanation(
+        label: 'Dart-Weg',
+        value: option.breakdown.dartPathScore,
+        reason: _dartPathReason(route.length),
+        details: option.breakdown.dartPathDetails,
+      ),
+      _BreakdownExplanation(
         label: 'Komfort',
         value: option.breakdown.comfort,
         reason: _comfortReason(
@@ -1033,6 +1102,7 @@ class _CheckoutResultTile extends StatelessWidget {
           earlyTriples: earlyTriples,
           earlyDoubles: earlyDoubles,
         ),
+        details: option.breakdown.comfortDetails,
       ),
       _BreakdownExplanation(
         label: 'Robustheit',
@@ -1041,11 +1111,13 @@ class _CheckoutResultTile extends StatelessWidget {
           finishScenarios: finishScenarios,
           setupScenarios: setupScenarios,
         ),
+        details: option.breakdown.robustnessDetails,
       ),
       _BreakdownExplanation(
         label: 'Doppel',
         value: option.breakdown.doubleQuality,
         reason: _doubleReason(route.last),
+        details: option.breakdown.doubleQualityDetails,
       ),
       _BreakdownExplanation(
         label: 'Bull-Malus',
@@ -1054,11 +1126,13 @@ class _CheckoutResultTile extends StatelessWidget {
           outerBullCount: outerBullCount,
           bullCount: bullCount,
         ),
+        details: option.breakdown.bullPenaltyDetails,
       ),
       _BreakdownExplanation(
         label: 'Segmentfluss',
         value: option.breakdown.segmentFlow,
         reason: _flowReason(sameSegmentPairs: sameSegmentPairs),
+        details: option.breakdown.segmentFlowDetails,
       ),
     ];
 
@@ -1090,6 +1164,17 @@ class _CheckoutResultTile extends StatelessWidget {
       return 'ein fruehes Doppel ist heikler als ein grosses Single-Feld.';
     }
     return 'der Aufbau ist weder besonders breit noch besonders unbequem.';
+  }
+
+  String _dartPathReason(int routeLength) {
+    switch (routeLength) {
+      case 1:
+        return '1-Dart-Weg liegt vorne und bekommt den hoechsten Tempobonus.';
+      case 2:
+        return '2-Dart-Weg wird in der Regel vor 3 Darts bevorzugt und bekommt einen klaren Bonus.';
+      default:
+        return '3-Dart-Weg bleibt spielbar, liegt aber meist etwas hinter kuerzeren Wegen.';
+    }
   }
 
   String _robustnessReason({
@@ -1126,9 +1211,9 @@ class _CheckoutResultTile extends StatelessWidget {
       return 'BULL ist bewusst abgewertet, vor allem als Schlussfeld.';
     }
     if (outerBullCount > 0 && bullCount == 0) {
-      return '25 ist leicht schlechter als ein normales grosses Single-Feld.';
+      return '25 zaehlt hier nicht mehr als eigener Malus.';
     }
-    return '25 und BULL kosten beide Punkte und druecken die Bewertung.';
+    return 'Nur BULL kostet hier Punkte; 25 hat keinen eigenen Malus mehr.';
   }
 
   String _flowReason({required int sameSegmentPairs}) {
@@ -1216,6 +1301,14 @@ class _CheckoutResultTile extends StatelessWidget {
                       ),
                 ),
                 const SizedBox(height: 6),
+                Text(
+                  'Endscore: ${option.score}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF0E5A52),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -1250,7 +1343,7 @@ class _CheckoutResultTile extends StatelessWidget {
                       .map(
                         (item) => SizedBox(
                           width: 220,
-                          child: _BreakdownExplanationCard(item: item),
+                          child: _BreakdownDetailsCard(item: item),
                         ),
                       )
                       .toList(),
@@ -1399,15 +1492,142 @@ class _BreakdownExplanation {
     required this.label,
     required this.value,
     required this.reason,
+    required this.details,
   });
 
   final String label;
   final int value;
   final String reason;
+  final List<String> details;
 }
 
 class _BreakdownExplanationCard extends StatelessWidget {
   const _BreakdownExplanationCard({
+    required this.item,
+  });
+
+  final _BreakdownExplanation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPositive = item.value >= 0;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE3E8EE)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  item.label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF17324D),
+                      ),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isPositive
+                      ? const Color(0xFFE6F3ED)
+                      : const Color(0xFFF6E8E6),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${isPositive ? '+' : ''}${item.value}',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: isPositive
+                            ? const Color(0xFF0E5A52)
+                            : const Color(0xFF8A3A2C),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+            Text(
+              item.reason,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF556372),
+                    height: 1.35,
+                  ),
+            ),
+            if (item.details.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  dividerColor: Colors.transparent,
+                ),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  dense: true,
+                  visualDensity: const VisualDensity(
+                    horizontal: -4,
+                    vertical: -4,
+                  ),
+                  title: Text(
+                    'Genaue Rechnung',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFF0E5A52),
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  children: item.details
+                      .map(
+                        (detail) => Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              const Padding(
+                                padding: EdgeInsets.only(top: 2),
+                                child: Text(
+                                  '•',
+                                  style: TextStyle(
+                                    color: Color(0xFF556372),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  detail,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: const Color(0xFF556372),
+                                        height: 1.3,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+  }
+}
+
+class _BreakdownDetailsCard extends StatelessWidget {
+  const _BreakdownDetailsCard({
     required this.item,
   });
 
@@ -1466,6 +1686,65 @@ class _BreakdownExplanationCard extends StatelessWidget {
                   height: 1.35,
                 ),
           ),
+          if (item.details.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Theme(
+              data: Theme.of(context).copyWith(
+                dividerColor: Colors.transparent,
+              ),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                dense: true,
+                visualDensity: const VisualDensity(
+                  horizontal: -4,
+                  vertical: -4,
+                ),
+                title: Text(
+                  'Genaue Rechnung',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: const Color(0xFF0E5A52),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                children: item.details
+                    .map(
+                      (detail) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: Text(
+                                '-',
+                                style: TextStyle(
+                                  color: Color(0xFF556372),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                detail,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: const Color(0xFF556372),
+                                      height: 1.3,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
         ],
       ),
     );

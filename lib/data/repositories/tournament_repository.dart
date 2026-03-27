@@ -172,9 +172,9 @@ class TournamentRepository extends ChangeNotifier {
         existingContext?.calendarItem.id == item.id) {
       return;
     }
-    AppDebug.instance.info(
+    final action = AppDebug.instance.startAction(
       'Turnier',
-      'Karriere-Turnier "${item.name}" wird aufgebaut.',
+      'Karriere-Turnier "${item.name}" aufbauen',
     );
     final participants = _buildCareerParticipants(
       career: career,
@@ -190,6 +190,7 @@ class TournamentRepository extends ChangeNotifier {
       _careerContext = null;
       notifyListeners();
       unawaited(_persist());
+      action.complete('uebersprungen');
       return;
     }
 
@@ -223,6 +224,7 @@ class TournamentRepository extends ChangeNotifier {
     );
     notifyListeners();
     unawaited(_persist());
+    action.complete('${participants.length} Teilnehmer');
   }
 
   void _createCareerLeagueSeriesTournament({
@@ -490,9 +492,9 @@ class TournamentRepository extends ChangeNotifier {
       return;
     }
 
-    AppDebug.instance.info(
+    final action = AppDebug.instance.startAction(
       'Turnier',
-      'Simuliere Turnier "${bracket.definition.name}" bis zum Ende.',
+      'Simulation "${bracket.definition.name}"',
     );
     var workingBracket = bracket;
     var simulatedMatches = 0;
@@ -508,6 +510,7 @@ class TournamentRepository extends ChangeNotifier {
           'Turnier',
           'Turnier "${bracket.definition.name}" macht keinen Fortschritt mehr.',
         );
+        action.fail('kein Fortschritt mehr');
         break;
       }
       workingBracket = nextBracket;
@@ -530,6 +533,7 @@ class TournamentRepository extends ChangeNotifier {
       'Turnier',
       'Turnier "${workingBracket.definition.name}" abgeschlossen: ${workingBracket.isCompleted}.',
     );
+    action.complete('$simulatedMatches Matches');
     notifyListeners();
     await _persist();
   }
@@ -558,8 +562,14 @@ class TournamentRepository extends ChangeNotifier {
       return;
     }
 
+    final action = AppDebug.instance.startAction(
+      'Turnier',
+      'Karriere-Turnier committen',
+    );
+
     final career = CareerRepository.instance.activeCareer;
     if (career == null || career.id != context.careerId) {
+      action.fail('aktive Karriere passt nicht zum Turnierkontext');
       return;
     }
 
@@ -591,6 +601,7 @@ class TournamentRepository extends ChangeNotifier {
       _careerContext = null;
       notifyListeners();
       unawaited(_persist());
+      action.complete(context.calendarItem.name);
       return;
     }
 
@@ -615,6 +626,7 @@ class TournamentRepository extends ChangeNotifier {
     _careerContext = null;
     notifyListeners();
     unawaited(_persist());
+    action.complete(context.calendarItem.name);
   }
 
   TournamentArchiveEntry? archiveForCareerItem({
