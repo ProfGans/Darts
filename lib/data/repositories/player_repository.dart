@@ -66,8 +66,32 @@ class PlayerEquipmentPerformance {
   double get winRate => matchCount <= 0 ? 0 : (winCount / matchCount) * 100;
 }
 
+enum PlayerAnalyticsRange {
+  allTime,
+  last5,
+  last10,
+  last25,
+  last3Months,
+}
+
+extension PlayerAnalyticsRangePresentation on PlayerAnalyticsRange {
+  String get label => switch (this) {
+        PlayerAnalyticsRange.allTime => 'All Time',
+        PlayerAnalyticsRange.last5 => 'Letzte 5 Matches',
+        PlayerAnalyticsRange.last10 => 'Letzte 10 Matches',
+        PlayerAnalyticsRange.last25 => 'Letzte 25 Matches',
+        PlayerAnalyticsRange.last3Months => 'Letzte 3 Monate',
+      };
+}
+
 class PlayerProfileAnalytics {
   const PlayerProfileAnalytics({
+    required this.filterRange,
+    required this.filterEquipmentId,
+    required this.filterStartDate,
+    required this.filterEndDate,
+    required this.filtered,
+    required this.filteredTrainingCount,
     required this.last5,
     required this.last10,
     required this.last25,
@@ -87,6 +111,12 @@ class PlayerProfileAnalytics {
     required this.equipment,
   });
 
+  final PlayerAnalyticsRange filterRange;
+  final String? filterEquipmentId;
+  final DateTime? filterStartDate;
+  final DateTime? filterEndDate;
+  final PlayerStatsWindow filtered;
+  final int filteredTrainingCount;
   final PlayerStatsWindow last5;
   final PlayerStatsWindow last10;
   final PlayerStatsWindow last25;
@@ -185,6 +215,8 @@ class PlayerRepository extends ChangeNotifier {
     required String name,
     String? nationality,
     int? age,
+    String? favoriteDouble,
+    String? hatedDouble,
     List<String> tags = const <String>[],
     String? notes,
     PlayerProfileSource source = PlayerProfileSource.manual,
@@ -204,6 +236,8 @@ class PlayerRepository extends ChangeNotifier {
       lastModifiedReason: 'manual_create',
       nationality: _normalizeNationality(nationality),
       age: age,
+      favoriteDouble: _normalizeNullableText(favoriteDouble),
+      hatedDouble: _normalizeNullableText(hatedDouble),
       tags: _normalizeTags(tags),
       notes: _normalizeNullableText(notes),
       source: source,
@@ -348,6 +382,8 @@ class PlayerRepository extends ChangeNotifier {
     required String name,
     String? nationality,
     int? age,
+    String? favoriteDouble,
+    String? hatedDouble,
     List<String> tags = const <String>[],
     String? notes,
     PlayerProfileSource? source,
@@ -368,6 +404,10 @@ class PlayerRepository extends ChangeNotifier {
           _normalizeNullableText(nationality) == null,
       age: age,
       clearAge: age == null,
+      favoriteDouble: _normalizeNullableText(favoriteDouble),
+      clearFavoriteDouble: _normalizeNullableText(favoriteDouble) == null,
+      hatedDouble: _normalizeNullableText(hatedDouble),
+      clearHatedDouble: _normalizeNullableText(hatedDouble) == null,
       tags: _normalizeTags(tags),
       notes: _normalizeNullableText(notes),
       clearNotes: _normalizeNullableText(notes) == null,
@@ -651,6 +691,8 @@ class PlayerRepository extends ChangeNotifier {
         'age',
         'favorite',
         'protected',
+        'favoriteDouble',
+        'hatedDouble',
         'tags',
         'favoriteFormats',
         'avatarEmoji',
@@ -668,6 +710,8 @@ class PlayerRepository extends ChangeNotifier {
             player.age?.toString() ?? '',
             player.isFavorite.toString(),
             player.isProtected.toString(),
+            player.favoriteDouble ?? '',
+            player.hatedDouble ?? '',
             player.tags.join('|'),
             player.preferences.favoriteFormats.join('|'),
             player.preferences.avatarEmoji,
@@ -754,6 +798,8 @@ class PlayerRepository extends ChangeNotifier {
           isProtected: values['protected'] == 'true',
           age: int.tryParse(values['age'] ?? ''),
           nationality: _normalizeNationality(values['nationality']),
+          favoriteDouble: _normalizeNullableText(values['favoriteDouble']),
+          hatedDouble: _normalizeNullableText(values['hatedDouble']),
           tags: _normalizeTags((values['tags'] ?? '').split('|')),
           notes: _normalizeNullableText(values['notes']),
           preferences: PlayerProfilePreferences(
@@ -848,7 +894,13 @@ class PlayerRepository extends ChangeNotifier {
     return aggregate;
   }
 
-  PlayerProfileAnalytics buildAnalytics(PlayerProfile player) {
+  PlayerProfileAnalytics buildAnalytics(
+    PlayerProfile player, {
+    PlayerAnalyticsRange range = PlayerAnalyticsRange.allTime,
+    String? equipmentId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
     final x01Entries = player.history.where((entry) => entry.match != null).toList()
       ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
 
@@ -865,14 +917,48 @@ class PlayerRepository extends ChangeNotifier {
       );
     }
 
+    final setupFilteredEntries = equipmentId == null
+        ? x01Entries
+        : x01Entries
+            .where((entry) => entry.equipmentId == equipmentId)
+            .toList();
+    final dateFilteredEntries = _filterMatchEntriesByRange(
+      setupFilteredEntries,
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final filteredX01Entries =
+        startDate == null && endDate == null
+            ? _applyRangeToMatchEntries(dateFilteredEntries, range)
+            : dateFilteredEntries;
+    final setupFilteredTrainingEntries = equipmentId == null
+        ? player.trainingHistory
+        : player.trainingHistory
+            .where((entry) => entry.equipmentId == equipmentId)
+            .toList();
+    final filteredTrainingEntries = _applyRangeToTrainingEntries(
+      _filterTrainingEntriesByRange(
+        setupFilteredTrainingEntries,
+        startDate: startDate,
+        endDate: endDate,
+      ),
+      startDate == null && endDate == null
+          ? range
+          : PlayerAnalyticsRange.allTime,
+    );
+    final filteredStats = _buildX01StatsFromEntries(
+      playerId: player.id,
+      playerName: player.name,
+      entries: filteredX01Entries,
+    );
     final threeMonthsAgo = DateTime.now().subtract(const Duration(days: 90));
-    final last5Entries = x01Entries.take(5).toList();
-    final last10Entries = x01Entries.take(10).toList();
-    final last25Entries = x01Entries.take(25).toList();
-    final last3MonthsEntries = x01Entries
+    final last5Entries = filteredX01Entries.take(5).toList();
+    final last10Entries = filteredX01Entries.take(10).toList();
+    final last25Entries = filteredX01Entries.take(25).toList();
+    final last3MonthsEntries = filteredX01Entries
         .where((entry) => entry.playedAt.isAfter(threeMonthsAgo))
         .toList();
-    final shortEntries = x01Entries.where((entry) {
+    final shortEntries = filteredX01Entries.where((entry) {
       final stats = _resolveParticipantStats(
         playerId: player.id,
         playerName: player.name,
@@ -880,7 +966,7 @@ class PlayerRepository extends ChangeNotifier {
       );
       return stats.legsPlayed <= 9;
     }).toList();
-    final longEntries = x01Entries.where((entry) {
+    final longEntries = filteredX01Entries.where((entry) {
       final stats = _resolveParticipantStats(
         playerId: player.id,
         playerName: player.name,
@@ -888,14 +974,14 @@ class PlayerRepository extends ChangeNotifier {
       );
       return stats.legsPlayed > 9;
     }).toList();
-    final humanEntries = x01Entries
+    final humanEntries = filteredX01Entries
         .where((entry) => entry.opponentType == PlayerOpponentKind.human)
         .toList();
-    final cpuEntries = x01Entries
+    final cpuEntries = filteredX01Entries
         .where((entry) => entry.opponentType == PlayerOpponentKind.cpu)
         .toList();
 
-    final allHeadToHead = _buildHeadToHead(player, x01Entries);
+    final allHeadToHead = _buildHeadToHead(player, filteredX01Entries);
     final favoriteOpponent = allHeadToHead.isEmpty
         ? null
         : (List<PlayerHeadToHeadStats>.from(allHeadToHead)
@@ -918,32 +1004,38 @@ class PlayerRepository extends ChangeNotifier {
           })).first;
 
     return PlayerProfileAnalytics(
+      filterRange: range,
+      filterEquipmentId: equipmentId,
+      filterStartDate: startDate,
+      filterEndDate: endDate,
+      filtered: buildWindow(range.label, filteredX01Entries),
+      filteredTrainingCount: filteredTrainingEntries.length,
       last5: buildWindow('Letzte 5', last5Entries),
       last10: buildWindow('Letzte 10', last10Entries),
       last25: buildWindow('Letzte 25', last25Entries),
       last3Months: buildWindow('Letzte 3 Monate', last3MonthsEntries),
-      allTime: buildWindow('All Time', x01Entries),
+      allTime: buildWindow('All Time', filteredX01Entries),
       withThrow: PlayerStatsWindow(
         label: 'Mit Anwurf',
-        matchCount: x01Entries.length,
-        winCount: x01Entries.where((entry) => entry.won).length,
+        matchCount: filteredX01Entries.length,
+        winCount: filteredX01Entries.where((entry) => entry.won).length,
         stats: const PlayerProfileStats().copyWith(
-          withThrowPoints: player.stats.withThrowPoints,
-          withThrowDarts: player.stats.withThrowDarts,
+          withThrowPoints: filteredStats.withThrowPoints,
+          withThrowDarts: filteredStats.withThrowDarts,
         ),
       ),
       againstThrow: PlayerStatsWindow(
         label: 'Ohne Anwurf',
-        matchCount: x01Entries.length,
-        winCount: x01Entries.where((entry) => entry.won).length,
+        matchCount: filteredX01Entries.length,
+        winCount: filteredX01Entries.where((entry) => entry.won).length,
         stats: const PlayerProfileStats().copyWith(
-          againstThrowPoints: player.stats.againstThrowPoints,
-          againstThrowDarts: player.stats.againstThrowDarts,
+          againstThrowPoints: filteredStats.againstThrowPoints,
+          againstThrowDarts: filteredStats.againstThrowDarts,
         ),
       ),
       decider: buildWindow(
         'Decider',
-        x01Entries.where((entry) => _entryHasDecider(entry)).toList(),
+        filteredX01Entries.where((entry) => _entryHasDecider(entry)).toList(),
       ),
       bestOfShort: buildWindow('Best of Short', shortEntries),
       bestOfLong: buildWindow('Best of Long', longEntries),
@@ -952,8 +1044,14 @@ class PlayerRepository extends ChangeNotifier {
       headToHead: allHeadToHead,
       favoriteOpponent: favoriteOpponent,
       toughestOpponent: toughestOpponent,
-      movingAverage: _buildMovingAverage(x01Entries),
-      equipment: _buildEquipmentPerformance(player),
+      movingAverage: _buildMovingAverage(filteredX01Entries),
+      equipment: _buildEquipmentPerformance(
+        player,
+        range: range,
+        selectedEquipmentId: equipmentId,
+        startDate: startDate,
+        endDate: endDate,
+      ),
     );
   }
 
@@ -1182,15 +1280,144 @@ class PlayerRepository extends ChangeNotifier {
     return result;
   }
 
-  List<PlayerEquipmentPerformance> _buildEquipmentPerformance(PlayerProfile player) {
+  List<PlayerMatchHistoryEntry> _applyRangeToMatchEntries(
+    List<PlayerMatchHistoryEntry> entries,
+    PlayerAnalyticsRange range,
+  ) {
+    final sorted = entries.toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    switch (range) {
+      case PlayerAnalyticsRange.allTime:
+        return sorted;
+      case PlayerAnalyticsRange.last5:
+        return sorted.take(5).toList();
+      case PlayerAnalyticsRange.last10:
+        return sorted.take(10).toList();
+      case PlayerAnalyticsRange.last25:
+        return sorted.take(25).toList();
+      case PlayerAnalyticsRange.last3Months:
+        final threshold = DateTime.now().subtract(const Duration(days: 90));
+        return sorted.where((entry) => entry.playedAt.isAfter(threshold)).toList();
+    }
+  }
+
+  List<PlayerMatchHistoryEntry> _filterMatchEntriesByRange(
+    List<PlayerMatchHistoryEntry> entries, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
+    if (startDate == null && endDate == null) {
+      return entries.toList()
+        ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    }
+    final normalizedStart = startDate == null ? null : _startOfDay(startDate);
+    final normalizedEnd = endDate == null ? null : _endOfDay(endDate);
+    return entries.where((entry) {
+      final playedAt = entry.playedAt.toLocal();
+      if (normalizedStart != null && playedAt.isBefore(normalizedStart)) {
+        return false;
+      }
+      if (normalizedEnd != null && playedAt.isAfter(normalizedEnd)) {
+        return false;
+      }
+      return true;
+    }).toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+  }
+
+  List<PlayerTrainingEntry> _applyRangeToTrainingEntries(
+    List<PlayerTrainingEntry> entries,
+    PlayerAnalyticsRange range,
+  ) {
+    final sorted = entries.toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    switch (range) {
+      case PlayerAnalyticsRange.allTime:
+        return sorted;
+      case PlayerAnalyticsRange.last5:
+        return sorted.take(5).toList();
+      case PlayerAnalyticsRange.last10:
+        return sorted.take(10).toList();
+      case PlayerAnalyticsRange.last25:
+        return sorted.take(25).toList();
+      case PlayerAnalyticsRange.last3Months:
+        final threshold = DateTime.now().subtract(const Duration(days: 90));
+        return sorted.where((entry) => entry.playedAt.isAfter(threshold)).toList();
+    }
+  }
+
+  List<PlayerTrainingEntry> _filterTrainingEntriesByRange(
+    List<PlayerTrainingEntry> entries, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
+    if (startDate == null && endDate == null) {
+      return entries.toList()
+        ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    }
+    final normalizedStart = startDate == null ? null : _startOfDay(startDate);
+    final normalizedEnd = endDate == null ? null : _endOfDay(endDate);
+    return entries.where((entry) {
+      final playedAt = entry.playedAt.toLocal();
+      if (normalizedStart != null && playedAt.isBefore(normalizedStart)) {
+        return false;
+      }
+      if (normalizedEnd != null && playedAt.isAfter(normalizedEnd)) {
+        return false;
+      }
+      return true;
+    }).toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+  }
+
+  DateTime _startOfDay(DateTime value) {
+    final local = value.toLocal();
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  DateTime _endOfDay(DateTime value) {
+    final local = value.toLocal();
+    return DateTime(local.year, local.month, local.day, 23, 59, 59, 999, 999);
+  }
+
+  List<PlayerEquipmentPerformance> _buildEquipmentPerformance(
+    PlayerProfile player, {
+    required PlayerAnalyticsRange range,
+    String? selectedEquipmentId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
     final setupsById = <String, PlayerEquipmentSetup>{
       for (final setup in player.equipmentSetups) setup.id: setup,
     };
     final buckets = <String, ({List<PlayerMatchHistoryEntry> matches, List<PlayerTrainingEntry> trainings})>{};
 
-    for (final entry in player.history) {
+    final dateFilteredHistory = _filterMatchEntriesByRange(
+      player.history.where((entry) => entry.match != null).toList(),
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final filteredHistory =
+        startDate == null && endDate == null
+            ? _applyRangeToMatchEntries(dateFilteredHistory, range)
+            : dateFilteredHistory;
+    final dateFilteredTrainings = _filterTrainingEntriesByRange(
+      player.trainingHistory,
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final filteredTrainings = _applyRangeToTrainingEntries(
+      dateFilteredTrainings,
+      startDate == null && endDate == null
+          ? range
+          : PlayerAnalyticsRange.allTime,
+    );
+
+    for (final entry in filteredHistory) {
       final equipmentId = entry.equipmentId;
-      if (equipmentId == null || entry.match == null) {
+      if (equipmentId == null ||
+          entry.match == null ||
+          (selectedEquipmentId != null && equipmentId != selectedEquipmentId)) {
         continue;
       }
       final bucket = buckets[equipmentId] ??
@@ -1198,9 +1425,10 @@ class PlayerRepository extends ChangeNotifier {
       bucket.matches.add(entry);
       buckets[equipmentId] = bucket;
     }
-    for (final entry in player.trainingHistory) {
+    for (final entry in filteredTrainings) {
       final equipmentId = entry.equipmentId;
-      if (equipmentId == null) {
+      if (equipmentId == null ||
+          (selectedEquipmentId != null && equipmentId != selectedEquipmentId)) {
         continue;
       }
       final bucket = buckets[equipmentId] ??
@@ -1212,9 +1440,14 @@ class PlayerRepository extends ChangeNotifier {
     final performances = <PlayerEquipmentPerformance>[];
     for (final bucket in buckets.entries) {
       final setup = setupsById[bucket.key];
+      final firstMatchName =
+          bucket.value.matches.isEmpty ? null : bucket.value.matches.first.equipmentName;
+      final firstTrainingName = bucket.value.trainings.isEmpty
+          ? null
+          : bucket.value.trainings.first.equipmentName;
       final name = setup?.name ??
-          bucket.value.matches.firstOrNull?.equipmentName ??
-          bucket.value.trainings.firstOrNull?.equipmentName ??
+          firstMatchName ??
+          firstTrainingName ??
           'Equipment';
       final stats = _buildX01StatsFromEntries(
         playerId: player.id,

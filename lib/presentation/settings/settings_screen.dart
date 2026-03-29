@@ -1,9 +1,79 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/settings_repository.dart';
+
+Future<void> _runBlockingRefresh(
+  BuildContext context, {
+  required Future<void> Function() action,
+  required String message,
+  String? successMessage,
+}) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final messenger = ScaffoldMessenger.of(context);
+  final repository = ComputerRepository.instance;
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      return AnimatedBuilder(
+        animation: repository,
+        builder: (context, _) {
+          final progress = repository.theoreticalRefreshProgress;
+          final label = repository.theoreticalRefreshLabel.isNotEmpty
+              ? repository.theoreticalRefreshLabel
+              : message;
+          return AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Text(label),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: progress > 0 && progress < 1 ? progress : null,
+                ),
+                if (progress > 0) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text('${(progress * 100).toStringAsFixed(0)}%'),
+                ],
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+  await Future<void>.delayed(Duration.zero);
+  await WidgetsBinding.instance.endOfFrame;
+  await Future<void>.delayed(const Duration(milliseconds: 16));
+  try {
+    await action();
+  } finally {
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
+  if (context.mounted && successMessage != null && successMessage.isNotEmpty) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(successMessage),
+      ),
+    );
+  }
+}
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -60,11 +130,38 @@ class SettingsScreen extends StatelessWidget {
                                 computerSpeedIndex: value,
                               ),
                             );
-                            unawaited(
-                              ComputerRepository.instance
-                                  .refreshTheoreticalAverages(),
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Debug',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Blendet das Debug-Panel in der App ein oder aus. Die Debug-Ausgabe in PowerShell bleibt weiter aktiv.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: settings.debugOverlayEnabled,
+                          onChanged: (value) {
+                            repository.update(
+                              settings.copyWith(debugOverlayEnabled: value),
                             );
                           },
+                          title: const Text('Debug-Panel in App anzeigen'),
                         ),
                       ],
                     ),
@@ -74,6 +171,8 @@ class SettingsScreen extends StatelessWidget {
                 _buildSliderCard(
                   context,
                   title: 'Radius Kalibrierung',
+                  description:
+                      'Steuert die grundsaetzliche Zielgenauigkeit der Bots. Hoehere Werte machen die Streuung groesser, niedrigere Werte praeziser.',
                   value: settings.radiusCalibrationPercent
                       .clamp(
                         SettingsRepository.minRadiusCalibrationPercent,
@@ -82,8 +181,7 @@ class SettingsScreen extends StatelessWidget {
                       .toDouble(),
                   min: SettingsRepository.minRadiusCalibrationPercent.toDouble(),
                   max: SettingsRepository.maxRadiusCalibrationPercent.toDouble(),
-                  label:
-                      '${settings.radiusCalibrationPercent}% (100% entspricht deinem bisherigen 97%-Punkt)',
+                  label: '${settings.radiusCalibrationPercent}%',
                   onChanged: (value) {
                     repository.update(
                       settings.copyWith(
@@ -92,15 +190,14 @@ class SettingsScreen extends StatelessWidget {
                     );
                   },
                   onChangeEnd: (_) {
-                    unawaited(
-                      ComputerRepository.instance.refreshTheoreticalAverages(),
-                    );
                   },
                 ),
                 const SizedBox(height: 16),
                 _buildSliderCard(
                   context,
                   title: 'Simulations Spreizung',
+                  description:
+                      'Beeinflusst, wie stark gute und schwache Phasen in der Simulation auseinanderlaufen. Hoehere Werte sorgen fuer mehr Varianz, niedrigere fuer gleichmaessigere Leistungen.',
                   value: settings.simulationSpreadPercent
                       .clamp(
                         SettingsRepository.minSimulationSpreadPercent,
@@ -120,9 +217,6 @@ class SettingsScreen extends StatelessWidget {
                     );
                   },
                   onChangeEnd: (_) {
-                    unawaited(
-                      ComputerRepository.instance.refreshTheoreticalAverages(),
-                    );
                   },
                 ),
                 const SizedBox(height: 16),
@@ -185,12 +279,53 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Theo Averages',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Berechnet die theoretischen Averages aller vorhandenen Computer-Spieler mit der aktuellen Bot- und Settings-Logik neu.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Hinweis: Der Theo Average liegt in der Regel ein paar Punkte ueber dem echten Match-Average.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: () async {
+                            await _runBlockingRefresh(
+                              context,
+                              message:
+                                  'Theoretische Averages werden neu berechnet...',
+                              successMessage:
+                                  'Theoretische Averages wurden neu berechnet.',
+                              action: () {
+                                return ComputerRepository.instance
+                                    .refreshTheoreticalAverages();
+                              },
+                            );
+                          },
+                          child: const Text(
+                            'Theo Averages neu berechnen',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 OutlinedButton(
                   onPressed: () {
                     repository.reset();
-                    unawaited(
-                      ComputerRepository.instance.refreshTheoreticalAverages(),
-                    );
                   },
                   child: const Text('Auf Standard zuruecksetzen'),
                 ),
@@ -205,6 +340,7 @@ class SettingsScreen extends StatelessWidget {
   Widget _buildSliderCard(
     BuildContext context, {
     required String title,
+    required String description,
     required double value,
     required double min,
     required double max,
@@ -221,6 +357,11 @@ class SettingsScreen extends StatelessWidget {
             Text(
               title,
               style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              description,
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 8),
             Text(label),

@@ -111,6 +111,10 @@ class RankingEngine {
       }
     }
 
+    for (final accumulator in totals.values) {
+      accumulator.total = accumulator.totalFor(ranking);
+    }
+
     final sorted = totals.values.toList()
       ..sort((left, right) {
         final moneyCompare = right.total.compareTo(left.total);

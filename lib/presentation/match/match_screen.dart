@@ -11,6 +11,7 @@ import '../../domain/bot/bot_engine.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/checkout_planner.dart';
 import '../../domain/x01/x01_match_engine.dart';
+import '../../domain/x01/x01_match_simulator.dart';
 import '../../domain/x01/x01_models.dart';
 import 'game_mode_models.dart';
 import 'match_end_screen.dart';
@@ -82,6 +83,7 @@ class _ParticipantRuntime {
   int decidingLegDarts = 0;
   int decidingLegsPlayed = 0;
   int decidingLegsWon = 0;
+  int won9Darters = 0;
   int won12Darters = 0;
   int won15Darters = 0;
   int won18Darters = 0;
@@ -140,6 +142,7 @@ class _ParticipantRuntime {
       decidingLegDarts: decidingLegDarts,
       decidingLegsPlayed: decidingLegsPlayed,
       decidingLegsWon: decidingLegsWon,
+      won9Darters: won9Darters,
       won12Darters: won12Darters,
       won15Darters: won15Darters,
       won18Darters: won18Darters,
@@ -193,6 +196,7 @@ class _ParticipantRuntime {
     decidingLegDarts = snapshot.decidingLegDarts;
     decidingLegsPlayed = snapshot.decidingLegsPlayed;
     decidingLegsWon = snapshot.decidingLegsWon;
+    won9Darters = snapshot.won9Darters;
     won12Darters = snapshot.won12Darters;
     won15Darters = snapshot.won15Darters;
     won18Darters = snapshot.won18Darters;
@@ -247,6 +251,7 @@ class _ParticipantRuntimeSnapshot {
     required this.decidingLegDarts,
     required this.decidingLegsPlayed,
     required this.decidingLegsWon,
+    required this.won9Darters,
     required this.won12Darters,
     required this.won15Darters,
     required this.won18Darters,
@@ -298,6 +303,7 @@ class _ParticipantRuntimeSnapshot {
   final int decidingLegDarts;
   final int decidingLegsPlayed;
   final int decidingLegsWon;
+  final int won9Darters;
   final int won12Darters;
   final int won15Darters;
   final int won18Darters;
@@ -345,6 +351,18 @@ class _MatchUndoSnapshot {
   final Map<String, _BullOffResult> bullOffResults;
 }
 
+class _PlayerStatItem {
+  const _PlayerStatItem({
+    required this.label,
+    required this.value,
+    required this.description,
+  });
+
+  final String label;
+  final String value;
+  final String description;
+}
+
 enum _ManualFinishType {
   single('Single'),
   doubleValue('Double'),
@@ -388,8 +406,15 @@ enum _BullOffResult {
 }
 
 class _MatchScreenState extends State<MatchScreen> {
+  static const CheckoutPlayStyle _suggestionPlayStyle =
+      CheckoutPlayStyle.balanced;
+  static const int _suggestionSetupPreference = 85;
+  static const int _suggestionOuterBullPreference = 50;
+  static const int _suggestionBullPreference = 50;
+
   late final BotEngine _botEngine;
   late final X01MatchEngine _matchEngine;
+  late final X01MatchSimulator _matchSimulator;
   late final CheckoutPlanner _checkoutPlanner;
   late List<_ParticipantRuntime> _participants;
 
@@ -397,6 +422,8 @@ class _MatchScreenState extends State<MatchScreen> {
   int _starterIndex = 0;
   bool _matchFinished = false;
   bool _showScoreStats = false;
+  bool _showVisitLogOverlay = false;
+  final Set<String> _expandedParticipantStats = <String>{};
   String _status = '';
   String _currentInput = '';
   final List<String> _visitLog = <String>[];
@@ -417,6 +444,10 @@ class _MatchScreenState extends State<MatchScreen> {
     super.initState();
     _botEngine = BotEngine();
     _matchEngine = X01MatchEngine();
+    _matchSimulator = X01MatchSimulator(
+      matchEngine: _matchEngine,
+      botEngine: _botEngine,
+    );
     _checkoutPlanner = CheckoutPlanner();
     _participants = widget.session.participants
         .map(
@@ -631,48 +662,18 @@ class _MatchScreenState extends State<MatchScreen> {
     }
 
     final startScore = participant.score;
-    var currentScore = startScore;
-    var hasOpenedLeg = participant.hasOpenedLeg;
-    final throws = <DartThrowResult>[];
-    for (var dart = 1; dart <= 3; dart += 1) {
-      final simulation = !hasOpenedLeg &&
-              widget.session.matchConfig.startRequirement == StartRequirement.doubleIn
-          ? _botEngine.simulateTargetThrow(
-              target: _matchEngine.rules.createDouble(20),
-              score: currentScore,
-              profile: participant.config.botProfile!,
-              reason: 'Double-in opener',
-            )
-          : _botEngine.simulateThrow(
-              score: currentScore,
-              dartsLeft: 4 - dart,
-              profile: participant.config.botProfile!,
-            );
-      throws.add(simulation.hit);
-
-      final visitResult = _matchEngine.evaluateVisit(
-        currentScore: startScore,
-        throws: throws,
-        startRequirement: widget.session.matchConfig.startRequirement,
-        hasOpenedLeg: participant.hasOpenedLeg,
-        checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-      );
-
-      if (visitResult.didBust || visitResult.remainingScore == 0) {
-        _applyVisit(
-          participant: participant,
-          visitResult: visitResult,
-          throws: throws,
-          startScore: startScore,
-          manualDescription: throws.map((entry) => entry.label).join(' - '),
-        );
-        return;
-      }
-
-      currentScore = visitResult.remainingScore;
-      hasOpenedLeg = visitResult.openedLeg;
-    }
-
+    final simulatedVisit = _matchSimulator.simulateBotVisit(
+      startScore: startScore,
+      hasOpenedLeg: participant.hasOpenedLeg,
+      startRequirement: widget.session.matchConfig.startRequirement,
+      player: SimulatedPlayer(
+        name: participant.config.name,
+        profile: participant.config.botProfile!,
+      ),
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      detailed: true,
+    );
+    final throws = List<DartThrowResult>.from(simulatedVisit.throws);
     final visitResult = _matchEngine.evaluateVisit(
       currentScore: startScore,
       throws: throws,
@@ -1064,6 +1065,9 @@ class _MatchScreenState extends State<MatchScreen> {
       if (winner.bestLegDarts == 0 || winnerLegDarts < winner.bestLegDarts) {
         winner.bestLegDarts = winnerLegDarts;
       }
+      if (winnerLegDarts == 9) {
+        winner.won9Darters += 1;
+      }
       if (winnerLegDarts > 0 && winnerLegDarts <= 12) {
         winner.won12Darters += 1;
       }
@@ -1157,6 +1161,7 @@ class _MatchScreenState extends State<MatchScreen> {
               decidingLegDarts: entry.decidingLegDarts,
               decidingLegsPlayed: entry.decidingLegsPlayed,
               decidingLegsWon: entry.decidingLegsWon,
+              won9Darters: entry.won9Darters,
               won12Darters: entry.won12Darters,
               won15Darters: entry.won15Darters,
               won18Darters: entry.won18Darters,
@@ -1226,6 +1231,7 @@ class _MatchScreenState extends State<MatchScreen> {
                   decidingLegDarts: entry.decidingLegDarts,
                   decidingLegsPlayed: entry.decidingLegsPlayed,
                   decidingLegsWon: entry.decidingLegsWon,
+                  won9Darters: entry.won9Darters,
                   won12Darters: entry.won12Darters,
                   won15Darters: entry.won15Darters,
                   won18Darters: entry.won18Darters,
@@ -1804,59 +1810,57 @@ class _MatchScreenState extends State<MatchScreen> {
             constraints: const BoxConstraints(maxWidth: 430),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
-              child: Column(
+              child: Stack(
                 children: <Widget>[
-                  _buildTopBar(),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final maxHeight = constraints.maxHeight;
-                        final compactLayout = maxHeight < 620;
-                        final spacing = compactLayout ? 10.0 : 12.0;
-                        final inputHeight = compactLayout ? 388.0 : 432.0;
-                        final minInfoHeight = compactLayout ? 58.0 : 72.0;
-                        final preferredInfoHeight = compactLayout ? 72.0 : 88.0;
-                        final statsPanelHeight = _showScoreStats
-                            ? (compactLayout ? 156.0 : 184.0)
-                            : 44.0;
-                        final scoreMinHeight =
-                            (compactLayout ? 120.0 : 146.0) + statsPanelHeight;
-                        final remainingAfterInput =
-                            maxHeight - inputHeight - (spacing * 2);
-                        final infoHeight = remainingAfterInput <= scoreMinHeight
-                            ? minInfoHeight
-                            : (remainingAfterInput - scoreMinHeight)
-                                .clamp(minInfoHeight, preferredInfoHeight)
-                                .toDouble();
-                        final scoreHeight =
-                            (maxHeight - inputHeight - infoHeight - (spacing * 2))
-                                .clamp(scoreMinHeight, maxHeight)
-                                .toDouble();
+                  Column(
+                    children: <Widget>[
+                      _buildTopBar(),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final maxHeight = constraints.maxHeight;
+                            final compactLayout = maxHeight < 620;
+                            final spacing = compactLayout ? 10.0 : 12.0;
+                            final participantCount = _participants.length;
+                            final additionalPlayers = participantCount > 1
+                                ? participantCount - 1
+                                : 0;
+                            final scoreMinHeight = (compactLayout ? 176.0 : 204.0) +
+                                (additionalPlayers * (compactLayout ? 60.0 : 72.0));
+                            final inputMinHeight = compactLayout ? 358.0 : 404.0;
+                            final maxScoreHeight =
+                                (maxHeight - inputMinHeight - spacing)
+                                    .clamp(compactLayout ? 148.0 : 176.0, maxHeight)
+                                    .toDouble();
+                            final scoreHeight = scoreMinHeight <= maxScoreHeight
+                                ? scoreMinHeight
+                                : maxScoreHeight;
 
-                        return Column(
-                          children: <Widget>[
-                            SizedBox(
-                              height: scoreHeight,
-                              child: _buildScoreZone(compact: compactLayout),
-                            ),
-                            SizedBox(height: spacing),
-                            SizedBox(
-                              height: inputHeight,
-                              child: _buildInputZone(compact: compactLayout),
-                            ),
-                            SizedBox(height: spacing),
-                            Expanded(
-                              child: SizedBox(
-                                height: infoHeight,
-                                child: _buildInfoZone(compact: compactLayout),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                            return Column(
+                              children: <Widget>[
+                                SizedBox(
+                                  height: scoreHeight,
+                                  child: _buildScoreZone(compact: compactLayout),
+                                ),
+                                SizedBox(height: spacing),
+                                Expanded(
+                                  child: _buildInputZone(compact: compactLayout),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
+                  if (_showVisitLogOverlay)
+                    Positioned(
+                      top: 56,
+                      left: MediaQuery.sizeOf(context).width < 520 ? 0 : null,
+                      right: 0,
+                      child: _buildVisitLogOverlay(),
+                    ),
                 ],
               ),
             ),
@@ -1869,17 +1873,18 @@ class _MatchScreenState extends State<MatchScreen> {
   Widget _buildBullOffView() {
     final currentParticipant = _currentBullOffParticipant;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _buildTopBar(),
-        const SizedBox(height: 12),
-        Expanded(
-          child: _buildSurface(
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _buildTopBar(),
+          const SizedBox(height: 12),
+          _buildSurface(
             color: Colors.white,
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
                   'Ausbullen',
@@ -1898,7 +1903,7 @@ class _MatchScreenState extends State<MatchScreen> {
                         height: 1.4,
                       ),
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -1933,8 +1938,8 @@ class _MatchScreenState extends State<MatchScreen> {
                     );
                   }).toList(),
                 ),
-                const Spacer(),
                 if (currentParticipant != null) ...<Widget>[
+                  const SizedBox(height: 20),
                   Text(
                     '${currentParticipant.config.name} ist dran',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -1950,7 +1955,7 @@ class _MatchScreenState extends State<MatchScreen> {
                           color: const Color(0xFF5E6E7D),
                         ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 16),
                   if (currentParticipant.config.isHuman)
                     Column(
                       children: <Widget>[
@@ -1980,15 +1985,18 @@ class _MatchScreenState extends State<MatchScreen> {
                       ],
                     )
                   else
-                    const Center(
-                      child: CircularProgressIndicator(),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
                     ),
                 ],
               ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2041,6 +2049,21 @@ class _MatchScreenState extends State<MatchScreen> {
             ],
           ),
         ),
+        const SizedBox(width: 8),
+        IconButton.filledTonal(
+          tooltip: 'Matchverlauf',
+          onPressed: () {
+            setState(() {
+              _showVisitLogOverlay = !_showVisitLogOverlay;
+            });
+          },
+          icon: Icon(
+            _showVisitLogOverlay
+                ? Icons.history_toggle_off_rounded
+                : Icons.history_rounded,
+          ),
+        ),
+        const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -2084,8 +2107,6 @@ class _MatchScreenState extends State<MatchScreen> {
           Expanded(
             child: _buildPrimaryScoreboard(),
           ),
-          SizedBox(height: compact ? 8 : 10),
-          _buildScoreStatsPanel(compact: compact),
         ],
       ),
     );
@@ -2111,20 +2132,64 @@ class _MatchScreenState extends State<MatchScreen> {
     );
   }
 
-  Widget _buildInfoZone({required bool compact}) {
-    return _buildSurface(
-      color: const Color(0xFFEAF0F4),
-      padding: EdgeInsets.fromLTRB(
-        14,
-        compact ? 10 : 12,
-        14,
-        compact ? 10 : 12,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(child: _buildVisitLogContent()),
-        ],
+  Widget _buildVisitLogOverlay() {
+    final screenSize = MediaQuery.sizeOf(context);
+    final isNarrow = screenSize.width < 520;
+    final overlayWidth = isNarrow
+        ? (screenSize.width - 48).clamp(260.0, 380.0).toDouble()
+        : 320.0;
+    final overlayMaxHeight =
+        (screenSize.height * (isNarrow ? 0.42 : 0.36)).clamp(230.0, 360.0).toDouble();
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: overlayWidth,
+        constraints: BoxConstraints(maxHeight: overlayMaxHeight),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x1F000000),
+              blurRadius: 18,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Matchverlauf',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF152C45),
+                        ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _showVisitLogOverlay = false;
+                    });
+                  },
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Flexible(
+              child: _buildVisitLogContent(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2133,25 +2198,46 @@ class _MatchScreenState extends State<MatchScreen> {
       SettingsRepository.instance.settings.x01QuickScores;
 
   String? _checkoutSuggestionSummary() {
+    return _participantRouteSuggestion(_currentParticipant);
+  }
+
+  String? _participantRouteSuggestion(_ParticipantRuntime participant) {
     if (_matchFinished ||
         _isBullOffActive ||
-        !_currentParticipant.hasOpenedLeg ||
-        _currentParticipant.score <= 1) {
+        !participant.hasOpenedLeg ||
+        participant.score <= 1) {
       return null;
     }
 
     final finishRoute = _bestCheckoutSuggestionRoute(
-      score: _currentParticipant.score,
+      score: participant.score,
       dartsLeft: 3,
     );
+    if (finishRoute != null && finishRoute.isNotEmpty) {
+      final routeText = finishRoute.take(3).map((entry) => entry.label).join(' - ');
+      return '$routeText -> Finish';
+    }
+
+    if (participant.score > 230) {
+      final setupOption = _bestSetupSuggestionRoute(
+        score: participant.score,
+        dartsLeft: 3,
+      );
+      if (setupOption != null && setupOption.setupRoute.isNotEmpty) {
+        final routeText =
+            setupOption.setupRoute.take(3).map((entry) => entry.label).join(' - ');
+        return '$routeText -> Rest ${setupOption.remainingScore}';
+      }
+    }
+
     final continuation = finishRoute == null
         ? _checkoutPlanner.bestContinuationPlan(
-            score: _currentParticipant.score,
+            score: participant.score,
             dartsLeft: 3,
             checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-            playStyle: CheckoutPlayStyle.balanced,
-            outerBullPreference: 50,
-            bullPreference: 50,
+            playStyle: _suggestionPlayStyle,
+            outerBullPreference: _suggestionOuterBullPreference,
+            bullPreference: _suggestionBullPreference,
           )
         : null;
 
@@ -2159,7 +2245,16 @@ class _MatchScreenState extends State<MatchScreen> {
     if (route == null || route.isEmpty) {
       return null;
     }
-    return route.take(3).map((entry) => entry.label).join(' - ');
+    final routeText = route.take(3).map((entry) => entry.label).join(' - ');
+    final resultingScore = participant.score -
+        route.take(3).fold<int>(
+          0,
+          (sum, entry) => sum + entry.scoredPoints,
+        );
+    final outcomeText = resultingScore <= 0
+        ? 'Finish'
+        : 'Rest $resultingScore';
+    return '$routeText -> $outcomeText';
   }
 
   Widget _buildPadMetaTile({
@@ -2302,14 +2397,55 @@ class _MatchScreenState extends State<MatchScreen> {
     required int score,
     required int dartsLeft,
   }) {
-    return _checkoutPlanner.bestFinishRoute(
+    final finishes = _checkoutPlanner.allCheckoutRoutes(
       score: score,
       dartsLeft: dartsLeft,
       checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-      playStyle: CheckoutPlayStyle.balanced,
-      outerBullPreference: 50,
-      bullPreference: 50,
+      playStyle: _suggestionPlayStyle,
     );
+    if (finishes.isEmpty) {
+      return null;
+    }
+
+    final rankedRoutes = finishes
+        .map(
+          (route) => (
+            route: route,
+            score: _checkoutPlanner.scoreRoute(
+              route: route,
+              startScore: score,
+              totalDarts: dartsLeft,
+              checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+              playStyle: _suggestionPlayStyle,
+              outerBullPreference: _suggestionOuterBullPreference,
+              bullPreference: _suggestionBullPreference,
+            ),
+          ),
+        )
+        .toList()
+      ..sort((left, right) => right.score.compareTo(left.score));
+    return rankedRoutes.first.route;
+  }
+
+  CheckoutSetupLeaveOption? _bestSetupSuggestionRoute({
+    required int score,
+    required int dartsLeft,
+  }) {
+    final options = _checkoutPlanner.setupLeaveOptions(
+      startScore: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      playStyle: _suggestionPlayStyle,
+      leavePreference: _suggestionSetupPreference,
+      outerBullPreference: _suggestionOuterBullPreference,
+      bullPreference: _suggestionBullPreference,
+      maxResults: 1,
+      maxResultsPerNarrowCount: 20,
+    );
+    if (options.isEmpty) {
+      return null;
+    }
+    return options.first;
   }
 
   Widget _buildSurface({
@@ -2336,32 +2472,44 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 
   Widget _buildPrimaryScoreboard() {
-    return Column(
-      children: _participants
-          .asMap()
-          .entries
-          .map(
-            (entry) => Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                decoration: BoxDecoration(
-                  border: entry.key == _participants.length - 1
-                      ? null
-                      : const Border(
-                          bottom: BorderSide(
-                            color: Color(0xFF2C4967),
+    final orderedParticipants = _participants.length <= 1 || _matchFinished
+        ? List<_ParticipantRuntime>.from(_participants)
+        : <_ParticipantRuntime>[
+            ..._participants.skip(_currentTurnIndex),
+            ..._participants.take(_currentTurnIndex),
+          ];
+    return Scrollbar(
+      thumbVisibility: orderedParticipants.length > 1,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.only(right: 4, bottom: 6),
+        child: Column(
+          children: orderedParticipants
+              .asMap()
+              .entries
+              .map(
+                (entry) => Container(
+                  padding: EdgeInsets.symmetric(
+                    vertical: orderedParticipants.length > 1 ? 6 : 8,
+                  ),
+                  decoration: BoxDecoration(
+                    border: entry.key == orderedParticipants.length - 1
+                        ? null
+                        : const Border(
+                            bottom: BorderSide(
+                              color: Color(0xFF2C4967),
+                            ),
                           ),
-                        ),
+                  ),
+                  child: _buildParticipantScoreCard(
+                    participant: entry.value,
+                    isActive: !_matchFinished &&
+                        _currentParticipant.config.id == entry.value.config.id,
+                  ),
                 ),
-                child: _buildParticipantScoreCard(
-                  participant: entry.value,
-                  isActive: !_matchFinished &&
-                      _currentParticipant.config.id == entry.value.config.id,
-                ),
-              ),
-            ),
-          )
-          .toList(),
+              )
+              .toList(),
+        ),
+      ),
     );
   }
 
@@ -2369,125 +2517,143 @@ class _MatchScreenState extends State<MatchScreen> {
     required _ParticipantRuntime participant,
     required bool isActive,
   }) {
-    return Row(
+    final compactCard = _participants.length > 1;
+    final routeSuggestion = _participantRouteSuggestion(participant);
+    final isExpanded = _expandedParticipantStats.contains(participant.config.id);
+    final primaryStats = <_PlayerStatItem>[
+      _PlayerStatItem(
+        label: 'Avg',
+        value: participant.average.toStringAsFixed(1),
+        description:
+            '3-Dart Average: durchschnittlich erzielte Punkte pro 3 Darts.',
+      ),
+      _PlayerStatItem(
+        label: 'CO',
+        value: '${participant.doubleQuote.toStringAsFixed(0)}%',
+        description:
+            'Checkout Quote: Anteil erfolgreich verwandelter Doppel-Chancen.',
+      ),
+    ];
+    final detailedStats = _buildDetailedStats(participant);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Container(
-          width: 10,
-          height: 54,
-          decoration: BoxDecoration(
-            color: isActive ? const Color(0xFF5BC0FF) : const Color(0xFF35516E),
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Text(
-                participant.config.name,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: 10,
+              height: compactCard ? 48 : 54,
+              margin: const EdgeInsets.only(top: 2),
+              decoration: BoxDecoration(
+                color: isActive ? const Color(0xFF5BC0FF) : const Color(0xFF35516E),
+                borderRadius: BorderRadius.circular(999),
               ),
-              const SizedBox(height: 4),
-              Text(
-                widget.session.matchConfig.mode == MatchMode.sets
-                    ? '${participant.sets} Sets | ${participant.legs} Legs'
-                    : '${participant.legs} Legs',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFFBBD1E4),
-                    ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            '${participant.score}',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: Colors.white,
-                ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPlayerStatPill({
-    required String label,
-    required String value,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: const Color(0xFF26425E),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$label $value',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: const Color(0xFFD6E4EF),
-              fontWeight: FontWeight.w700,
-              fontSize: 10,
             ),
-      ),
-    );
-  }
-
-  Widget _buildScoreStatsPanel({required bool compact}) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      width: double.infinity,
-      padding: EdgeInsets.fromLTRB(12, 10, 12, _showScoreStats ? 12 : 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF203C58),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () {
-              setState(() {
-                _showScoreStats = !_showScoreStats;
-              });
-            },
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        participant.config.name,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      ...primaryStats.map(
+                        (item) => _buildInteractiveStatChip(
+                          item: item,
+                          backgroundColor: const Color(0xFF26425E),
+                          foregroundColor: const Color(0xFFD6E4EF),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.session.matchConfig.mode == MatchMode.sets
+                        ? '${participant.sets} Sets | ${participant.legs} Legs'
+                        : '${participant.legs} Legs',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFFBBD1E4),
+                        ),
+                  ),
+                  if (routeSuggestion != null) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      routeSuggestion,
+                      maxLines: compactCard ? 1 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: isActive
+                                ? const Color(0xFF8FD4FF)
+                                : const Color(0xFF9AB6CD),
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${participant.score}',
+                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                    ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            setState(() {
+              if (isExpanded) {
+                _expandedParticipantStats.remove(participant.config.id);
+              } else {
+                _expandedParticipantStats.add(participant.config.id);
+              }
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: compactCard ? 8 : 10,
+              vertical: compactCard ? 6 : 8,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFF203C58),
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Row(
               children: <Widget>[
-                const Icon(
-                  Icons.query_stats_rounded,
-                  color: Color(0xFFD6E4EF),
-                  size: 18,
-                ),
-                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Live-Statistiken',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Colors.white,
+                    compactCard
+                        ? (isExpanded ? 'Stats ausblenden' : 'Stats einblenden')
+                        : (isExpanded
+                            ? 'Alle Statistiken ausblenden'
+                            : 'Alle Statistiken einblenden'),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFFD6E4EF),
                           fontWeight: FontWeight.w700,
                         ),
                   ),
                 ),
-                Text(
-                  _showScoreStats ? 'Ausblenden' : 'Einblenden',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: const Color(0xFFBBD1E4),
-                      ),
-                ),
-                const SizedBox(width: 6),
                 Icon(
-                  _showScoreStats
+                  isExpanded
                       ? Icons.keyboard_arrow_up_rounded
                       : Icons.keyboard_arrow_down_rounded,
                   color: const Color(0xFFD6E4EF),
@@ -2495,96 +2661,336 @@ class _MatchScreenState extends State<MatchScreen> {
               ],
             ),
           ),
-          if (_showScoreStats) ...<Widget>[
-            const SizedBox(height: 10),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: compact ? 110 : 138,
+        ),
+        if (isExpanded) ...<Widget>[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: detailedStats
+                .map(
+                  (item) => _buildInteractiveStatChip(
+                    item: item,
+                    backgroundColor: const Color(0xFF26425E),
+                    foregroundColor: const Color(0xFFD6E4EF),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildInteractiveStatChip({
+    required _PlayerStatItem item,
+    required Color backgroundColor,
+    required Color foregroundColor,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () => _showStatInfo(item),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          '${item.label} ${item.value}',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: foregroundColor,
+                fontWeight: FontWeight.w700,
+                fontSize: 10,
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: _participants.map((participant) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              participant.config.name,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: <Widget>[
-                                _buildPlayerStatPill(
-                                  label: 'Avg',
-                                  value: participant.average.toStringAsFixed(1),
-                                ),
-                                _buildPlayerStatPill(
-                                  label: 'PPD',
-                                  value: participant.dartsThrown <= 0
-                                      ? '0.00'
-                                      : (participant.pointsScored /
-                                              participant.dartsThrown)
-                                          .toStringAsFixed(2),
-                                ),
-                                _buildPlayerStatPill(
-                                  label: 'Last',
-                                  value: _latestVisitTextFor(participant),
-                                ),
-                                _buildPlayerStatPill(
-                                  label: 'F9',
-                                  value: participant.firstNineAverage
-                                      .toStringAsFixed(1),
-                                ),
-                                _buildPlayerStatPill(
-                                  label: 'CO',
-                                  value:
-                                      '${participant.doubleQuote.toStringAsFixed(0)}%',
-                                ),
-                                _buildPlayerStatPill(
-                                  label: 'HF',
-                                  value: '${participant.highestFinish}',
-                                ),
-                                _buildPlayerStatPill(
-                                  label: '100+',
-                                  value: '${participant.scores100Plus}',
-                                ),
-                                _buildPlayerStatPill(
-                                  label: '140+',
-                                  value: '${participant.scores140Plus}',
-                                ),
-                                _buildPlayerStatPill(
-                                  label: '171+',
-                                  value: '${participant.scores171Plus}',
-                                ),
-                                _buildPlayerStatPill(
-                                  label: '180',
-                                  value: '${participant.scores180}',
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
+        ),
+      ),
+    );
+  }
+
+  List<_PlayerStatItem> _buildDetailedStats(_ParticipantRuntime participant) {
+    return <_PlayerStatItem>[
+      _PlayerStatItem(
+        label: 'PPD',
+        value: participant.dartsThrown <= 0
+            ? '0.00'
+            : (participant.pointsScored / participant.dartsThrown)
+                .toStringAsFixed(2),
+        description: 'Points per Dart: durchschnittliche Punkte pro geworfenem Dart.',
+      ),
+      _PlayerStatItem(
+        label: 'PPR',
+        value: participant.visits <= 0
+            ? '0.0'
+            : (participant.pointsScored / participant.visits).toStringAsFixed(1),
+        description:
+            'Points per Round: durchschnittliche Punkte pro Aufnahme bzw. Besuch.',
+      ),
+      _PlayerStatItem(
+        label: 'F9',
+        value: participant.firstNineAverage.toStringAsFixed(1),
+        description:
+            'First 9 Average: Durchschnitt der ersten neun Darts pro Leg.',
+      ),
+      _PlayerStatItem(
+        label: 'CO1',
+        value: _formatPercent(
+          participant.checkoutAttempts1Dart <= 0
+              ? 0
+              : (participant.successfulCheckouts1Dart /
+                      participant.checkoutAttempts1Dart) *
+                  100,
+        ),
+        description:
+            'Checkout Quote 1 Dart: Erfolgsquote bei Checkouts mit genau einem Dart.',
+      ),
+      _PlayerStatItem(
+        label: 'CO2',
+        value: _formatPercent(
+          participant.checkoutAttempts2Dart <= 0
+              ? 0
+              : (participant.successfulCheckouts2Dart /
+                      participant.checkoutAttempts2Dart) *
+                  100,
+        ),
+        description:
+            'Checkout Quote 2 Darts: Erfolgsquote bei Checkouts mit genau zwei Darts.',
+      ),
+      _PlayerStatItem(
+        label: 'CO3',
+        value: _formatPercent(
+          participant.checkoutAttempts3Dart <= 0
+              ? 0
+              : (participant.successfulCheckouts3Dart /
+                      participant.checkoutAttempts3Dart) *
+                  100,
+        ),
+        description:
+            'Checkout Quote 3 Darts: Erfolgsquote bei Checkouts mit genau drei Darts.',
+      ),
+      _PlayerStatItem(
+        label: 'HF',
+        value: '${participant.highestFinish}',
+        description: 'Highest Finish: höchstes erfolgreiches Checkout-Finish.',
+      ),
+      _PlayerStatItem(
+        label: 'BL',
+        value: '${participant.bestLegDarts}',
+        description: 'Best Leg: bestes gewonnenes Leg gemessen in Darts.',
+      ),
+      _PlayerStatItem(
+        label: 'LW',
+        value: '${participant.totalLegsWon}',
+        description: 'Legs Won: insgesamt gewonnene Legs im Match.',
+      ),
+      _PlayerStatItem(
+        label: '100+',
+        value: '${participant.scores100Plus}',
+        description: 'Anzahl aller Aufnahmen mit mindestens 100 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: '140+',
+        value: '${participant.scores140Plus}',
+        description: 'Anzahl aller Aufnahmen mit mindestens 140 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: '171+',
+        value: '${participant.scores171Plus}',
+        description: 'Anzahl aller Aufnahmen mit mindestens 171 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: '180',
+        value: '${participant.scores180}',
+        description: 'Anzahl geworfener 180er.',
+      ),
+      _PlayerStatItem(
+        label: '180/L',
+        value: participant.legsPlayed <= 0
+            ? '0.00'
+            : (participant.scores180 / participant.legsPlayed).toStringAsFixed(2),
+        description: '180s per Leg: 180er im Schnitt pro gespieltem Leg.',
+      ),
+      _PlayerStatItem(
+        label: 'DRT',
+        value: '${participant.dartsThrown}',
+        description: 'Darts Thrown: insgesamt geworfene Darts.',
+      ),
+      _PlayerStatItem(
+        label: 'VIS',
+        value: '${participant.visits}',
+        description: 'Visits: insgesamt gespielte Aufnahmen bzw. Besuche.',
+      ),
+      _PlayerStatItem(
+        label: 'LSt',
+        value: '${participant.legsStarted}',
+        description: 'Legs Started: Anzahl der begonnenen Legs.',
+      ),
+      _PlayerStatItem(
+        label: 'LWS',
+        value: '${participant.legsWonAsStarter}',
+        description: 'Legs Won as Starter: gewonnene Legs mit Anwurf.',
+      ),
+      _PlayerStatItem(
+        label: 'LWNS',
+        value: '${participant.legsWonWithoutStarter}',
+        description: 'Legs Won No Start: gewonnene Legs ohne Anwurf.',
+      ),
+      _PlayerStatItem(
+        label: 'WTA',
+        value: participant.withThrowDarts <= 0
+            ? '0.0'
+            : ((participant.withThrowPoints / participant.withThrowDarts) * 3)
+                .toStringAsFixed(1),
+        description: 'With Throw Average: Average in Legs, die der Spieler begonnen hat.',
+      ),
+      _PlayerStatItem(
+        label: 'ATA',
+        value: participant.againstThrowDarts <= 0
+            ? '0.0'
+            : ((participant.againstThrowPoints / participant.againstThrowDarts) * 3)
+                .toStringAsFixed(1),
+        description:
+            'Against Throw Average: Average in Legs ohne eigenen Anwurf.',
+      ),
+      _PlayerStatItem(
+        label: 'DLA',
+        value: participant.decidingLegDarts <= 0
+            ? '0.0'
+            : ((participant.decidingLegPoints / participant.decidingLegDarts) * 3)
+                .toStringAsFixed(1),
+        description:
+            'Deciding Leg Average: Average in entscheidenden Legs.',
+      ),
+      _PlayerStatItem(
+        label: 'DLW%',
+        value: _formatPercent(
+          participant.decidingLegsPlayed <= 0
+              ? 0
+              : (participant.decidingLegsWon / participant.decidingLegsPlayed) *
+                  100,
+        ),
+        description:
+            'Deciding Legs Won: Gewinnquote in entscheidenden Legs.',
+      ),
+      _PlayerStatItem(
+        label: '12D%',
+        value: _formatPercent(
+          participant.totalLegsWon <= 0
+              ? 0
+              : (participant.won12Darters / participant.totalLegsWon) * 100,
+        ),
+        description:
+            '12-Darter Quote: Anteil gewonnener Legs in 12 Darts oder besser.',
+      ),
+      _PlayerStatItem(
+        label: '15D%',
+        value: _formatPercent(
+          participant.totalLegsWon <= 0
+              ? 0
+              : (participant.won15Darters / participant.totalLegsWon) * 100,
+        ),
+        description:
+            '15-Darter Quote: Anteil gewonnener Legs in 15 Darts oder besser.',
+      ),
+      _PlayerStatItem(
+        label: '18D%',
+        value: _formatPercent(
+          participant.totalLegsWon <= 0
+              ? 0
+              : (participant.won18Darters / participant.totalLegsWon) * 100,
+        ),
+        description:
+            '18-Darter Quote: Anteil gewonnener Legs in 18 Darts oder besser.',
+      ),
+      _PlayerStatItem(
+        label: '3DC%',
+        value: _formatPercent(
+          participant.thirdDartCheckoutAttempts <= 0
+              ? 0
+              : (participant.thirdDartCheckouts /
+                      participant.thirdDartCheckoutAttempts) *
+                  100,
+        ),
+        description:
+            '3rd Dart Checkout Quote: Quote der Checkouts mit dem letzten Dart der Hand.',
+      ),
+      _PlayerStatItem(
+        label: 'Bull%',
+        value: _formatPercent(
+          participant.bullCheckoutAttempts <= 0
+              ? 0
+              : (participant.bullCheckouts / participant.bullCheckoutAttempts) *
+                  100,
+        ),
+        description:
+            'Bull Checkout Quote: Erfolgsquote bei Bull-Finishes.',
+      ),
+      _PlayerStatItem(
+        label: 'FD%',
+        value: _formatPercent(
+          participant.functionalDoubleAttempts <= 0
+              ? 0
+              : (participant.functionalDoubleSuccesses /
+                      participant.functionalDoubleAttempts) *
+                  100,
+        ),
+        description:
+            'Functional Doubles Quote: sinnvolle Doppelchancen, die erfolgreich genutzt wurden.',
+      ),
+      _PlayerStatItem(
+        label: 'AvgF',
+        value: participant.successfulCheckouts <= 0
+            ? '0.0'
+            : (participant.totalFinishValue / participant.successfulCheckouts)
+                .toStringAsFixed(1),
+        description:
+            'Average Finish: durchschnittlicher Wert erfolgreicher Checkouts.',
+      ),
+      _PlayerStatItem(
+        label: '0-40',
+        value: '${participant.scores0To40}',
+        description: 'Anzahl der Aufnahmen im Segment von 0 bis 40 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: '41-59',
+        value: '${participant.scores41To59}',
+        description: 'Anzahl der Aufnahmen im Segment von 41 bis 59 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: '60+',
+        value: '${participant.scores60Plus}',
+        description: 'Anzahl der Aufnahmen mit mindestens 60 Punkten.',
+      ),
+      _PlayerStatItem(
+        label: 'Pts',
+        value: '${participant.pointsScored}',
+        description: 'Gesamtsumme aller erzielten Punkte im Match.',
+      ),
+      _PlayerStatItem(
+        label: 'Last',
+        value: _latestVisitTextFor(participant),
+        description: 'Zuletzt eingetragene Aufnahme dieses Spielers.',
+      ),
+    ];
+  }
+
+  String _formatPercent(double value) => '${value.toStringAsFixed(0)}%';
+
+  void _showStatInfo(_PlayerStatItem item) {
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(item.label),
+          content: Text(item.description),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
             ),
           ],
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -2854,14 +3260,19 @@ class _MatchScreenState extends State<MatchScreen> {
       itemCount: _visitLog.length,
       itemBuilder: (context, index) {
         final reversedIndex = _visitLog.length - 1 - index;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 6),
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF4F7FA),
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: Text(
             _visitLog[reversedIndex],
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            softWrap: true,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: const Color(0xFF344657),
+                  height: 1.25,
                 ),
           ),
         );

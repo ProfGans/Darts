@@ -42,6 +42,42 @@ class CareerPlayerHistoryEntry {
   final int money;
 }
 
+class CareerPlayerMatchHistoryEntry {
+  const CareerPlayerMatchHistoryEntry({
+    required this.seasonNumber,
+    required this.tournamentName,
+    required this.roundLabel,
+    required this.opponentName,
+    required this.resultLabel,
+    required this.scoreText,
+    required this.average,
+  });
+
+  final int seasonNumber;
+  final String tournamentName;
+  final String roundLabel;
+  final String opponentName;
+  final String resultLabel;
+  final String scoreText;
+  final double average;
+}
+
+class CareerNineDarterRecord {
+  const CareerNineDarterRecord({
+    required this.seasonNumber,
+    required this.tournamentName,
+    required this.roundLabel,
+    required this.opponentName,
+    required this.scoreText,
+  });
+
+  final int seasonNumber;
+  final String tournamentName;
+  final String roundLabel;
+  final String opponentName;
+  final String scoreText;
+}
+
 class CareerPlayerHistorySummary {
   const CareerPlayerHistorySummary({
     required this.playerId,
@@ -61,6 +97,8 @@ class CareerPlayerHistorySummary {
     required this.entries,
     required this.typeTitleCounts,
     required this.x01Stats,
+    required this.nineDarterRecords,
+    required this.matchHistoryEntries,
     required this.availableSeasons,
     required this.selectedSeasonNumber,
   });
@@ -82,6 +120,8 @@ class CareerPlayerHistorySummary {
   final List<CareerPlayerHistoryEntry> entries;
   final Map<String, int> typeTitleCounts;
   final CareerX01PlayerStats x01Stats;
+  final List<CareerNineDarterRecord> nineDarterRecords;
+  final List<CareerPlayerMatchHistoryEntry> matchHistoryEntries;
   final List<int> availableSeasons;
   final int? selectedSeasonNumber;
 }
@@ -179,6 +219,8 @@ class CareerStatisticsEngine {
     var seasonMoney = 0;
     final entries = <CareerPlayerHistoryEntry>[];
     final typeTitleCounts = <String, int>{};
+    final nineDarterRecords = <CareerNineDarterRecord>[];
+    final matchHistoryEntries = <CareerPlayerMatchHistoryEntry>[];
     var x01Stats = const CareerX01PlayerStats();
     final availableSeasons = completedTournaments
         .map((entry) => entry.seasonNumber)
@@ -197,9 +239,60 @@ class CareerStatisticsEngine {
       final exactMoney = tournament.playerPayouts[playerId];
       final exactLabel = tournament.playerResultLabels[playerId];
       final tournamentX01Stats = tournament.playerX01Stats[playerId];
+      final tournamentMatchHistory = tournament.matchHistoryEvents
+          .where((entry) => entry.playerId == playerId)
+          .toList();
 
       if (includeTournament && tournamentX01Stats != null) {
         x01Stats = x01Stats.add(tournamentX01Stats);
+      }
+      if (includeTournament) {
+        for (final matchEntry in tournamentMatchHistory) {
+          matchHistoryEntries.add(
+            CareerPlayerMatchHistoryEntry(
+              seasonNumber: matchEntry.seasonNumber,
+              tournamentName: matchEntry.tournamentName,
+              roundLabel: matchEntry.roundLabel,
+              opponentName: matchEntry.opponentName,
+              resultLabel: matchEntry.resultLabel,
+              scoreText: matchEntry.scoreText,
+              average: matchEntry.average,
+            ),
+          );
+        }
+      }
+      var exactNineDarterEventsForTournament = 0;
+      if (includeTournament) {
+        for (final event in tournament.nineDarterEvents) {
+          if (event.playerId != playerId) {
+            continue;
+          }
+          exactNineDarterEventsForTournament += 1;
+          nineDarterRecords.add(
+            CareerNineDarterRecord(
+              seasonNumber: event.seasonNumber,
+              tournamentName: event.tournamentName,
+              roundLabel: event.roundLabel,
+              opponentName: event.opponentName,
+              scoreText: event.scoreText,
+            ),
+          );
+        }
+        if (tournamentX01Stats != null &&
+            exactNineDarterEventsForTournament == 0 &&
+            tournamentX01Stats.won9Darters <= 0 &&
+            tournamentX01Stats.bestLegDarts == 9) {
+          nineDarterRecords.add(
+            CareerNineDarterRecord(
+              seasonNumber: tournament.seasonNumber,
+              tournamentName: tournament.name,
+              roundLabel: 'Runde unbekannt',
+              opponentName: 'Gegner unbekannt',
+              scoreText: '',
+            ),
+          );
+          x01Stats = x01Stats.copyWith(won9Darters: x01Stats.won9Darters + 1);
+        }
       }
 
       if (tournament.winnerId == playerId) {
@@ -330,6 +423,28 @@ class CareerStatisticsEngine {
       }
       return left.tournamentName.compareTo(right.tournamentName);
     });
+    nineDarterRecords.sort((left, right) {
+      final seasonCompare = right.seasonNumber.compareTo(left.seasonNumber);
+      if (seasonCompare != 0) {
+        return seasonCompare;
+      }
+      final tournamentCompare = left.tournamentName.compareTo(right.tournamentName);
+      if (tournamentCompare != 0) {
+        return tournamentCompare;
+      }
+      return left.roundLabel.compareTo(right.roundLabel);
+    });
+    matchHistoryEntries.sort((left, right) {
+      final seasonCompare = right.seasonNumber.compareTo(left.seasonNumber);
+      if (seasonCompare != 0) {
+        return seasonCompare;
+      }
+      final tournamentCompare = left.tournamentName.compareTo(right.tournamentName);
+      if (tournamentCompare != 0) {
+        return tournamentCompare;
+      }
+      return left.roundLabel.compareTo(right.roundLabel);
+    });
 
     return CareerPlayerHistorySummary(
       playerId: playerId,
@@ -349,6 +464,8 @@ class CareerStatisticsEngine {
       entries: entries,
       typeTitleCounts: typeTitleCounts,
       x01Stats: x01Stats,
+      nineDarterRecords: nineDarterRecords,
+      matchHistoryEntries: matchHistoryEntries,
       availableSeasons: availableSeasons.reversed.toList(),
       selectedSeasonNumber: filterMode == CareerHistoryFilterMode.specificSeason
           ? seasonNumber

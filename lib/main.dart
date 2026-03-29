@@ -8,6 +8,20 @@ import 'data/app_bootstrap.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.addTimingsCallback((timings) {
+    for (final timing in timings) {
+      final totalMilliseconds =
+          timing.totalSpan.inMilliseconds;
+      if (totalMilliseconds < 40) {
+        continue;
+      }
+      AppDebug.instance.logSlowFrame(
+        totalMilliseconds: totalMilliseconds,
+        buildMilliseconds: timing.buildDuration.inMilliseconds,
+        rasterMilliseconds: timing.rasterDuration.inMilliseconds,
+      );
+    }
+  });
   FlutterError.onError = (details) {
     AppDebug.instance.error(
       'Flutter',

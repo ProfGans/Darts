@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import '../../data/debug/app_debug.dart';
 import '../board/board_geometry.dart';
 import '../x01/checkout_planner.dart';
 import '../x01/x01_models.dart';
@@ -49,18 +50,6 @@ class _LeaveCandidate {
   final int leavePreference;
 }
 
-class _SetupCandidate {
-  const _SetupCandidate({
-    required this.target,
-    required this.route,
-    required this.rest,
-  });
-
-  final DartThrowResult target;
-  final List<DartThrowResult> route;
-  final int rest;
-}
-
 class _ThrowModel {
   const _ThrowModel({
     required this.radialScale,
@@ -75,6 +64,51 @@ class _ThrowModel {
   final double radialBias;
   final double consistencySigma;
   final double pressureMultiplier;
+}
+
+class _BotPerfTotals {
+  int throwCount = 0;
+  int totalMicroseconds = 0;
+  int decideAimMicroseconds = 0;
+  int aimPointMicroseconds = 0;
+  int scatterPrepMicroseconds = 0;
+  int throwModelMicroseconds = 0;
+  int randomMicroseconds = 0;
+  int projectMicroseconds = 0;
+  int classifyMicroseconds = 0;
+
+  void reset() {
+    throwCount = 0;
+    totalMicroseconds = 0;
+    decideAimMicroseconds = 0;
+    aimPointMicroseconds = 0;
+    scatterPrepMicroseconds = 0;
+    throwModelMicroseconds = 0;
+    randomMicroseconds = 0;
+    projectMicroseconds = 0;
+    classifyMicroseconds = 0;
+  }
+
+  void record({
+    required int totalMicrosecondsValue,
+    required int decideAimMicrosecondsValue,
+    required int aimPointMicrosecondsValue,
+    required int scatterPrepMicrosecondsValue,
+    required int throwModelMicrosecondsValue,
+    required int randomMicrosecondsValue,
+    required int projectMicrosecondsValue,
+    required int classifyMicrosecondsValue,
+  }) {
+    throwCount += 1;
+    totalMicroseconds += totalMicrosecondsValue;
+    decideAimMicroseconds += decideAimMicrosecondsValue;
+    aimPointMicroseconds += aimPointMicrosecondsValue;
+    scatterPrepMicroseconds += scatterPrepMicrosecondsValue;
+    throwModelMicroseconds += throwModelMicrosecondsValue;
+    randomMicroseconds += randomMicrosecondsValue;
+    projectMicroseconds += projectMicrosecondsValue;
+    classifyMicroseconds += classifyMicrosecondsValue;
+  }
 }
 
 class BotEngine {
@@ -100,6 +134,8 @@ class BotEngine {
       <String, DartThrowResult?>{};
   final Map<String, DartThrowResult?> _inVisitSetupTargetCache =
       <String, DartThrowResult?>{};
+  final Map<String, List<DartThrowResult>?> _preferredSetupRouteCache =
+      <String, List<DartThrowResult>?>{};
   final Map<int, DartThrowResult?> _preferredLeaveTargetCache =
       <int, DartThrowResult?>{};
   final Map<int, int> _leavePreferenceCache = <int, int>{};
@@ -107,71 +143,130 @@ class BotEngine {
   final Map<String, List<List<DartThrowResult>>> _checkoutRoutesCache =
       <String, List<List<DartThrowResult>>>{};
   final Map<String, double> _theoreticalAverageCache = <String, double>{};
+  final Map<String, BoardPoint> _aimPointCache = <String, BoardPoint>{};
+  final Map<String, _ThrowModel> _throwModelCache = <String, _ThrowModel>{};
+  final Map<String, BotAimDecision> _aimDecisionCache = <String, BotAimDecision>{};
   final List<DartThrowResult> _allThrows = const X01Rules().buildAllThrows();
+  final _BotPerfTotals _perfTotals = _BotPerfTotals();
+
+  void resetPerformanceTotals() {
+    _perfTotals.reset();
+  }
 
   BotAimDecision decideAim({
     required BotProfile profile,
     required int score,
     required int dartsRemaining,
   }) {
-    final preferredCheckout = findPreferredCheckout(
-      score: score,
-      dartsLeft: dartsRemaining,
-    );
-    if (preferredCheckout != null && preferredCheckout.isNotEmpty) {
-      return BotAimDecision(
-        target: preferredCheckout.first,
-        reason: 'Preferred checkout',
-        route: preferredCheckout,
-      );
-    }
-
-    final setupTarget = findPreferredSetupTarget(
-      score: score,
-      dartsLeft: dartsRemaining,
-    );
-    if (setupTarget != null) {
-      return BotAimDecision(
-        target: setupTarget,
-        reason: 'Preferred setup',
-      );
-    }
-
-    if (score > 170) {
-      return BotAimDecision(
-        target: rules.createTriple(20),
-        reason: 'Maximum scoring',
-      );
+    final cacheKey = '$score|$dartsRemaining|${score == 50 && profile.finishingSkill >= 350 ? 1 : 0}';
+    final cached = _aimDecisionCache[cacheKey];
+    if (cached != null) {
+      return cached;
     }
 
     if (score == 50) {
       final target = profile.finishingSkill >= 350
           ? rules.createBull()
           : rules.createOuterBull();
-      return BotAimDecision(
+      final decision = BotAimDecision(
         target: target,
         reason: 'Bull finish decision',
       );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
     }
 
     if (score <= 40 && score.isEven) {
-      return BotAimDecision(
+      final decision = BotAimDecision(
         target: rules.createDouble(score ~/ 2),
         reason: 'Direct double finish',
       );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
     }
 
     if (score <= 20) {
-      return BotAimDecision(
+      final decision = BotAimDecision(
         target: rules.createSingle((score - 1).clamp(0, 20)),
         reason: 'Avoid bogey finish',
       );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
     }
 
-    return BotAimDecision(
+    if (dartsRemaining == 1 && score > 40) {
+      final leaveTarget =
+          findPreferredLeaveTarget(score) ??
+          rules.createSingle((score - 2).clamp(0, 20));
+      final decision = BotAimDecision(
+        target: leaveTarget,
+        reason: 'Preferred leave',
+      );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
+    }
+
+    if (score > 170) {
+      final continuation = checkoutPlanner.bestContinuationPlan(
+        score: score,
+        dartsLeft: dartsRemaining,
+        checkoutRequirement: CheckoutRequirement.doubleOut,
+        playStyle: CheckoutPlayStyle.balanced,
+        outerBullPreference: 50,
+        bullPreference: 50,
+      );
+      if (continuation != null && continuation.throws.isNotEmpty) {
+        final decision = BotAimDecision(
+          target: continuation.throws.first,
+          reason: 'Preferred continuation',
+          route: continuation.throws,
+        );
+        _aimDecisionCache[cacheKey] = decision;
+        return decision;
+      }
+
+      final decision = BotAimDecision(
+        target: rules.createTriple(20),
+        reason: 'Maximum scoring',
+      );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
+    }
+
+    final preferredCheckout = findPreferredCheckout(
+      score: score,
+      dartsLeft: dartsRemaining,
+    );
+    if (preferredCheckout != null && preferredCheckout.isNotEmpty) {
+      final decision = BotAimDecision(
+        target: preferredCheckout.first,
+        reason: 'Preferred checkout',
+        route: preferredCheckout,
+      );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
+    }
+
+    final setupRoute = findPreferredSetupRoute(
+      score: score,
+      dartsLeft: dartsRemaining,
+    );
+    if (setupRoute != null && setupRoute.isNotEmpty) {
+      final decision = BotAimDecision(
+        target: setupRoute.first,
+        reason: 'Preferred setup',
+        route: setupRoute,
+      );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
+    }
+
+    final decision = BotAimDecision(
       target: rules.createSingle((score - 2).clamp(0, 20)),
       reason: 'Default leave choice',
     );
+    _aimDecisionCache[cacheKey] = decision;
+    return decision;
   }
 
   double getCheckoutCommitChance(BotProfile profile) {
@@ -220,7 +315,7 @@ class BotEngine {
     required DartThrowResult target,
   }) {
     final radiusFactor = boardGeometry.radialFactorForPoint(
-      boardGeometry.aimPointForThrow(target),
+      _aimPointForThrow(target),
     );
     final pressure = score <= 80
         ? 1.08
@@ -250,7 +345,7 @@ class BotEngine {
     required DartThrowResult target,
   }) {
     final radiusFactor = boardGeometry.radialFactorForPoint(
-      boardGeometry.aimPointForThrow(target),
+      _aimPointForThrow(target),
     );
     final pressure = score <= 80 ? 1.1 : 1.02;
     final baseRadius = getScoringBaseRadius(
@@ -298,11 +393,13 @@ class BotEngine {
     required BotProfile profile,
     Random? random,
   }) {
+    final decideAimStopwatch = Stopwatch()..start();
     final decision = decideAim(
       profile: profile,
       score: score,
       dartsRemaining: dartsLeft,
     );
+    decideAimStopwatch.stop();
     return simulateTargetThrow(
       target: decision.target,
       score: score,
@@ -310,6 +407,7 @@ class BotEngine {
       random: random,
       reason: decision.reason,
       plannedRoute: decision.route,
+      precomputedAimDecisionMicroseconds: decideAimStopwatch.elapsedMicroseconds,
     );
   }
 
@@ -320,33 +418,60 @@ class BotEngine {
     Random? random,
     String reason = '',
     List<DartThrowResult> plannedRoute = const <DartThrowResult>[],
+    int precomputedAimDecisionMicroseconds = 0,
   }) {
+    final totalStopwatch = Stopwatch()..start();
     final activeRandom = random ?? Random();
-    final targetPoint = boardGeometry.aimPointForThrow(target);
+    final aimPointStopwatch = Stopwatch()..start();
+    final targetPoint = _aimPointForThrow(target);
+    aimPointStopwatch.stop();
+    final scatterPrepStopwatch = Stopwatch()..start();
     final baseScatterRadius = getScatterRadius(
       profile: profile,
       score: score,
       target: target,
     );
+    scatterPrepStopwatch.stop();
+    final throwModelStopwatch = Stopwatch()..start();
     final model = _buildThrowModel(
       profile: profile,
       score: score,
       target: target,
     );
+    throwModelStopwatch.stop();
+    final randomStopwatch = Stopwatch()..start();
     final jitter = (1 + (_nextGaussian(activeRandom) * model.consistencySigma))
         .clamp(0.72, 1.38);
     final scatterRadius = baseScatterRadius * model.pressureMultiplier * jitter;
     final sample = _randomUnitSample(activeRandom);
+    randomStopwatch.stop();
+    final projectStopwatch = Stopwatch()..start();
     final hitPoint = _projectScatterPoint(
       targetPoint: targetPoint,
       scatterRadius: scatterRadius,
       sample: sample,
       model: model,
     );
+    projectStopwatch.stop();
+    final classifyStopwatch = Stopwatch()..start();
     final hit = boardGeometry.classifyBoardPoint(
       hitPoint.x,
       hitPoint.y,
       rules: rules,
+    );
+    classifyStopwatch.stop();
+    totalStopwatch.stop();
+    final totalWithAimMicroseconds =
+        totalStopwatch.elapsedMicroseconds + precomputedAimDecisionMicroseconds;
+    _recordPerformanceSample(
+      totalMicroseconds: totalWithAimMicroseconds,
+      decideAimMicroseconds: precomputedAimDecisionMicroseconds,
+      aimPointMicroseconds: aimPointStopwatch.elapsedMicroseconds,
+      scatterPrepMicroseconds: scatterPrepStopwatch.elapsedMicroseconds,
+      throwModelMicroseconds: throwModelStopwatch.elapsedMicroseconds,
+      randomMicroseconds: randomStopwatch.elapsedMicroseconds,
+      projectMicroseconds: projectStopwatch.elapsedMicroseconds,
+      classifyMicroseconds: classifyStopwatch.elapsedMicroseconds,
     );
     return BotThrowSimulation(
       target: target,
@@ -357,6 +482,58 @@ class BotEngine {
       reason: reason,
       plannedRoute: plannedRoute,
     );
+  }
+
+  void _recordPerformanceSample({
+    required int totalMicroseconds,
+    required int decideAimMicroseconds,
+    required int aimPointMicroseconds,
+    required int scatterPrepMicroseconds,
+    required int throwModelMicroseconds,
+    required int randomMicroseconds,
+    required int projectMicroseconds,
+    required int classifyMicroseconds,
+  }) {
+    _perfTotals.record(
+      totalMicrosecondsValue: totalMicroseconds,
+      decideAimMicrosecondsValue: decideAimMicroseconds,
+      aimPointMicrosecondsValue: aimPointMicroseconds,
+      scatterPrepMicrosecondsValue: scatterPrepMicroseconds,
+      throwModelMicrosecondsValue: throwModelMicroseconds,
+      randomMicrosecondsValue: randomMicroseconds,
+      projectMicrosecondsValue: projectMicroseconds,
+      classifyMicrosecondsValue: classifyMicroseconds,
+    );
+    if (_perfTotals.throwCount % 50000 != 0) {
+      return;
+    }
+    final otherMicroseconds =
+        (_perfTotals.totalMicroseconds -
+                _perfTotals.decideAimMicroseconds -
+                _perfTotals.aimPointMicroseconds -
+                _perfTotals.scatterPrepMicroseconds -
+                _perfTotals.throwModelMicroseconds -
+                _perfTotals.randomMicroseconds -
+                _perfTotals.projectMicroseconds -
+                _perfTotals.classifyMicroseconds)
+            .clamp(0, 1 << 62);
+    AppDebug.instance.info(
+      'Performance',
+      'Bot-Kern ${_perfTotals.throwCount} Wuerfe | '
+      'Gesamt ${_formatPerfMs(_perfTotals.totalMicroseconds)} ms | '
+      'Aim ${_formatPerfMs(_perfTotals.decideAimMicroseconds)} ms | '
+      'AimPoint ${_formatPerfMs(_perfTotals.aimPointMicroseconds)} ms | '
+      'Scatter ${_formatPerfMs(_perfTotals.scatterPrepMicroseconds)} ms | '
+      'Model ${_formatPerfMs(_perfTotals.throwModelMicroseconds)} ms | '
+      'Random ${_formatPerfMs(_perfTotals.randomMicroseconds)} ms | '
+      'Project ${_formatPerfMs(_perfTotals.projectMicroseconds)} ms | '
+      'Classify ${_formatPerfMs(_perfTotals.classifyMicroseconds)} ms | '
+      'Rest ${_formatPerfMs(otherMicroseconds)} ms',
+    );
+  }
+
+  String _formatPerfMs(int microseconds) {
+    return (microseconds / 1000.0).toStringAsFixed(1);
   }
 
   double estimateScoringAverage(BotProfile profile) {
@@ -451,9 +628,9 @@ class BotEngine {
     );
     final profileAnchorAverage = _estimateProfileAnchorAverage(profile);
     final orderingBias = _buildOrderingBias(profile);
-    return ((structuralAverage * 0.74) +
-            (simulatedAverage * 0.04) +
-            (profileAnchorAverage * 0.22) +
+    return ((structuralAverage * 0.45) +
+            (simulatedAverage * 0.38) +
+            (profileAnchorAverage * 0.17) +
             orderingBias)
         .clamp(0, 180)
         .toDouble();
@@ -465,8 +642,8 @@ class BotEngine {
   }) {
     var grandTotalScored = 0;
     var grandTotalDarts = 0;
-    const passes = 4;
-    const legsToSimulate = 24;
+    const passes = 5;
+    const legsToSimulate = 28;
 
     for (var pass = 0; pass < passes; pass += 1) {
       final seededRandom = _SeededRandom('$cacheKey|$pass');
@@ -557,7 +734,7 @@ class BotEngine {
 
   String getTheoreticalAverageCacheKey(BotProfile profile) {
     return <String>[
-      'v3',
+      'v11b',
       'board-geometry-2',
       profile.skill.round().toString(),
       profile.finishingSkill.round().toString(),
@@ -598,34 +775,20 @@ class BotEngine {
       return null;
     }
 
-    final inVisit = findInVisitSetupTarget(score: score, dartsLeft: dartsLeft);
-    if (inVisit != null) {
-      _preferredSetupTargetCache[cacheKey] = inVisit;
-      return inVisit;
-    }
-
-    if (score > 170 && dartsLeft > 1) {
-      final continuation = checkoutPlanner.bestContinuationPlan(
-        score: score,
-        dartsLeft: dartsLeft,
-      );
-      if (continuation != null && continuation.throws.isNotEmpty) {
-        final continuationTarget = continuation.throws.first;
-        _preferredSetupTargetCache[cacheKey] = continuationTarget;
-        return continuationTarget;
-      }
+    final setupRoute = findPreferredSetupRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+    );
+    if (setupRoute != null && setupRoute.isNotEmpty) {
+      final target = setupRoute.first;
+      _preferredSetupTargetCache[cacheKey] = target;
+      return target;
     }
 
     if (dartsLeft == 1 || score > 170) {
       final leaveTarget = findPreferredLeaveTarget(score);
       _preferredSetupTargetCache[cacheKey] = leaveTarget;
       return leaveTarget;
-    }
-
-    if (score >= 62) {
-      final setupThrow = rules.findSetupThrow(score);
-      _preferredSetupTargetCache[cacheKey] = setupThrow;
-      return setupThrow;
     }
 
     _preferredSetupTargetCache[cacheKey] = null;
@@ -646,40 +809,66 @@ class BotEngine {
       return null;
     }
 
-    final candidates = <_SetupCandidate>[];
-    for (final dartThrow in _allThrows) {
-      if (dartThrow.scoredPoints <= 0 || dartThrow.isBull) {
-        continue;
-      }
-
-      final rest = score - dartThrow.scoredPoints;
-      if (rest < 2) {
-        continue;
-      }
-
-      final tail = findPreferredCheckout(score: rest, dartsLeft: dartsLeft - 1);
-      if (tail == null || tail.isEmpty) {
-        continue;
-      }
-
-      candidates.add(
-        _SetupCandidate(
-          target: dartThrow,
-          route: <DartThrowResult>[dartThrow, ...tail],
-          rest: rest,
-        ),
-      );
-    }
-
-    if (candidates.isEmpty) {
+    final setupRoute = findPreferredSetupRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+    );
+    if (setupRoute == null || setupRoute.isEmpty) {
       _inVisitSetupTargetCache[cacheKey] = null;
       return null;
     }
 
-    candidates.sort(_compareSetupCandidates);
-    final best = candidates.first.target;
+    final best = setupRoute.first;
     _inVisitSetupTargetCache[cacheKey] = best;
     return best;
+  }
+
+  List<DartThrowResult>? findPreferredSetupRoute({
+    required int score,
+    required int dartsLeft,
+  }) {
+    final cacheKey = '$score|$dartsLeft';
+    if (_preferredSetupRouteCache.containsKey(cacheKey)) {
+      return _preferredSetupRouteCache[cacheKey];
+    }
+
+    if (dartsLeft <= 1 || score <= 1 || score > 170) {
+      _preferredSetupRouteCache[cacheKey] = null;
+      return null;
+    }
+
+    final route = _bestPlannerSetupRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+    );
+    if (route == null || route.isEmpty) {
+      _preferredSetupRouteCache[cacheKey] = null;
+      return null;
+    }
+
+    _preferredSetupRouteCache[cacheKey] = route;
+    return route;
+  }
+
+  List<DartThrowResult>? _bestPlannerSetupRoute({
+    required int score,
+    required int dartsLeft,
+  }) {
+    final options = checkoutPlanner.setupLeaveOptions(
+      startScore: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: CheckoutRequirement.doubleOut,
+      playStyle: CheckoutPlayStyle.balanced,
+      leavePreference: 85,
+      outerBullPreference: 50,
+      bullPreference: 50,
+      maxResults: 1,
+      maxResultsPerNarrowCount: 20,
+    );
+    if (options.isEmpty) {
+      return null;
+    }
+    return options.first.setupRoute;
   }
 
   DartThrowResult? findPreferredLeaveTarget(int score) {
@@ -895,7 +1084,7 @@ class BotEngine {
     required double scatterRadius,
     required int score,
   }) {
-    final targetPoint = boardGeometry.aimPointForThrow(target);
+    final targetPoint = _aimPointForThrow(target);
     final model = _buildThrowModel(
       profile: profile,
       score: score,
@@ -929,7 +1118,7 @@ class BotEngine {
       return 1;
     }
 
-    final targetPoint = boardGeometry.aimPointForThrow(target);
+    final targetPoint = _aimPointForThrow(target);
     final model = _buildThrowModel(
       profile: profile,
       score: score,
@@ -953,66 +1142,6 @@ class BotEngine {
       }
     }
     return hits / _circleSamplePattern.length;
-  }
-
-  int _compareCheckoutRoutes(
-    List<DartThrowResult> a,
-    List<DartThrowResult> b,
-  ) {
-    final aNarrow = countNarrowFields(a);
-    final bNarrow = countNarrowFields(b);
-    if (aNarrow != bNarrow) {
-      return aNarrow - bNarrow;
-    }
-
-    if (a.length != b.length) {
-      return a.length - b.length;
-    }
-
-    final aBullPenalty = getBullPenalty(a);
-    final bBullPenalty = getBullPenalty(b);
-    if (aBullPenalty != bBullPenalty) {
-      return aBullPenalty - bBullPenalty;
-    }
-
-    final aFinish = getFinishPreference(a.last);
-    final bFinish = getFinishPreference(b.last);
-    if (aFinish != bFinish) {
-      return bFinish - aFinish;
-    }
-
-    final aSetup = getSetupPreference(a);
-    final bSetup = getSetupPreference(b);
-    if (aSetup != bSetup) {
-      return bSetup - aSetup;
-    }
-
-    return b.first.scoredPoints - a.first.scoredPoints;
-  }
-
-  int _compareSetupCandidates(_SetupCandidate a, _SetupCandidate b) {
-    final routeComparison = _compareCheckoutRoutes(a.route, b.route);
-    if (routeComparison != 0) {
-      return routeComparison;
-    }
-
-    final leaveComparison = _compareLeaveCandidates(
-      _LeaveCandidate(
-        target: a.target,
-        rest: a.rest,
-        leavePreference: getLeavePreference(a.rest),
-      ),
-      _LeaveCandidate(
-        target: b.target,
-        rest: b.rest,
-        leavePreference: getLeavePreference(b.rest),
-      ),
-    );
-    if (leaveComparison != 0) {
-      return leaveComparison;
-    }
-
-    return b.target.scoredPoints - a.target.scoredPoints;
   }
 
   int _compareLeaveCandidates(_LeaveCandidate a, _LeaveCandidate b) {
@@ -1040,6 +1169,19 @@ class BotEngine {
     required int score,
     required DartThrowResult target,
   }) {
+    final cacheKey = <String>[
+      target.label,
+      score.toString(),
+      profile.skill.toString(),
+      profile.finishingSkill.toString(),
+      profile.radiusCalibrationPercent.toString(),
+      profile.simulationSpreadPercent.toString(),
+    ].join('|');
+    final cached = _throwModelCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+
     final skillNorm = profile.skill.clamp(1, 1000) / 1000;
     final finishNorm = profile.finishingSkill.clamp(1, 1000) / 1000;
     final accuracyNorm = isCheckoutField(target) ? finishNorm : skillNorm;
@@ -1086,13 +1228,15 @@ class BotEngine {
     final consistencySigma =
         (0.24 - consistencyNorm * 0.14).clamp(0.06, 0.2).toDouble();
 
-    return _ThrowModel(
+    final model = _ThrowModel(
       radialScale: radialScale,
       tangentialScale: tangentialScale,
       radialBias: radialBias,
       consistencySigma: consistencySigma,
       pressureMultiplier: pressureMultiplier,
     );
+    _throwModelCache[cacheKey] = model;
+    return model;
   }
 
   BoardPoint _projectScatterPoint({
@@ -1133,6 +1277,13 @@ class BotEngine {
     final u1 = max(random.nextDouble(), 1e-9);
     final u2 = random.nextDouble();
     return sqrt(-2 * log(u1)) * cos(2 * pi * u2);
+  }
+
+  BoardPoint _aimPointForThrow(DartThrowResult target) {
+    return _aimPointCache.putIfAbsent(
+      target.label,
+      () => boardGeometry.aimPointForThrow(target),
+    );
   }
 }
 

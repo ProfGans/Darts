@@ -955,11 +955,21 @@ class PlayerProfileStats {
   }
 
   static PlayerProfileStats fromJson(Map<String, dynamic> json) {
+    final pointsScored = (json['pointsScored'] as num?)?.toInt() ?? 0;
+    final dartsThrown = (json['dartsThrown'] as num?)?.toInt() ?? 0;
+    final legsPlayed = (json['legsPlayed'] as num?)?.toInt() ?? 0;
+    final normalizedFirstNine = _normalizeFirstNineSample(
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
+      legsPlayed: legsPlayed,
+      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
+      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+    );
     return PlayerProfileStats(
-      pointsScored: (json['pointsScored'] as num?)?.toInt() ?? 0,
-      dartsThrown: (json['dartsThrown'] as num?)?.toInt() ?? 0,
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
       visits: (json['visits'] as num?)?.toInt() ?? 0,
-      legsPlayed: (json['legsPlayed'] as num?)?.toInt() ?? 0,
+      legsPlayed: legsPlayed,
       legsWon: (json['legsWon'] as num?)?.toInt() ?? 0,
       legsStarted: (json['legsStarted'] as num?)?.toInt() ?? 0,
       legsWonAsStarter: (json['legsWonAsStarter'] as num?)?.toInt() ?? 0,
@@ -995,8 +1005,8 @@ class PlayerProfileStats {
           (json['hundredPlusCheckouts'] as num?)?.toInt() ?? 0,
       firstThreePoints: (json['firstThreePoints'] as num?)?.toDouble() ?? 0,
       firstThreeDarts: (json['firstThreeDarts'] as num?)?.toInt() ?? 0,
-      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
-      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+      firstNinePoints: normalizedFirstNine.points,
+      firstNineDarts: normalizedFirstNine.darts,
       highestFinish: (json['highestFinish'] as num?)?.toInt() ?? 0,
       bestLegDarts: (json['bestLegDarts'] as num?)?.toInt() ?? 0,
       totalFinishValue: (json['totalFinishValue'] as num?)?.toInt() ?? 0,
@@ -1012,6 +1022,29 @@ class PlayerProfileStats {
       won15Darters: (json['won15Darters'] as num?)?.toInt() ?? 0,
       won18Darters: (json['won18Darters'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  static ({double points, int darts}) _normalizeFirstNineSample({
+    required int pointsScored,
+    required int dartsThrown,
+    required int legsPlayed,
+    required double firstNinePoints,
+    required int firstNineDarts,
+  }) {
+    final safePoints = firstNinePoints < 0 ? 0.0 : firstNinePoints;
+    final safeDarts = firstNineDarts < 0 ? 0 : firstNineDarts;
+    final maxFirstNineDarts = legsPlayed <= 0
+        ? dartsThrown
+        : ((legsPlayed * 9) < dartsThrown ? (legsPlayed * 9) : dartsThrown);
+    final legacyTotalSample = safeDarts == dartsThrown &&
+        safePoints == pointsScored.toDouble() &&
+        dartsThrown > maxFirstNineDarts;
+    final impossibleSample =
+        safeDarts > maxFirstNineDarts || safePoints > pointsScored;
+    if (legacyTotalSample || impossibleSample) {
+      return (points: 0.0, darts: 0);
+    }
+    return (points: safePoints, darts: safeDarts);
   }
 
   static PlayerProfileStats fromMatchParticipantStats(
@@ -1170,6 +1203,8 @@ class PlayerProfile {
     this.isProtected = false,
     this.age,
     this.nationality,
+    this.favoriteDouble,
+    this.hatedDouble,
     this.tags = const <String>[],
     this.notes,
     this.matchesPlayed = 0,
@@ -1195,6 +1230,8 @@ class PlayerProfile {
   final bool isProtected;
   final int? age;
   final String? nationality;
+  final String? favoriteDouble;
+  final String? hatedDouble;
   final List<String> tags;
   final String? notes;
   final int matchesPlayed;
@@ -1225,6 +1262,10 @@ class PlayerProfile {
     bool clearAge = false,
     String? nationality,
     bool clearNationality = false,
+    String? favoriteDouble,
+    bool clearFavoriteDouble = false,
+    String? hatedDouble,
+    bool clearHatedDouble = false,
     List<String>? tags,
     String? notes,
     bool clearNotes = false,
@@ -1252,6 +1293,9 @@ class PlayerProfile {
       isProtected: isProtected ?? this.isProtected,
       age: clearAge ? null : age ?? this.age,
       nationality: clearNationality ? null : nationality ?? this.nationality,
+      favoriteDouble:
+          clearFavoriteDouble ? null : favoriteDouble ?? this.favoriteDouble,
+      hatedDouble: clearHatedDouble ? null : hatedDouble ?? this.hatedDouble,
       tags: tags ?? this.tags,
       notes: clearNotes ? null : notes ?? this.notes,
       matchesPlayed: matchesPlayed ?? this.matchesPlayed,
@@ -1282,6 +1326,8 @@ class PlayerProfile {
       'isProtected': isProtected,
       'age': age,
       'nationality': nationality,
+      'favoriteDouble': favoriteDouble,
+      'hatedDouble': hatedDouble,
       'tags': tags,
       'notes': notes,
       'matchesPlayed': matchesPlayed,
@@ -1323,6 +1369,12 @@ class PlayerProfile {
       age: (json['age'] as num?)?.toInt(),
       nationality:
           rawNationality == null || rawNationality.isEmpty ? null : rawNationality,
+      favoriteDouble: (json['favoriteDouble'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (json['favoriteDouble'] as String?)?.trim(),
+      hatedDouble: (json['hatedDouble'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (json['hatedDouble'] as String?)?.trim(),
       tags: parsedTags,
       notes: (json['notes'] as String?)?.trim().isEmpty ?? true
           ? null

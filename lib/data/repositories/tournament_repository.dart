@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../background/background_task_runner.dart';
 import '../debug/app_debug.dart';
 import '../../domain/career/career_models.dart';
+import '../../domain/rankings/ranking_engine.dart';
 import '../../domain/tournament/tournament_engine.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
@@ -20,18 +23,32 @@ class TournamentRepository extends ChangeNotifier {
   static final TournamentRepository instance = TournamentRepository._();
 
   static const _storageKey = 'tournament_state';
+  static const int _maxArchiveEntries = 160;
+  static const int _maxCareerArchiveEntries = 96;
 
   final TournamentEngine _engine = TournamentEngine();
   TournamentBracket? _currentBracket;
   CareerTournamentContext? _careerContext;
   final List<TournamentArchiveEntry> _archive = <TournamentArchiveEntry>[];
+  final List<TournamentComputerSelectionPreset> _savedComputerSelections =
+      <TournamentComputerSelectionPreset>[];
+  bool _simulationInProgress = false;
+  String _simulationProgressLabel = '';
+  double? _simulationProgress;
 
   TournamentBracket? get currentBracket => _currentBracket;
   CareerTournamentContext? get careerContext => _careerContext;
   bool get isCareerTournament => _careerContext != null;
   bool get hasActiveTournament => _currentBracket != null;
+  bool get simulationInProgress => _simulationInProgress;
+  String get simulationProgressLabel => _simulationProgressLabel;
+  double? get simulationProgress => _simulationProgress;
   List<TournamentArchiveEntry> get archive =>
       List<TournamentArchiveEntry>.unmodifiable(_archive);
+  List<TournamentComputerSelectionPreset> get savedComputerSelections =>
+      List<TournamentComputerSelectionPreset>.unmodifiable(
+        _savedComputerSelections,
+      );
 
   Future<void> initialize() async {
     final json = await AppStorage.instance.readJsonMap(_storageKey);
@@ -57,8 +74,21 @@ class TournamentRepository extends ChangeNotifier {
               (entry) => TournamentArchiveEntry.fromJson(
                 (entry as Map).cast<String, dynamic>(),
               ),
+            )
+            .map(_normalizeArchiveEntry),
+      );
+    _pruneArchive();
+    _savedComputerSelections
+      ..clear()
+      ..addAll(
+        (json['savedComputerSelections'] as List<dynamic>? ?? const <dynamic>[])
+            .map(
+              (entry) => TournamentComputerSelectionPreset.fromJson(
+                (entry as Map).cast<String, dynamic>(),
+              ),
             ),
       );
+    await _persist();
     notifyListeners();
   }
 
@@ -83,6 +113,7 @@ class TournamentRepository extends ChangeNotifier {
     int? computerOpponentCount,
     double? minimumComputerAverage,
     double? maximumComputerAverage,
+    List<String> selectedComputerIds = const <String>[],
   }) {
     final participants = <TournamentParticipant>[];
     final activePlayer = PlayerRepository.instance.activePlayer;
@@ -106,11 +137,40 @@ class TournamentRepository extends ChangeNotifier {
         minimumAverage <= maximumAverage ? minimumAverage : maximumAverage;
     final averageCeiling =
         minimumAverage <= maximumAverage ? maximumAverage : minimumAverage;
+    final computersById = <String, ComputerPlayer>{
+      for (final player in ComputerRepository.instance.players) player.id: player,
+    };
+    final addedSelectedComputerIds = <String>{};
 
-    for (var index = 0; index < desiredComputerCount; index += 1) {
+    for (final computerId in selectedComputerIds) {
+      if (addedSelectedComputerIds.length >= desiredComputerCount) {
+        break;
+      }
+      final computer = computersById[computerId];
+      if (computer == null || !addedSelectedComputerIds.add(computer.id)) {
+        continue;
+      }
+      participants.add(
+        TournamentParticipant(
+          id: computer.id,
+          name: computer.name,
+          type: TournamentParticipantType.computer,
+          average: computer.theoreticalAverage,
+          qualificationReason: 'Aus Datenbank gewaehlt',
+          botSkill: computer.skill,
+          botFinishingSkill: computer.finishingSkill,
+        ),
+      );
+    }
+
+    final generatedComputerCount = desiredComputerCount > addedSelectedComputerIds.length
+        ? desiredComputerCount - addedSelectedComputerIds.length
+        : 0;
+
+    for (var index = 0; index < generatedComputerCount; index += 1) {
       final targetAverage = _generatedTargetAverage(
         index: index,
-        totalCount: desiredComputerCount,
+        totalCount: generatedComputerCount,
         minimumAverage: averageFloor,
         maximumAverage: averageCeiling,
       );
@@ -157,12 +217,62 @@ class TournamentRepository extends ChangeNotifier {
     unawaited(_persist());
   }
 
+  Future<TournamentComputerSelectionPreset?> saveComputerSelectionPreset({
+    String? existingPresetId,
+    required String name,
+    required List<String> computerIds,
+  }) async {
+    final trimmedName = name.trim();
+    final normalizedIds = <String>[];
+    for (final id in computerIds) {
+      final trimmedId = id.trim();
+      if (trimmedId.isEmpty || normalizedIds.contains(trimmedId)) {
+        continue;
+      }
+      normalizedIds.add(trimmedId);
+    }
+    if (trimmedName.isEmpty || normalizedIds.isEmpty) {
+      return null;
+    }
+
+    final preset = TournamentComputerSelectionPreset(
+      id:
+          existingPresetId ??
+          'preset-${DateTime.now().microsecondsSinceEpoch}-${normalizedIds.length}',
+      name: trimmedName,
+      computerIds: normalizedIds,
+    );
+
+    final existingIndex = _savedComputerSelections.indexWhere(
+      (entry) => entry.id == preset.id,
+    );
+    if (existingIndex >= 0) {
+      _savedComputerSelections[existingIndex] = preset;
+    } else {
+      _savedComputerSelections.insert(0, preset);
+    }
+    notifyListeners();
+    await _persist();
+    return preset;
+  }
+
+  Future<void> deleteComputerSelectionPreset(String presetId) async {
+    _savedComputerSelections.removeWhere((entry) => entry.id == presetId);
+    notifyListeners();
+    await _persist();
+  }
+
   void createCareerTournament({
     required CareerDefinition career,
     required CareerCalendarItem item,
+    bool silent = false,
   }) {
     if (item.isLeagueSeriesItem) {
-      _createCareerLeagueSeriesTournament(career: career, item: item);
+      _createCareerLeagueSeriesTournament(
+        career: career,
+        item: item,
+        silent: silent,
+      );
       return;
     }
     final existingContext = _careerContext;
@@ -176,9 +286,16 @@ class TournamentRepository extends ChangeNotifier {
       'Turnier',
       'Karriere-Turnier "${item.name}" aufbauen',
     );
+    _logProcessMemory('vor Aufbau "${item.name}"');
+    final participantsStopwatch = Stopwatch()..start();
     final participants = _buildCareerParticipants(
       career: career,
       item: item,
+    );
+    participantsStopwatch.stop();
+    AppDebug.instance.info(
+      'Performance',
+      'Teilnehmeraufbau "${item.name}": ${participantsStopwatch.elapsedMilliseconds} ms',
     );
     if (participants.isEmpty) {
       AppDebug.instance.info(
@@ -188,12 +305,15 @@ class TournamentRepository extends ChangeNotifier {
       CareerRepository.instance.skipCurrentTournament(item: item);
       _currentBracket = null;
       _careerContext = null;
-      notifyListeners();
-      unawaited(_persist());
+      if (!silent) {
+        notifyListeners();
+        unawaited(_persist());
+      }
       action.complete('uebersprungen');
       return;
     }
 
+    final bracketStopwatch = Stopwatch()..start();
     _currentBracket = _engine.buildBracket(
       definition: TournamentDefinition(
         name: item.name,
@@ -217,19 +337,28 @@ class TournamentRepository extends ChangeNotifier {
       ),
       participants: participants,
     );
+    bracketStopwatch.stop();
+    AppDebug.instance.info(
+      'Performance',
+      'Bracket-Build "${item.name}": ${bracketStopwatch.elapsedMilliseconds} ms',
+    );
     _careerContext = CareerTournamentContext(
       careerId: career.id,
       seasonNumber: career.currentSeason.seasonNumber,
       calendarItem: item,
     );
-    notifyListeners();
-    unawaited(_persist());
+    if (!silent) {
+      notifyListeners();
+      unawaited(_persist());
+    }
     action.complete('${participants.length} Teilnehmer');
+    _logProcessMemory('nach Aufbau "${item.name}"');
   }
 
   void _createCareerLeagueSeriesTournament({
     required CareerDefinition career,
     required CareerCalendarItem item,
+    bool silent = false,
   }) {
     final existingContext = _careerContext;
     if (_currentBracket != null &&
@@ -251,8 +380,10 @@ class TournamentRepository extends ChangeNotifier {
       CareerRepository.instance.skipCurrentTournament(item: item);
       _currentBracket = null;
       _careerContext = null;
-      notifyListeners();
-      unawaited(_persist());
+      if (!silent) {
+        notifyListeners();
+        unawaited(_persist());
+      }
       return;
     }
     seriesState = _leagueSeriesState(
@@ -301,8 +432,10 @@ class TournamentRepository extends ChangeNotifier {
         CareerRepository.instance.skipCurrentTournament(item: item);
         _currentBracket = null;
         _careerContext = null;
-        notifyListeners();
-        unawaited(_persist());
+        if (!silent) {
+          notifyListeners();
+          unawaited(_persist());
+        }
         return;
       }
       nextBracket = TournamentBracket(
@@ -326,8 +459,10 @@ class TournamentRepository extends ChangeNotifier {
         CareerRepository.instance.skipCurrentTournament(item: item);
         _currentBracket = null;
         _careerContext = null;
-        notifyListeners();
-        unawaited(_persist());
+        if (!silent) {
+          notifyListeners();
+          unawaited(_persist());
+        }
         return;
       }
       nextBracket = TournamentBracket(
@@ -346,8 +481,10 @@ class TournamentRepository extends ChangeNotifier {
       seasonNumber: career.currentSeason.seasonNumber,
       calendarItem: item,
     );
-    notifyListeners();
-    unawaited(_persist());
+    if (!silent) {
+      notifyListeners();
+      unawaited(_persist());
+    }
   }
 
   void resolveHumanMatch({
@@ -469,12 +606,29 @@ class TournamentRepository extends ChangeNotifier {
     simulateRemainingMatches(includeHumanMatches: false);
   }
 
+  void simulateNextRound() {
+    final bracket = _currentBracket;
+    if (bracket == null || bracket.isCompleted) {
+      return;
+    }
+    final roundNumber = _nextPendingRoundNumber(bracket);
+    if (roundNumber == null) {
+      return;
+    }
+    _simulateRemainingCpuMatchesForRound(roundNumber);
+    notifyListeners();
+    unawaited(_persist());
+  }
+
   void simulateRemainingMatches({
     bool includeHumanMatches = false,
   }) {
     while (true) {
       final before = _currentBracket;
       if (before == null || before.isCompleted) {
+        break;
+      }
+      if (!includeHumanMatches && _shouldStopBeforeNextRound(before)) {
         break;
       }
       _simulateNextMatch(includeHumanMatches: includeHumanMatches);
@@ -486,6 +640,7 @@ class TournamentRepository extends ChangeNotifier {
 
   Future<void> simulateCurrentTournamentUntilComplete({
     bool includeHumanMatches = false,
+    bool emitProgressUpdates = true,
   }) async {
     final bracket = _currentBracket;
     if (bracket == null || bracket.isCompleted) {
@@ -496,46 +651,145 @@ class TournamentRepository extends ChangeNotifier {
       'Turnier',
       'Simulation "${bracket.definition.name}"',
     );
-    var workingBracket = bracket;
-    var simulatedMatches = 0;
-    const batchSize = 8;
-    while (!workingBracket.isCompleted) {
-      final nextBracket = _engine.simulateNextMatch(
-        bracket: workingBracket,
-        profileProvider: _profileForParticipant,
-        includeHumanMatches: includeHumanMatches,
+    final totalMatches = _countTotalMatches(bracket);
+    _setSimulationProgress(
+      inProgress: true,
+      label: 'Turnier wird vorbereitet: ${bracket.definition.name}',
+      progress: totalMatches == 0 ? null : 0,
+    );
+    _logProcessMemory('vor Simulation "${bracket.definition.name}"');
+    await Future<void>.delayed(Duration.zero);
+    final simulationResult =
+        _shouldPreferLowMemorySimulation(bracket: bracket)
+            ? await _simulateTournamentLowMemory(
+                bracket: bracket,
+                includeHumanMatches: includeHumanMatches,
+                emitProgressUpdates: emitProgressUpdates,
+                totalMatches: totalMatches,
+              )
+            : await BackgroundTaskRunner.instance.runJob<Map<String, Object?>>(
+                taskType: 'simulate_tournament',
+                initialLabel: 'Turnier wird simuliert: ${bracket.definition.name}',
+                payload: <String, Object?>{
+                  'bracket': bracket.toJson(),
+                  'profilesById': _serializedProfilesForBracket(bracket),
+                  'includeHumanMatches': includeHumanMatches,
+                },
+                onUpdate: (snapshot) {
+                  _setSimulationProgress(
+                    inProgress: snapshot.inProgress,
+                    label: snapshot.label,
+                    progress: snapshot.progress,
+                  );
+                },
+              );
+
+    final simulatedBracket = TournamentBracket.fromJson(
+      (simulationResult['bracket'] as Map).cast<String, dynamic>(),
+    );
+    final simulatedMatches =
+        (simulationResult['simulatedMatches'] as num?)?.toInt() ?? 0;
+    final stoppedForHumanMatch =
+        simulationResult['stoppedForHumanMatch'] as bool? ?? false;
+    final madeProgress = simulatedMatches > 0;
+
+    if (!madeProgress && !stoppedForHumanMatch) {
+      AppDebug.instance.error(
+        'Turnier',
+        'Turnier "${bracket.definition.name}" macht keinen Fortschritt mehr.',
       );
-      if (identical(nextBracket, workingBracket)) {
-        AppDebug.instance.error(
-          'Turnier',
-          'Turnier "${bracket.definition.name}" macht keinen Fortschritt mehr.',
-        );
-        action.fail('kein Fortschritt mehr');
+      action.fail('kein Fortschritt mehr');
+    }
+
+    _currentBracket = simulatedBracket;
+    AppDebug.instance.info(
+      'Turnier',
+      'Turnier "${simulatedBracket.definition.name}" abgeschlossen: ${simulatedBracket.isCompleted}.',
+    );
+    action.complete('$simulatedMatches Matches');
+    _logProcessMemory('nach Simulation "${simulatedBracket.definition.name}"');
+    if (emitProgressUpdates) {
+      notifyListeners();
+    }
+    await _persist();
+    _setSimulationProgress(
+      inProgress: true,
+      label: 'Turniersimulation abgeschlossen: ${simulatedBracket.definition.name}',
+      progress: 1,
+    );
+  }
+
+  bool _shouldPreferLowMemorySimulation({
+    required TournamentBracket bracket,
+  }) {
+    return true;
+  }
+
+  Future<Map<String, Object?>> _simulateTournamentLowMemory({
+    required TournamentBracket bracket,
+    required bool includeHumanMatches,
+    required bool emitProgressUpdates,
+    required int totalMatches,
+  }) async {
+    _engine.resetPerformanceTotals();
+    var workingBracket = bracket;
+    final profileProvider = _profileProviderForBracket(bracket);
+    var simulatedMatches = 0;
+    var batchSize = 1;
+    var stoppedForHumanMatch = false;
+
+    while (!workingBracket.isCompleted) {
+      if (!includeHumanMatches && _shouldStopBeforeNextRound(workingBracket)) {
+        stoppedForHumanMatch = true;
         break;
       }
-      workingBracket = nextBracket;
-      simulatedMatches += 1;
-      if (simulatedMatches == 1 || simulatedMatches % 8 == 0) {
-        AppDebug.instance.info(
-          'Turnier',
-          'Turnier "${bracket.definition.name}": $simulatedMatches Matches simuliert.',
-        );
+      final batchStopwatch = Stopwatch()..start();
+      final batch = _engine.simulateMatchesBatch(
+        bracket: workingBracket,
+        profileProvider: profileProvider,
+        includeHumanMatches: includeHumanMatches,
+        maxMatches: batchSize,
+      );
+      batchStopwatch.stop();
+      if (!batch.madeProgress) {
+        break;
       }
-      if (simulatedMatches % batchSize == 0) {
+      workingBracket = batch.bracket;
+      simulatedMatches += batch.simulatedMatches;
+      final completedMatches = _countCompletedMatchesLowMemory(workingBracket);
+      _setSimulationProgress(
+        inProgress: true,
+        label:
+            'Turnier wird simuliert: ${workingBracket.definition.name} ($completedMatches/$totalMatches Matches)',
+        progress: totalMatches == 0
+            ? null
+            : (completedMatches / totalMatches).clamp(0.0, 1.0).toDouble(),
+      );
+      if (emitProgressUpdates) {
         _currentBracket = workingBracket;
         notifyListeners();
-        await Future<void>.delayed(Duration.zero);
+      }
+      await Future<void>.delayed(Duration.zero);
+      final batchDurationMs = batchStopwatch.elapsedMilliseconds;
+      if (batchDurationMs >= 80) {
+        batchSize = 1;
+      } else if (batchDurationMs >= 40) {
+        batchSize = 2;
+      } else if (batchDurationMs >= 20) {
+        batchSize = 4;
+      } else if (batchDurationMs >= 10) {
+        batchSize = 6;
+      } else {
+        batchSize = 8;
       }
     }
 
-    _currentBracket = workingBracket;
-    AppDebug.instance.info(
-      'Turnier',
-      'Turnier "${workingBracket.definition.name}" abgeschlossen: ${workingBracket.isCompleted}.',
-    );
-    action.complete('$simulatedMatches Matches');
-    notifyListeners();
-    await _persist();
+    return <String, Object?>{
+      'bracket': workingBracket.toJson(),
+      'simulatedMatches': simulatedMatches,
+      'completed': workingBracket.isCompleted,
+      'stoppedForHumanMatch': stoppedForHumanMatch,
+    };
   }
 
   void _simulateNextMatch({
@@ -543,6 +797,9 @@ class TournamentRepository extends ChangeNotifier {
   }) {
     final bracket = _currentBracket;
     if (bracket == null) {
+      return;
+    }
+    if (!includeHumanMatches && _shouldStopBeforeNextRound(bracket)) {
       return;
     }
 
@@ -555,7 +812,9 @@ class TournamentRepository extends ChangeNotifier {
     unawaited(_persist());
   }
 
-  void commitCurrentCareerTournament() {
+  void commitCurrentCareerTournament({
+    bool silent = false,
+  }) {
     final bracket = _currentBracket;
     final context = _careerContext;
     if (bracket == null || context == null || !bracket.isCompleted) {
@@ -566,6 +825,12 @@ class TournamentRepository extends ChangeNotifier {
       'Turnier',
       'Karriere-Turnier committen',
     );
+    _setSimulationProgress(
+      inProgress: true,
+      label: 'Turnier wird uebernommen: ${context.calendarItem.name}',
+      progress: 1,
+    );
+    _logProcessMemory('vor Commit "${context.calendarItem.name}"');
 
     final career = CareerRepository.instance.activeCareer;
     if (career == null || career.id != context.careerId) {
@@ -574,6 +839,7 @@ class TournamentRepository extends ChangeNotifier {
     }
 
     if (context.calendarItem.isLeagueSeriesItem) {
+      final commitStopwatch = Stopwatch()..start();
       final seriesName = _leagueSeriesState(career, context.calendarItem.seriesGroupId!)?.baseName ??
           _baseNameForSeriesItem(context.calendarItem);
       CareerRepository.instance.completeLeagueSeriesRound(
@@ -584,6 +850,11 @@ class TournamentRepository extends ChangeNotifier {
         ),
         seriesName: seriesName,
       );
+      commitStopwatch.stop();
+      AppDebug.instance.info(
+        'Performance',
+        'Liga-Commit "${context.calendarItem.name}": ${commitStopwatch.elapsedMilliseconds} ms',
+      );
       AppDebug.instance.info(
         'Turnier',
         'Liga-Spieltag "${context.calendarItem.name}" wurde in die Karriere uebernommen.',
@@ -592,22 +863,38 @@ class TournamentRepository extends ChangeNotifier {
         TournamentArchiveEntry(
           id: 'archive-${DateTime.now().microsecondsSinceEpoch}',
           name: context.calendarItem.name,
-          bracket: bracket,
+          bracket: _lightweightArchiveBracket(bracket),
           careerId: context.careerId,
           seasonNumber: context.seasonNumber,
           calendarItemId: context.calendarItem.id,
         ),
       );
       _careerContext = null;
-      notifyListeners();
-      unawaited(_persist());
+      if (!silent) {
+        notifyListeners();
+        unawaited(_persist());
+      }
       action.complete(context.calendarItem.name);
+      _logProcessMemory(
+        'nach Liga-Commit "${context.calendarItem.name}" | Archiv ${_archive.length}',
+      );
+      _setSimulationProgress(
+        inProgress: false,
+        label: '',
+        progress: null,
+      );
       return;
     }
 
+    final commitStopwatch = Stopwatch()..start();
     CareerRepository.instance.completeCurrentTournament(
       item: context.calendarItem,
       bracket: bracket,
+    );
+    commitStopwatch.stop();
+    AppDebug.instance.info(
+      'Performance',
+      'Karriere-Commit "${bracket.definition.name}": ${commitStopwatch.elapsedMilliseconds} ms',
     );
     AppDebug.instance.info(
       'Turnier',
@@ -617,16 +904,26 @@ class TournamentRepository extends ChangeNotifier {
       TournamentArchiveEntry(
         id: 'archive-${DateTime.now().microsecondsSinceEpoch}',
         name: bracket.definition.name,
-        bracket: bracket,
+        bracket: _lightweightArchiveBracket(bracket),
         careerId: context.careerId,
         seasonNumber: context.seasonNumber,
         calendarItemId: context.calendarItem.id,
       ),
     );
     _careerContext = null;
-    notifyListeners();
-    unawaited(_persist());
+    if (!silent) {
+      notifyListeners();
+      unawaited(_persist());
+    }
     action.complete(context.calendarItem.name);
+    _logProcessMemory(
+      'nach Commit "${context.calendarItem.name}" | Archiv ${_archive.length}',
+    );
+    _setSimulationProgress(
+      inProgress: false,
+      label: '',
+      progress: null,
+    );
   }
 
   TournamentArchiveEntry? archiveForCareerItem({
@@ -642,6 +939,39 @@ class TournamentRepository extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  void clearSimulationProgress() {
+    _setSimulationProgress(
+      inProgress: false,
+      label: '',
+      progress: null,
+    );
+  }
+
+  int _countTotalMatches(TournamentBracket bracket) {
+    var count = 0;
+    for (final round in bracket.rounds) {
+      count += round.matches.length;
+    }
+    return count;
+  }
+
+  void _setSimulationProgress({
+    required bool inProgress,
+    required String label,
+    required double? progress,
+  }) {
+    final normalizedProgress = progress?.clamp(0.0, 1.0).toDouble();
+    if (_simulationInProgress == inProgress &&
+        _simulationProgressLabel == label &&
+        _simulationProgress == normalizedProgress) {
+      return;
+    }
+    _simulationInProgress = inProgress;
+    _simulationProgressLabel = label;
+    _simulationProgress = normalizedProgress;
+    notifyListeners();
   }
 
   List<TournamentParticipant> previewCareerParticipants({
@@ -670,6 +1000,10 @@ class TournamentRepository extends ChangeNotifier {
     required CareerCalendarItem item,
   }) {
     final pool = _careerPool(career);
+    final rankingsById = <String, CareerRankingDefinition>{
+      for (final ranking in career.rankings) ranking.id: ranking,
+    };
+    final standingsCache = <String, List<RankingStanding>>{};
     final orderedPool = pool.values.toList()
       ..sort((left, right) {
         if (left.type == TournamentParticipantType.human &&
@@ -732,6 +1066,7 @@ class TournamentRepository extends ChangeNotifier {
           pool: pool,
           orderedPool: orderedPool,
           rankingId: rankingId,
+          standingsCache: standingsCache,
           requiredTags: slotRule.requiredCareerTags,
           excludedTags: slotRule.excludedCareerTags,
         );
@@ -755,11 +1090,7 @@ class TournamentRepository extends ChangeNotifier {
           if (selectedIds.contains(rankedEntry.entry.id)) {
             continue;
           }
-          final rankingName = CareerRepository.instance.activeCareer?.rankings
-                  .where((ranking) => ranking.id == rankingId)
-                  .map((ranking) => ranking.name)
-                  .firstOrNull ??
-              rankingId;
+          final rankingName = rankingsById[rankingId]?.name ?? rankingId;
           selected.add(
             rankedEntry.entry.copyWith(
               entryRound: slotRule.entryRound,
@@ -789,14 +1120,12 @@ class TournamentRepository extends ChangeNotifier {
           pool: pool,
           orderedPool: orderedPool,
           rankingId: fillRule.rankingId!,
+          standingsCache: standingsCache,
           requiredTags: fillRule.requiredCareerTags,
           excludedTags: fillRule.excludedCareerTags,
         );
-        final rankingName = CareerRepository.instance.activeCareer?.rankings
-                .where((ranking) => ranking.id == fillRule.rankingId)
-                .map((ranking) => ranking.name)
-                .firstOrNull ??
-            fillRule.rankingId!;
+        final rankingName =
+            rankingsById[fillRule.rankingId!]?.name ?? fillRule.rankingId!;
         var fillCount = 0;
         final needed = fillRule.maxCount > 0 ? fillRule.maxCount : item.fieldSize;
         for (final rankedEntry in rankedEntries) {
@@ -860,6 +1189,7 @@ class TournamentRepository extends ChangeNotifier {
         pool: pool,
         orderedPool: orderedPool,
         rankingId: item.seedingRankingId!,
+        standingsCache: standingsCache,
         requiredTags: const <String>[],
         excludedTags: const <String>[],
       );
@@ -895,10 +1225,14 @@ class TournamentRepository extends ChangeNotifier {
     required Map<String, _CareerPoolEntry> pool,
     required List<_CareerPoolEntry> orderedPool,
     required String rankingId,
+    required Map<String, List<RankingStanding>> standingsCache,
     required List<String> requiredTags,
     required List<String> excludedTags,
   }) {
-    final standings = CareerRepository.instance.standingsForRanking(rankingId);
+    final standings = standingsCache.putIfAbsent(
+      rankingId,
+      () => CareerRepository.instance.standingsForRanking(rankingId),
+    );
     final shouldFallback =
         standings.isEmpty ||
         standings.every(
@@ -1131,6 +1465,81 @@ class TournamentRepository extends ChangeNotifier {
     );
   }
 
+  BotProfile Function(String participantId) _profileProviderForBracket(
+    TournamentBracket bracket,
+  ) {
+    final participantProfiles = _profilesForBracket(bracket);
+    final defaultProfile = SettingsRepository.instance.createBotProfile(
+      skill: 700,
+      finishingSkill: 700,
+    );
+    return (String participantId) =>
+        participantProfiles[participantId] ?? defaultProfile;
+  }
+
+  Map<String, BotProfile> _profilesForBracket(TournamentBracket bracket) {
+    final activePlayer = PlayerRepository.instance.activePlayer;
+    final computerProfiles = <String, BotProfile>{
+      for (final player in ComputerRepository.instance.players)
+        player.id: SettingsRepository.instance.createBotProfile(
+          skill: player.skill,
+          finishingSkill: player.finishingSkill,
+        ),
+    };
+    final participantProfiles = <String, BotProfile>{};
+
+    for (final participant in bracket.participants) {
+      if (participant.botSkill != null && participant.botFinishingSkill != null) {
+        participantProfiles[participant.id] =
+            SettingsRepository.instance.createBotProfile(
+              skill: participant.botSkill!,
+              finishingSkill: participant.botFinishingSkill!,
+            );
+        continue;
+      }
+      if (activePlayer != null && activePlayer.id == participant.id) {
+        participantProfiles[participant.id] = _profileForAverage(
+          activePlayer.average,
+        );
+        continue;
+      }
+      final computerProfile = computerProfiles[participant.id];
+      if (computerProfile != null) {
+        participantProfiles[participant.id] = computerProfile;
+        continue;
+      }
+      participantProfiles[participant.id] = _profileForAverage(
+        participant.average,
+      );
+    }
+    return participantProfiles;
+  }
+
+  Map<String, Object?> _serializedProfilesForBracket(TournamentBracket bracket) {
+    final result = <String, Object?>{};
+    _profilesForBracket(bracket).forEach((participantId, profile) {
+      result[participantId] = <String, Object?>{
+        'skill': profile.skill,
+        'finishingSkill': profile.finishingSkill,
+        'radiusCalibrationPercent': profile.radiusCalibrationPercent,
+        'simulationSpreadPercent': profile.simulationSpreadPercent,
+      };
+    });
+    return result;
+  }
+
+  int _countCompletedMatchesLowMemory(TournamentBracket bracket) {
+    var count = 0;
+    for (final round in bracket.rounds) {
+      for (final match in round.matches) {
+        if (match.status == TournamentMatchStatus.completed) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }
+
   BotProfile _profileForAverage(double average) {
     final normalizedAverage = average > 0 ? average : 65;
     final players = ComputerRepository.instance.players;
@@ -1196,6 +1605,42 @@ class TournamentRepository extends ChangeNotifier {
     return null;
   }
 
+  int? _nextPendingRoundNumber(TournamentBracket bracket) {
+    for (final round in bracket.rounds) {
+      for (final match in round.matches) {
+        if (match.status == TournamentMatchStatus.pending && match.isReady) {
+          return round.roundNumber;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _shouldStopBeforeNextRound(TournamentBracket bracket) {
+    final roundNumber = _nextPendingRoundNumber(bracket);
+    if (roundNumber == null) {
+      return false;
+    }
+    return _hasPendingHumanMatchInRound(bracket, roundNumber);
+  }
+
+  bool _hasPendingHumanMatchInRound(TournamentBracket bracket, int roundNumber) {
+    for (final round in bracket.rounds) {
+      if (round.roundNumber != roundNumber) {
+        continue;
+      }
+      for (final match in round.matches) {
+        if (match.status == TournamentMatchStatus.pending &&
+            match.isReady &&
+            match.isHumanMatch) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return false;
+  }
+
   void _simulateRemainingCpuMatchesForRound(int? roundNumber) {
     if (roundNumber == null) {
       return;
@@ -1206,6 +1651,7 @@ class TournamentRepository extends ChangeNotifier {
     }
 
     var workingBracket = bracket;
+    final profileProvider = _profileProviderForBracket(bracket);
     while (true) {
       TournamentMatch? nextCpuMatch;
       for (final round in workingBracket.rounds) {
@@ -1230,7 +1676,7 @@ class TournamentRepository extends ChangeNotifier {
       final nextBracket = _engine.simulateSpecificMatch(
         bracket: workingBracket,
         matchId: nextCpuMatch.id,
-        profileProvider: _profileForParticipant,
+        profileProvider: profileProvider,
       );
       if (identical(nextBracket, workingBracket)) {
         break;
@@ -1248,6 +1694,9 @@ class TournamentRepository extends ChangeNotifier {
         'currentBracket': _currentBracket?.toJson(),
         'careerContext': _careerContext?.toJson(),
         'archive': _archive.map((entry) => entry.toJson()).toList(),
+        'savedComputerSelections': _savedComputerSelections
+            .map((entry) => entry.toJson())
+            .toList(),
       },
     );
   }
@@ -1259,7 +1708,82 @@ class TournamentRepository extends ChangeNotifier {
           entry.seasonNumber == nextEntry.seasonNumber &&
           entry.calendarItemId == nextEntry.calendarItemId,
     );
-    _archive.insert(0, nextEntry);
+    _archive.insert(0, _normalizeArchiveEntry(nextEntry));
+    _pruneArchive();
+  }
+
+  TournamentArchiveEntry _normalizeArchiveEntry(TournamentArchiveEntry entry) {
+    return TournamentArchiveEntry(
+      id: entry.id,
+      name: entry.name,
+      bracket: _lightweightArchiveBracket(entry.bracket),
+      careerId: entry.careerId,
+      seasonNumber: entry.seasonNumber,
+      calendarItemId: entry.calendarItemId,
+    );
+  }
+
+  TournamentBracket _lightweightArchiveBracket(TournamentBracket bracket) {
+    return TournamentBracket(
+      definition: bracket.definition,
+      participants: bracket.participants,
+      rounds: bracket.rounds
+          .map(
+            (round) => TournamentRound(
+              roundNumber: round.roundNumber,
+              title: round.title,
+              stage: round.stage,
+              matches: round.matches
+                  .map(
+                    (match) => TournamentMatch(
+                      id: match.id,
+                      roundNumber: match.roundNumber,
+                      matchNumber: match.matchNumber,
+                      playerA: match.playerA,
+                      playerB: match.playerB,
+                      status: match.status,
+                      result: match.result == null
+                          ? null
+                          : TournamentMatchResult(
+                              winnerId: match.result!.winnerId,
+                              winnerName: match.result!.winnerName,
+                              scoreText: match.result!.scoreText,
+                              isDraw: match.result!.isDraw,
+                            ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  void _pruneArchive() {
+    if (_archive.isEmpty) {
+      return;
+    }
+    final nextArchive = <TournamentArchiveEntry>[];
+    var keptCareerEntries = 0;
+    for (final entry in _archive) {
+      final isCareerEntry = entry.careerId != null;
+      if (isCareerEntry && keptCareerEntries >= _maxCareerArchiveEntries) {
+        continue;
+      }
+      if (nextArchive.length >= _maxArchiveEntries) {
+        break;
+      }
+      nextArchive.add(entry);
+      if (isCareerEntry) {
+        keptCareerEntries += 1;
+      }
+    }
+    if (nextArchive.length == _archive.length) {
+      return;
+    }
+    _archive
+      ..clear()
+      ..addAll(nextArchive);
   }
 
   CareerLeagueSeriesState? _leagueSeriesState(
@@ -1419,6 +1943,34 @@ class TournamentRepository extends ChangeNotifier {
     }
     return item.name;
   }
+
+  void _logProcessMemory(String label) {
+    try {
+      final rssBytes = ProcessInfo.currentRss;
+      AppDebug.instance.info(
+        'Memory',
+        '$label | RSS ${_formatMemory(rssBytes)}',
+      );
+    } catch (_) {
+      // Ignore environments where process memory is unavailable.
+    }
+  }
+
+  String _formatMemory(int bytes) {
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (bytes >= gb) {
+      return '${(bytes / gb).toStringAsFixed(2)} GB';
+    }
+    if (bytes >= mb) {
+      return '${(bytes / mb).toStringAsFixed(0)} MB';
+    }
+    if (bytes >= kb) {
+      return '${(bytes / kb).toStringAsFixed(0)} KB';
+    }
+    return '$bytes B';
+  }
 }
 
 class _CareerPoolEntry {
@@ -1542,6 +2094,39 @@ class TournamentArchiveEntry {
       careerId: json['careerId'] as String?,
       seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
       calendarItemId: json['calendarItemId'] as String?,
+    );
+  }
+}
+
+class TournamentComputerSelectionPreset {
+  const TournamentComputerSelectionPreset({
+    required this.id,
+    required this.name,
+    required this.computerIds,
+  });
+
+  final String id;
+  final String name;
+  final List<String> computerIds;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'name': name,
+      'computerIds': computerIds,
+    };
+  }
+
+  static TournamentComputerSelectionPreset fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return TournamentComputerSelectionPreset(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      computerIds:
+          (json['computerIds'] as List<dynamic>? ?? const <dynamic>[])
+              .map((entry) => entry.toString())
+              .toList(),
     );
   }
 }

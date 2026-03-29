@@ -42,8 +42,15 @@ class TournamentBracketScreen extends StatelessWidget {
           });
         TournamentMatch? focusMatch;
         TournamentRoundStage focusRoundStage = TournamentRoundStage.knockout;
+        int? nextPendingRoundNumber;
+        var pendingHumanInNextRound = false;
         for (final round in bracket.rounds) {
           for (final match in round.matches) {
+            if (nextPendingRoundNumber == null &&
+                match.status == TournamentMatchStatus.pending &&
+                match.isReady) {
+              nextPendingRoundNumber = round.roundNumber;
+            }
             if (match.isHumanMatch) {
               focusMatch ??= match;
               focusRoundStage = round.stage;
@@ -56,6 +63,20 @@ class TournamentBracketScreen extends StatelessWidget {
           }
           if (focusMatch != null &&
               focusMatch.status == TournamentMatchStatus.pending) {
+            break;
+          }
+        }
+        if (nextPendingRoundNumber != null) {
+          for (final round in bracket.rounds) {
+            if (round.roundNumber != nextPendingRoundNumber) {
+              continue;
+            }
+            pendingHumanInNextRound = round.matches.any(
+              (match) =>
+                  match.status == TournamentMatchStatus.pending &&
+                  match.isReady &&
+                  match.isHumanMatch,
+            );
             break;
           }
         }
@@ -233,6 +254,27 @@ class TournamentBracketScreen extends StatelessWidget {
                           icon: const Icon(Icons.skip_next_rounded),
                           label: const Text('Naechstes CPU Match'),
                         ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonalIcon(
+                          onPressed: nextPendingRoundNumber == null
+                              ? null
+                              : repository.simulateNextRound,
+                          icon: const Icon(Icons.skip_next_outlined),
+                          label: Text(
+                            pendingHumanInNextRound
+                                ? 'Aktuelle Runde simulieren'
+                                : 'Naechste Runde simulieren',
+                          ),
+                        ),
+                        if (pendingHumanInNextRound) ...<Widget>[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Dein Match ist in der aktuellen offenen Runde noch nicht gespielt. Darum wird nur diese Runde simuliert.',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFF5D7285),
+                                ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: repository.simulateRemainingCpuMatches,

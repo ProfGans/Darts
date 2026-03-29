@@ -8,8 +8,6 @@ import '../../domain/career/career_models.dart';
 import '../../domain/career/career_template.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
-import '../models/computer_player.dart';
-import 'computer_repository.dart';
 import '../storage/app_storage.dart';
 
 class CareerTemplateRepository extends ChangeNotifier {
@@ -95,8 +93,6 @@ class CareerTemplateRepository extends ChangeNotifier {
 
   void saveTemplate({
     required String name,
-    List<CareerDatabasePlayer> databasePlayers =
-        const <CareerDatabasePlayer>[],
     List<CareerTagDefinition> careerTagDefinitions =
         const <CareerTagDefinition>[],
     List<CareerSeasonTagRule> seasonTagRules =
@@ -112,7 +108,6 @@ class CareerTemplateRepository extends ChangeNotifier {
     final template = CareerTemplate(
       id: 'template-${DateTime.now().microsecondsSinceEpoch}',
       name: trimmed,
-      databasePlayers: databasePlayers,
       careerTagDefinitions: careerTagDefinitions,
       seasonTagRules: seasonTagRules,
       rankings: rankings,
@@ -141,7 +136,6 @@ class CareerTemplateRepository extends ChangeNotifier {
         return CareerTemplate(
           id: builtInPdcBasicTemplateId,
           name: template.name,
-          databasePlayers: template.databasePlayers,
           careerTagDefinitions: template.careerTagDefinitions,
           seasonTagRules: template.seasonTagRules,
           rankings: template.rankings,
@@ -151,10 +145,10 @@ class CareerTemplateRepository extends ChangeNotifier {
     } catch (_) {
       // Fall back to the code-defined template if the bundled asset is unavailable.
     }
-    return _buildPdcTemplate(ComputerRepository.instance.players);
+    return _buildPdcTemplate();
   }
 
-  CareerTemplate _buildPdcTemplate(List<ComputerPlayer> computerPlayers) {
+  CareerTemplate _buildPdcTemplate() {
     const pdcRankingId = 'pdc-order-of-merit';
     const proTourRankingId = 'pdc-protour-order-of-merit';
     const playersChampionshipRankingId =
@@ -165,8 +159,6 @@ class CareerTemplateRepository extends ChangeNotifier {
     const qSchoolRankingId = 'pdc-q-school-order-of-merit';
     const worldSeriesRankingId = 'pdc-world-series-order-of-merit';
 
-    const realPlayerTag = 'Echter Spieler';
-    const bulkTag = 'Bulk';
     const tourCardTag = 'Tour Card Holder';
     const associateTag = 'Associate Member';
     const nonTourTag = 'Non-Tour';
@@ -203,66 +195,6 @@ class CareerTemplateRepository extends ChangeNotifier {
     final hostNationTags = <String, String>{
       for (final country in hostNations) country: 'Host Nation $country',
     };
-
-    final realPlayers = computerPlayers
-        .where((player) => _hasSourceTag(player, realPlayerTag))
-        .toList()
-      ..sort(
-        (left, right) =>
-            right.theoreticalAverage.compareTo(left.theoreticalAverage),
-      );
-    final fallbackTourPlayers = computerPlayers
-        .where((player) => !_hasSourceTag(player, bulkTag))
-        .toList()
-      ..sort(
-        (left, right) =>
-            right.theoreticalAverage.compareTo(left.theoreticalAverage),
-      );
-    final seededTourPlayers =
-        (realPlayers.length >= 128 ? realPlayers : fallbackTourPlayers)
-            .take(128)
-            .toList();
-    final tourCardIds =
-        seededTourPlayers.map((player) => player.id).toSet();
-    final invitationalIds = seededTourPlayers.take(8).map((player) => player.id).toSet();
-
-    final databasePlayers = computerPlayers.map((player) {
-      final tagNames = <String>{
-        if (tourCardIds.contains(player.id)) tourCardTag,
-        if (invitationalIds.contains(player.id)) ...<String>[
-          premierLeagueInviteTag,
-          worldSeriesInviteTag,
-        ],
-        if (_hasSourceTag(player, bulkTag)) nonTourTag,
-        if (_isDevelopmentEligible(player)) developmentEligibleTag,
-        if (_isNordicBaltic(player)) nordicBalticTag,
-        if (_isEastEurope(player)) eastEuropeTag,
-        if (_isAsian(player)) asiaTag,
-        if (_isNorthAmerican(player)) northAmericaTag,
-        if (_isOceanian(player)) oceaniaTag,
-        if (_isChinese(player)) chinaTag,
-        ..._hostNationCareerTags(
-          player: player,
-          hostNationTags: hostNationTags,
-        ),
-      };
-      return CareerDatabasePlayer(
-        databasePlayerId: player.id,
-        name: player.name,
-        average: player.theoreticalAverage,
-        skill: player.skill,
-        finishingSkill: player.finishingSkill,
-        careerTags: tagNames.map((tagName) {
-          if (tagName == tourCardTag) {
-            return const CareerPlayerTag(
-              tagName: tourCardTag,
-              remainingSeasons: 2,
-            );
-          }
-          return CareerPlayerTag(tagName: tagName);
-        }).toList(),
-      );
-    }).toList();
 
     final rankings = <CareerRankingDefinition>[
       const CareerRankingDefinition(
@@ -1289,7 +1221,6 @@ class CareerTemplateRepository extends ChangeNotifier {
       id: builtInPdcBasicTemplateId,
       name: 'PDC Basic',
       participantMode: CareerParticipantMode.cpuOnly,
-      databasePlayers: databasePlayers,
       careerTagDefinitions: tagDefinitions,
       seasonTagRules: const <CareerSeasonTagRule>[
         CareerSeasonTagRule(
@@ -1675,118 +1606,6 @@ class CareerTemplateRepository extends ChangeNotifier {
         fillTopByRankingCount: 10,
       ),
     ];
-  }
-
-  bool _hasSourceTag(ComputerPlayer player, String tagName) {
-    return player.tags.any(
-      (entry) => entry.toLowerCase() == tagName.toLowerCase(),
-    );
-  }
-
-  bool _isDevelopmentEligible(ComputerPlayer player) {
-    final age = player.age;
-    return age != null && age >= 16 && age <= 24;
-  }
-
-  bool _isNordicBaltic(ComputerPlayer player) {
-    const nationalities = <String>{
-      'Denmark',
-      'Estonia',
-      'Finland',
-      'Iceland',
-      'Latvia',
-      'Lithuania',
-      'Norway',
-      'Sweden',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _isEastEurope(ComputerPlayer player) {
-    const nationalities = <String>{
-      'Bulgaria',
-      'Croatia',
-      'Czech Republic',
-      'Hungary',
-      'Poland',
-      'Romania',
-      'Serbia',
-      'Slovakia',
-      'Slovenia',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _isAsian(ComputerPlayer player) {
-    const nationalities = <String>{
-      'Bahrain',
-      'China',
-      'Chinese Taipei',
-      'Hong Kong',
-      'India',
-      'Indonesia',
-      'Japan',
-      'Malaysia',
-      'Mongolia',
-      'Philippines',
-      'Singapore',
-      'South Korea',
-      'Thailand',
-      'United Arab Emirates',
-      'Vietnam',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _isNorthAmerican(ComputerPlayer player) {
-    const nationalities = <String>{
-      'Canada',
-      'Mexico',
-      'United States',
-      'USA',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _isOceanian(ComputerPlayer player) {
-    const nationalities = <String>{
-      'Australia',
-      'New Zealand',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _isChinese(ComputerPlayer player) {
-    const nationalities = <String>{
-      'China',
-    };
-    return _matchesNationality(player, nationalities);
-  }
-
-  bool _matchesNationality(ComputerPlayer player, Set<String> nationalities) {
-    final nationality = player.nationality?.trim();
-    if (nationality == null || nationality.isEmpty) {
-      return false;
-    }
-    return nationalities.any(
-      (entry) => entry.toLowerCase() == nationality.toLowerCase(),
-    );
-  }
-
-  List<String> _hostNationCareerTags({
-    required ComputerPlayer player,
-    required Map<String, String> hostNationTags,
-  }) {
-    final nationality = player.nationality?.trim();
-    if (nationality == null || nationality.isEmpty) {
-      return const <String>[];
-    }
-    for (final entry in hostNationTags.entries) {
-      if (entry.key.toLowerCase() == nationality.toLowerCase()) {
-        return <String>[entry.value];
-      }
-    }
-    return const <String>[];
   }
 
   List<CareerCalendarItem> _buildSeries({

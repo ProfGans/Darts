@@ -1,36 +1,66 @@
-import 'package:flutter/material.dart';
 import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
 
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
 import 'tournament_form_models.dart';
 
-class TournamentBasicsForm extends StatelessWidget {
+class TournamentBasicsForm extends StatefulWidget {
   const TournamentBasicsForm({
     super.key,
     required this.nameController,
     required this.formData,
     required this.onChanged,
     this.nameLabel = 'Turniername',
+    this.roundDistancesCollapsible = false,
+    this.roundDistancesInitiallyExpanded = true,
   });
 
   final TextEditingController nameController;
   final TournamentFormData formData;
   final ValueChanged<TournamentFormData> onChanged;
   final String nameLabel;
+  final bool roundDistancesCollapsible;
+  final bool roundDistancesInitiallyExpanded;
+
+  @override
+  State<TournamentBasicsForm> createState() => _TournamentBasicsFormState();
+}
+
+class _TournamentBasicsFormState extends State<TournamentBasicsForm> {
+  late bool _roundDistancesExpanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _roundDistancesExpanded =
+        !widget.roundDistancesCollapsible || widget.roundDistancesInitiallyExpanded;
+  }
+
+  @override
+  void didUpdateWidget(covariant TournamentBasicsForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.roundDistancesCollapsible) {
+      _roundDistancesExpanded = true;
+    } else if (!oldWidget.roundDistancesCollapsible &&
+        widget.roundDistancesCollapsible) {
+      _roundDistancesExpanded = widget.roundDistancesInitiallyExpanded;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: <Widget>[
         TextField(
-          controller: nameController,
-          decoration: InputDecoration(labelText: nameLabel),
+          controller: widget.nameController,
+          decoration: InputDecoration(labelText: widget.nameLabel),
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<TournamentGame>(
-          key: ValueKey<String>('game-${formData.game.name}'),
-          initialValue: formData.game,
+          key: ValueKey<String>('game-${widget.formData.game.name}'),
+          initialValue: widget.formData.game,
           decoration: const InputDecoration(labelText: 'Spiel'),
           items: const <DropdownMenuItem<TournamentGame>>[
             DropdownMenuItem(
@@ -40,14 +70,14 @@ class TournamentBasicsForm extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value != null) {
-              onChanged(formData.copyWith(game: value));
+              widget.onChanged(widget.formData.copyWith(game: value));
             }
           },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<TournamentFormat>(
-          key: ValueKey<String>('format-${formData.format.name}'),
-          initialValue: formData.format,
+          key: ValueKey<String>('format-${widget.formData.format.name}'),
+          initialValue: widget.formData.format,
           decoration: const InputDecoration(labelText: 'Turniermodus'),
           items: const <DropdownMenuItem<TournamentFormat>>[
             DropdownMenuItem(
@@ -65,26 +95,26 @@ class TournamentBasicsForm extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value != null) {
-              onChanged(formData.copyWith(format: value));
+              widget.onChanged(widget.formData.copyWith(format: value));
             }
           },
         ),
         const SizedBox(height: 12),
         TextFormField(
-          initialValue: formData.fieldSizeInput,
+          initialValue: widget.formData.fieldSizeInput,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Feldgroesse',
             helperText: 'Beliebige Teilnehmerzahl, Freilose werden automatisch vergeben.',
           ),
           onChanged: (value) {
-            onChanged(formData.copyWith(fieldSizeInput: value));
+            widget.onChanged(widget.formData.copyWith(fieldSizeInput: value));
           },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<MatchMode>(
-          key: ValueKey<String>('mode-${formData.matchMode.name}'),
-          initialValue: formData.matchMode,
+          key: ValueKey<String>('mode-${widget.formData.matchMode.name}'),
+          initialValue: widget.formData.matchMode,
           decoration: const InputDecoration(labelText: 'Modus'),
           items: const <DropdownMenuItem<MatchMode>>[
             DropdownMenuItem(value: MatchMode.legs, child: Text('Legs')),
@@ -92,30 +122,30 @@ class TournamentBasicsForm extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value != null) {
-              onChanged(formData.copyWith(matchMode: value));
+              widget.onChanged(widget.formData.copyWith(matchMode: value));
             }
           },
         ),
         const SizedBox(height: 12),
         TextFormField(
-          initialValue: '${formData.legsValue}',
+          initialValue: '${widget.formData.legsValue}',
           keyboardType: TextInputType.number,
           decoration: InputDecoration(
-            labelText: formData.matchMode == MatchMode.legs
+            labelText: widget.formData.matchMode == MatchMode.legs
                 ? 'Distanz (First to)'
                 : 'Legs pro Satz (Best of)',
           ),
           onChanged: (value) {
             final parsed = int.tryParse(value.trim());
             if (parsed != null && parsed > 0) {
-              onChanged(formData.copyWith(legsValue: parsed));
+              widget.onChanged(widget.formData.copyWith(legsValue: parsed));
             }
           },
         ),
-        if (formData.matchMode == MatchMode.sets) ...<Widget>[
+        if (widget.formData.matchMode == MatchMode.sets) ...<Widget>[
           const SizedBox(height: 12),
           TextFormField(
-            initialValue: '${formData.setsToWin}',
+            initialValue: '${widget.formData.setsToWin}',
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
               labelText: 'Sets zum Sieg (First to)',
@@ -123,56 +153,74 @@ class TournamentBasicsForm extends StatelessWidget {
             onChanged: (value) {
               final parsed = int.tryParse(value.trim());
               if (parsed != null && parsed > 0) {
-                onChanged(formData.copyWith(setsToWin: parsed));
+                widget.onChanged(widget.formData.copyWith(setsToWin: parsed));
               }
             },
           ),
         ],
-        if ((formData.format == TournamentFormat.knockout ||
-                formData.format == TournamentFormat.leaguePlayoff) &&
-            formData.roundCount > 0) ...<Widget>[
+        if ((widget.formData.format == TournamentFormat.knockout ||
+                widget.formData.format == TournamentFormat.leaguePlayoff) &&
+            widget.formData.roundCount > 0) ...<Widget>[
           const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Rundendistanzen',
-              style: Theme.of(context).textTheme.titleMedium,
+          if (widget.roundDistancesCollapsible)
+            Card(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    title: Text(
+                      'Rundendistanzen',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    subtitle: Text(
+                      _roundDistancesExpanded
+                          ? 'Distanz pro KO-Runde bearbeiten'
+                          : '${widget.formData.roundCount} Runden konfigurierbar',
+                    ),
+                    trailing: Icon(
+                      _roundDistancesExpanded
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                    ),
+                    onTap: () {
+                      setState(() {
+                        _roundDistancesExpanded = !_roundDistancesExpanded;
+                      });
+                    },
+                  ),
+                  if (_roundDistancesExpanded) ...<Widget>[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(height: 1),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      child: Column(
+                        children: _buildRoundDistanceFields(),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            )
+          else ...<Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Rundendistanzen',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          ...formData.effectiveRoundDistanceValues.asMap().entries.map((entry) {
-            final index = entry.key;
-            final roundNumber = index + 1;
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: index == formData.effectiveRoundDistanceValues.length - 1
-                    ? 0
-                    : 12,
-              ),
-              child: TextFormField(
-                initialValue: '${entry.value}',
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText:
-                      '${_roundLabel(roundNumber, formData.roundCount)}${formData.matchMode == MatchMode.legs ? ' (Legs zum Sieg)' : ' (Sets zum Sieg)'}',
-                ),
-                onChanged: (value) {
-                  final parsed = int.tryParse(value.trim());
-                  if (parsed == null || parsed <= 0) {
-                    return;
-                  }
-                  final updated = List<int>.from(
-                    formData.effectiveRoundDistanceValues,
-                  );
-                  updated[index] = parsed;
-                  onChanged(formData.copyWith(roundDistanceValues: updated));
-                },
-              ),
-            );
-          }),
+            const SizedBox(height: 8),
+            ..._buildRoundDistanceFields(),
+          ],
         ],
-        if (formData.format == TournamentFormat.league ||
-            formData.format == TournamentFormat.leaguePlayoff) ...<Widget>[
+        if (widget.formData.format == TournamentFormat.league ||
+            widget.formData.format == TournamentFormat.leaguePlayoff) ...<Widget>[
           const SizedBox(height: 16),
           Align(
             alignment: Alignment.centerLeft,
@@ -183,60 +231,60 @@ class TournamentBasicsForm extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           TextFormField(
-            initialValue: '${formData.pointsForWin}',
+            initialValue: '${widget.formData.pointsForWin}',
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(labelText: 'Punkte fuer Sieg'),
             onChanged: (value) {
               final parsed = int.tryParse(value.trim());
               if (parsed != null && parsed >= 0) {
-                onChanged(formData.copyWith(pointsForWin: parsed));
+                widget.onChanged(widget.formData.copyWith(pointsForWin: parsed));
               }
             },
           ),
           const SizedBox(height: 12),
           TextFormField(
-            initialValue: '${formData.pointsForDraw}',
+            initialValue: '${widget.formData.pointsForDraw}',
             keyboardType: TextInputType.number,
             decoration:
                 const InputDecoration(labelText: 'Punkte fuer Unentschieden'),
             onChanged: (value) {
               final parsed = int.tryParse(value.trim());
               if (parsed != null && parsed >= 0) {
-                onChanged(formData.copyWith(pointsForDraw: parsed));
+                widget.onChanged(widget.formData.copyWith(pointsForDraw: parsed));
               }
             },
           ),
           const SizedBox(height: 12),
           TextFormField(
-            initialValue: '${formData.roundRobinRepeats}',
+            initialValue: '${widget.formData.roundRobinRepeats}',
             keyboardType: TextInputType.number,
-            decoration:
-                const InputDecoration(labelText: 'Jeder gegen jeden'),
+            decoration: const InputDecoration(labelText: 'Jeder gegen jeden'),
             onChanged: (value) {
               final parsed = int.tryParse(value.trim());
               if (parsed != null && parsed > 0) {
-                onChanged(formData.copyWith(roundRobinRepeats: parsed));
+                widget.onChanged(
+                  widget.formData.copyWith(roundRobinRepeats: parsed),
+                );
               }
             },
           ),
-          if (formData.format == TournamentFormat.leaguePlayoff) ...<Widget>[
+          if (widget.formData.format == TournamentFormat.leaguePlayoff) ...<Widget>[
             const SizedBox(height: 12),
             TextFormField(
-              initialValue: '${formData.playoffQualifierCount}',
+              initialValue: '${widget.formData.playoffQualifierCount}',
               keyboardType: TextInputType.number,
-              decoration:
-                  const InputDecoration(
-                    labelText: 'Top X fuer Playoffs',
-                    helperText: 'Freie Zahl, sinnvoll sind Werte ab 2.',
-                  ),
+              decoration: const InputDecoration(
+                labelText: 'Top X fuer Playoffs',
+                helperText: 'Freie Zahl, sinnvoll sind Werte ab 2.',
+              ),
               onChanged: (value) {
                 final parsed = int.tryParse(value.trim());
                 if (parsed != null && parsed >= 2) {
-                  onChanged(
-                    formData.copyWith(
+                  widget.onChanged(
+                    widget.formData.copyWith(
                       playoffQualifierCount: parsed,
                       roundDistanceValues: List<int>.from(
-                        formData.effectiveRoundDistanceValues.take(
+                        widget.formData.effectiveRoundDistanceValues.take(
                           _playoffRoundCount(parsed),
                         ),
                       ),
@@ -249,19 +297,17 @@ class TournamentBasicsForm extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         TextFormField(
-          initialValue: formData.startScoreInput,
+          initialValue: widget.formData.startScoreInput,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(labelText: 'Startscore'),
           onChanged: (value) {
-            onChanged(formData.copyWith(startScoreInput: value));
+            widget.onChanged(widget.formData.copyWith(startScoreInput: value));
           },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<StartRequirement>(
-          key: ValueKey<String>(
-            'start-${formData.startRequirement.name}',
-          ),
-          initialValue: formData.startRequirement,
+          key: ValueKey<String>('start-${widget.formData.startRequirement.name}'),
+          initialValue: widget.formData.startRequirement,
           decoration: const InputDecoration(labelText: 'In'),
           items: const <DropdownMenuItem<StartRequirement>>[
             DropdownMenuItem(
@@ -275,16 +321,16 @@ class TournamentBasicsForm extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value != null) {
-              onChanged(formData.copyWith(startRequirement: value));
+              widget.onChanged(widget.formData.copyWith(startRequirement: value));
             }
           },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<CheckoutRequirement>(
           key: ValueKey<String>(
-            'checkout-${formData.checkoutRequirement.name}',
+            'checkout-${widget.formData.checkoutRequirement.name}',
           ),
-          initialValue: formData.checkoutRequirement,
+          initialValue: widget.formData.checkoutRequirement,
           decoration: const InputDecoration(labelText: 'Checkout'),
           items: const <DropdownMenuItem<CheckoutRequirement>>[
             DropdownMenuItem(
@@ -302,12 +348,51 @@ class TournamentBasicsForm extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value != null) {
-              onChanged(formData.copyWith(checkoutRequirement: value));
+              widget.onChanged(
+                widget.formData.copyWith(checkoutRequirement: value),
+              );
             }
           },
         ),
       ],
     );
+  }
+
+  List<Widget> _buildRoundDistanceFields() {
+    return widget.formData.effectiveRoundDistanceValues.asMap().entries.map((
+      entry,
+    ) {
+      final index = entry.key;
+      final roundNumber = index + 1;
+      return Padding(
+        padding: EdgeInsets.only(
+          bottom: index == widget.formData.effectiveRoundDistanceValues.length - 1
+              ? 0
+              : 12,
+        ),
+        child: TextFormField(
+          initialValue: '${entry.value}',
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText:
+                '${_roundLabel(roundNumber, widget.formData.roundCount)}${widget.formData.matchMode == MatchMode.legs ? ' (Legs zum Sieg)' : ' (Sets zum Sieg)'}',
+          ),
+          onChanged: (value) {
+            final parsed = int.tryParse(value.trim());
+            if (parsed == null || parsed <= 0) {
+              return;
+            }
+            final updated = List<int>.from(
+              widget.formData.effectiveRoundDistanceValues,
+            );
+            updated[index] = parsed;
+            widget.onChanged(
+              widget.formData.copyWith(roundDistanceValues: updated),
+            );
+          },
+        ),
+      );
+    }).toList();
   }
 
   int _playoffRoundCount(int qualifierCount) {

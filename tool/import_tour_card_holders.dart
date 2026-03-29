@@ -87,35 +87,53 @@ class _Importer {
       stdout.writeln('Backup created: ${backupFile.path}');
     }
 
+    final existingPayload = outputFile.existsSync()
+        ? (jsonDecode(outputFile.readAsStringSync()) as Map<String, dynamic>)
+        : <String, dynamic>{};
+    final existingPlayers = (existingPayload['players'] as List<dynamic>? ??
+            const <dynamic>[])
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+    final existingById = <String, Map<String, dynamic>>{
+      for (final entry in existingPlayers)
+        if (entry['id'] is String) entry['id'] as String: entry,
+    };
+
     final players = await _fetchTourCardHolders();
     final nationalities = <String>{};
-    final playerMaps = <Map<String, dynamic>>[];
+    final importedIds = <String>{};
+    final updatedImportedPlayers = <Map<String, dynamic>>[];
 
     for (var index = 0; index < players.length; index += 1) {
       final player = players[index];
       nationalities.add(player.nationality);
       final resolution = resolveSkillsForAverage(player.average2026);
       final now = DateTime.now();
-      playerMaps.add(
+      final id = 'db-player-${player.pid}';
+      importedIds.add(id);
+      final existing = existingById[id];
+      updatedImportedPlayers.add(
         <String, dynamic>{
-          'id': 'db-player-${player.pid}',
+          ...?existing,
+          'id': id,
           'name': player.name,
           'skill': resolution.skill,
           'finishingSkill': resolution.finishingSkill,
           'theoreticalAverage': resolution.theoreticalAverage,
-          'createdAt': now.toIso8601String(),
+          'createdAt':
+              existing?['createdAt'] as String? ?? now.toIso8601String(),
           'updatedAt': now.toIso8601String(),
           'lastModifiedReason': 'tour_card_import',
           'source': 'imported',
-          'isFavorite': false,
-          'isProtected': false,
+          'isFavorite': existing?['isFavorite'] as bool? ?? false,
+          'isProtected': existing?['isProtected'] as bool? ?? false,
           'age': player.age,
           'nationality': player.nationality,
-          'tags': const <String>[],
-          'matchesPlayed': 0,
-          'matchesWon': 0,
-          'average': 0,
-          'history': const <dynamic>[],
+          'tags': existing?['tags'] as List<dynamic>? ?? const <dynamic>[],
+          'matchesPlayed': existing?['matchesPlayed'] as num? ?? 0,
+          'matchesWon': existing?['matchesWon'] as num? ?? 0,
+          'average': existing?['average'] as num? ?? 0,
+          'history': existing?['history'] as List<dynamic>? ?? const <dynamic>[],
         },
       );
       stdout.writeln(
@@ -125,15 +143,39 @@ class _Importer {
       );
     }
 
+    final preservedPlayers = existingPlayers.where((entry) {
+      final id = entry['id'] as String?;
+      if (id != null && importedIds.contains(id)) {
+        return false;
+      }
+      return entry['source'] != 'imported';
+    }).toList();
+    final playerMaps = <Map<String, dynamic>>[
+      ...preservedPlayers,
+      ...updatedImportedPlayers,
+    ];
+
     playerMaps.sort(
       (left, right) => (right['theoreticalAverage'] as double).compareTo(
         left['theoreticalAverage'] as double,
       ),
     );
 
+    final existingNationalityDefinitions =
+        (existingPayload['nationalityDefinitions'] as List<dynamic>? ??
+                const <dynamic>[])
+            .map((entry) => entry.toString())
+            .toSet();
+    final mergedNationalities = <String>{
+      ...existingNationalityDefinitions,
+      ...nationalities,
+    }.toList()
+      ..sort();
+
     final payload = <String, dynamic>{
-      'tagDefinitions': const <String>[],
-      'nationalityDefinitions': nationalities.toList()..sort(),
+      'tagDefinitions': existingPayload['tagDefinitions'] as List<dynamic>? ??
+          const <dynamic>[],
+      'nationalityDefinitions': mergedNationalities,
       'players': playerMaps,
     };
 

@@ -19,13 +19,17 @@ class CheckoutSetupLeaveOption {
     required this.remainingScore,
     required this.finishRoute,
     required this.score,
+    required this.breakdown,
   });
 
   final List<DartThrowResult> setupRoute;
   final int remainingScore;
   final List<DartThrowResult> finishRoute;
   final int score;
+  final CheckoutSetupScoreBreakdown breakdown;
 }
+
+enum CheckoutSetupFinishBand { deep, medium, justFinish }
 
 class CheckoutRouteScoreBreakdown {
   const CheckoutRouteScoreBreakdown({
@@ -33,12 +37,14 @@ class CheckoutRouteScoreBreakdown {
     required this.comfort,
     required this.robustness,
     required this.doubleQuality,
+    required this.narrowFieldPenalty,
     required this.bullPenalty,
     required this.segmentFlow,
     required this.dartPathDetails,
     required this.comfortDetails,
     required this.robustnessDetails,
     required this.doubleQualityDetails,
+    required this.narrowFieldDetails,
     required this.bullPenaltyDetails,
     required this.segmentFlowDetails,
   });
@@ -47,18 +53,54 @@ class CheckoutRouteScoreBreakdown {
   final int comfort;
   final int robustness;
   final int doubleQuality;
+  final int narrowFieldPenalty;
   final int bullPenalty;
   final int segmentFlow;
   final List<String> dartPathDetails;
   final List<String> comfortDetails;
   final List<String> robustnessDetails;
   final List<String> doubleQualityDetails;
+  final List<String> narrowFieldDetails;
   final List<String> bullPenaltyDetails;
   final List<String> segmentFlowDetails;
 }
 
+class CheckoutSetupScoreBreakdown {
+  const CheckoutSetupScoreBreakdown({
+    required this.setupPathScore,
+    required this.routeGuidance,
+    required this.leaveQuality,
+    required this.missPenalty,
+    required this.totalScore,
+    required this.setupPathDetails,
+    required this.routeGuidanceDetails,
+    required this.leaveQualityDetails,
+    required this.missPenaltyDetails,
+  });
+
+  final int setupPathScore;
+  final int routeGuidance;
+  final int leaveQuality;
+  final int missPenalty;
+  final int totalScore;
+  final List<String> setupPathDetails;
+  final List<String> routeGuidanceDetails;
+  final List<String> leaveQualityDetails;
+  final List<String> missPenaltyDetails;
+}
+
 class _ScoreDetails {
   const _ScoreDetails({
+    required this.total,
+    required this.details,
+  });
+
+  final int total;
+  final List<String> details;
+}
+
+class _SetupComfortRelief {
+  const _SetupComfortRelief({
     required this.total,
     required this.details,
   });
@@ -88,6 +130,19 @@ class CheckoutPlanner {
       <String, List<DartThrowResult>?>{};
   final Map<String, CheckoutContinuationPlan?> _continuationPlanCache =
       <String, CheckoutContinuationPlan?>{};
+  final Map<String, CheckoutRouteScoreBreakdown> _routeScoreBreakdownCache =
+      <String, CheckoutRouteScoreBreakdown>{};
+  final Map<String, CheckoutSetupScoreBreakdown> _setupScoreBreakdownCache =
+      <String, CheckoutSetupScoreBreakdown>{};
+  final Map<String, List<CheckoutSetupLeaveOption>> _topSetupLeavesCache =
+      <String, List<CheckoutSetupLeaveOption>>{};
+  final Map<String, List<CheckoutSetupLeaveOption>> _setupLeaveOptionsCache =
+      <String, List<CheckoutSetupLeaveOption>>{};
+  final Map<String, Map<CheckoutSetupFinishBand, CheckoutSetupLeaveOption>>
+      _setupBandOptionsCache =
+      <String, Map<CheckoutSetupFinishBand, CheckoutSetupLeaveOption>>{};
+  final Map<String, List<DartThrowResult>?> _setupFallbackRouteCache =
+      <String, List<DartThrowResult>?>{};
 
   void clearCaches() {
     _checkoutRoutesCache.clear();
@@ -96,6 +151,389 @@ class CheckoutPlanner {
     _finishRouteByTypeCache.clear();
     _targetRouteCache.clear();
     _continuationPlanCache.clear();
+    _routeScoreBreakdownCache.clear();
+    _setupScoreBreakdownCache.clear();
+    _topSetupLeavesCache.clear();
+    _setupLeaveOptionsCache.clear();
+    _setupBandOptionsCache.clear();
+    _setupFallbackRouteCache.clear();
+  }
+
+  bool isValidSetupStartScore(int score) {
+    const bogeySetupScores = <int>{159, 162, 163, 165, 166, 168, 169};
+    return score >= 171 || bogeySetupScores.contains(score);
+  }
+
+  bool isAllowedSetupRoute(List<DartThrowResult> route) {
+    return !route.any((entry) => entry.isDouble && !entry.isBull);
+  }
+
+  int doublePreferenceAdjustment(
+    DartThrowResult? finalThrow, {
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    if (finalThrow == null || !finalThrow.isFinishDouble || finalThrow.isBull) {
+      return 0;
+    }
+    if (preferredDoubles.contains(finalThrow.baseValue)) {
+      return 150;
+    }
+    if (dislikedDoubles.contains(finalThrow.baseValue)) {
+      return -150;
+    }
+    return 0;
+  }
+
+  int setupLeaveEffectiveScore(
+    CheckoutSetupLeaveOption option, {
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    return option.score +
+        doublePreferenceAdjustment(
+          option.finishRoute.isEmpty ? null : option.finishRoute.last,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        );
+  }
+
+  List<CheckoutSetupLeaveOption> setupLeaveOptions({
+    required int startScore,
+    required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+    int leavePreference = 50,
+    int outerBullPreference = 50,
+    int bullPreference = 50,
+    int maxResults = 8,
+    int maxResultsPerNarrowCount = 20,
+    Set<int> preferredDoubles = const <int>{},
+    Set<int> dislikedDoubles = const <int>{},
+  }) {
+    final sortedPreferred = preferredDoubles.toList()..sort();
+    final sortedDisliked = dislikedDoubles.toList()..sort();
+    final cacheKey = <Object>[
+      startScore,
+      dartsLeft,
+      checkoutRequirement,
+      playStyle,
+      leavePreference,
+      outerBullPreference,
+      bullPreference,
+      maxResults,
+      maxResultsPerNarrowCount,
+      sortedPreferred,
+      sortedDisliked,
+    ].join('|');
+    final cached = _setupLeaveOptionsCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+    if (!isValidSetupStartScore(startScore) || dartsLeft <= 0) {
+      return const <CheckoutSetupLeaveOption>[];
+    }
+
+    final options = <CheckoutSetupLeaveOption>[];
+    for (var narrowCount = 0; narrowCount < 4; narrowCount += 1) {
+      options.addAll(
+        topSetupLeavesForNarrowFieldCount(
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          narrowFieldCount: narrowCount,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          maxResults: maxResultsPerNarrowCount,
+        ),
+      );
+    }
+
+    final deduped = <String, CheckoutSetupLeaveOption>{};
+    for (final option in options) {
+      if (!isAllowedSetupRoute(option.setupRoute)) {
+        continue;
+      }
+      final key = option.setupRoute.map((entry) => entry.label).join('|');
+      final existing = deduped[key];
+      if (existing == null ||
+          setupLeaveEffectiveScore(
+                option,
+                preferredDoubles: preferredDoubles,
+                dislikedDoubles: dislikedDoubles,
+              ) >
+              setupLeaveEffectiveScore(
+                existing,
+                preferredDoubles: preferredDoubles,
+                dislikedDoubles: dislikedDoubles,
+              )) {
+        deduped[key] = option;
+      }
+    }
+
+    final results = deduped.values.toList()
+      ..sort(
+        (a, b) => setupLeaveEffectiveScore(
+          b,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        ).compareTo(
+          setupLeaveEffectiveScore(
+            a,
+            preferredDoubles: preferredDoubles,
+            dislikedDoubles: dislikedDoubles,
+          ),
+        ),
+      );
+
+    final output = List<CheckoutSetupLeaveOption>.unmodifiable(
+      results.take(maxResults),
+    );
+    _setupLeaveOptionsCache[cacheKey] = output;
+    return output;
+  }
+
+  Map<CheckoutSetupFinishBand, CheckoutSetupLeaveOption> bestSetupBandOptions({
+    required int startScore,
+    required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+    int leavePreference = 50,
+    int outerBullPreference = 50,
+    int bullPreference = 50,
+    Set<int> preferredDoubles = const <int>{},
+    Set<int> dislikedDoubles = const <int>{},
+  }) {
+    final sortedPreferred = preferredDoubles.toList()..sort();
+    final sortedDisliked = dislikedDoubles.toList()..sort();
+    final cacheKey = <Object>[
+      startScore,
+      dartsLeft,
+      checkoutRequirement,
+      playStyle,
+      leavePreference,
+      outerBullPreference,
+      bullPreference,
+      sortedPreferred,
+      sortedDisliked,
+    ].join('|');
+    final cached = _setupBandOptionsCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+
+    final allOptions = setupLeaveOptions(
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: leavePreference,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+      maxResults: 1000,
+      maxResultsPerNarrowCount: 20,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    );
+
+    final result = <CheckoutSetupFinishBand, CheckoutSetupLeaveOption>{};
+    final deepOption = _bestDeepSetupOption(
+      allOptions,
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: leavePreference,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    );
+    if (deepOption != null) {
+      result[CheckoutSetupFinishBand.deep] = deepOption;
+    }
+    final mediumOption = _bestSetupOptionForRange(
+      allOptions,
+      minRemaining: 100,
+      maxRemaining: 130,
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: leavePreference,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    );
+    if (mediumOption != null) {
+      result[CheckoutSetupFinishBand.medium] = mediumOption;
+    }
+    final justFinishOption = _bestSetupOptionForRange(
+      allOptions,
+      minRemaining: 160,
+      maxRemaining: 170,
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: leavePreference,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    );
+    if (justFinishOption != null) {
+      result[CheckoutSetupFinishBand.justFinish] = justFinishOption;
+    }
+
+    final output = Map<CheckoutSetupFinishBand,
+        CheckoutSetupLeaveOption>.unmodifiable(result);
+    _setupBandOptionsCache[cacheKey] = output;
+    return output;
+  }
+
+  List<DartThrowResult>? bestSetupFallbackRoute({
+    required int startScore,
+    required int dartsLeft,
+    required CheckoutSetupFinishBand? targetBand,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+    int leavePreference = 50,
+    int outerBullPreference = 50,
+    int bullPreference = 50,
+    Set<int> preferredDoubles = const <int>{},
+    Set<int> dislikedDoubles = const <int>{},
+  }) {
+    final sortedPreferred = preferredDoubles.toList()..sort();
+    final sortedDisliked = dislikedDoubles.toList()..sort();
+    final cacheKey = <Object>[
+      startScore,
+      dartsLeft,
+      targetBand?.name ?? 'none',
+      checkoutRequirement,
+      playStyle,
+      leavePreference,
+      outerBullPreference,
+      bullPreference,
+      sortedPreferred,
+      sortedDisliked,
+    ].join('|');
+    if (_setupFallbackRouteCache.containsKey(cacheKey)) {
+      return _setupFallbackRouteCache[cacheKey];
+    }
+    if (!isValidSetupStartScore(startScore) || dartsLeft <= 0) {
+      _setupFallbackRouteCache[cacheKey] = null;
+      return null;
+    }
+
+    CheckoutSetupLeaveOption? best;
+    switch (targetBand) {
+      case CheckoutSetupFinishBand.deep:
+        best = _bestDeepSetupOption(
+          setupLeaveOptions(
+            startScore: startScore,
+            dartsLeft: dartsLeft,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            leavePreference: leavePreference,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+            maxResults: 1000,
+            maxResultsPerNarrowCount: 20,
+            preferredDoubles: preferredDoubles,
+            dislikedDoubles: dislikedDoubles,
+          ),
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        );
+        break;
+      case CheckoutSetupFinishBand.medium:
+        best = _bestSetupOptionForRange(
+          setupLeaveOptions(
+            startScore: startScore,
+            dartsLeft: dartsLeft,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            leavePreference: leavePreference,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+            maxResults: 1000,
+            maxResultsPerNarrowCount: 20,
+            preferredDoubles: preferredDoubles,
+            dislikedDoubles: dislikedDoubles,
+          ),
+          minRemaining: 100,
+          maxRemaining: 130,
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        );
+        break;
+      case CheckoutSetupFinishBand.justFinish:
+        best = _bestSetupOptionForRange(
+          setupLeaveOptions(
+            startScore: startScore,
+            dartsLeft: dartsLeft,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            leavePreference: leavePreference,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+            maxResults: 1000,
+            maxResultsPerNarrowCount: 20,
+            preferredDoubles: preferredDoubles,
+            dislikedDoubles: dislikedDoubles,
+          ),
+          minRemaining: 160,
+          maxRemaining: 170,
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        );
+        break;
+      case null:
+        final options = setupLeaveOptions(
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          maxResults: 1,
+          maxResultsPerNarrowCount: 20,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        );
+        best = options.isEmpty ? null : options.first;
+        break;
+    }
+
+    final result = best?.setupRoute;
+    _setupFallbackRouteCache[cacheKey] = result;
+    return result;
   }
 
   List<List<DartThrowResult>> allRoutesToTargetRemaining({
@@ -455,6 +893,21 @@ class CheckoutPlanner {
     int bullPreference = 50,
     int maxResults = 3,
   }) {
+    final cacheKey = <Object>[
+      startScore,
+      dartsLeft,
+      narrowFieldCount,
+      checkoutRequirement,
+      playStyle,
+      leavePreference,
+      outerBullPreference,
+      bullPreference,
+      maxResults,
+    ].join('|');
+    final cached = _topSetupLeavesCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
     if (startScore <= 1 || dartsLeft <= 0) {
       return const <CheckoutSetupLeaveOption>[];
     }
@@ -502,22 +955,24 @@ class CheckoutPlanner {
           final routeKey = nextRoute.map((entry) => entry.label).join('-');
           final key = '$next|$routeKey';
           if (seen.add(key)) {
+            final breakdown = setupLeaveScoreBreakdown(
+              setupRoute: nextRoute,
+              startScore: startScore,
+              remainingScore: next,
+              finishRoute: finishRoute,
+              dartsLeft: dartsLeft,
+              checkoutRequirement: checkoutRequirement,
+              playStyle: playStyle,
+              leavePreference: leavePreference,
+              outerBullPreference: outerBullPreference,
+              bullPreference: bullPreference,
+            );
             final candidate = CheckoutSetupLeaveOption(
               setupRoute: nextRoute,
               remainingScore: next,
               finishRoute: finishRoute,
-              score: scoreSetupLeave(
-                setupRoute: nextRoute,
-                startScore: startScore,
-                remainingScore: next,
-                finishRoute: finishRoute,
-                dartsLeft: dartsLeft,
-                checkoutRequirement: checkoutRequirement,
-                playStyle: playStyle,
-                leavePreference: leavePreference,
-                outerBullPreference: outerBullPreference,
-                bullPreference: bullPreference,
-              ),
+              score: breakdown.totalScore,
+              breakdown: breakdown,
             );
             candidates.add(candidate);
           }
@@ -534,7 +989,11 @@ class CheckoutPlanner {
 
     search(startScore, dartsLeft, const <DartThrowResult>[], 0);
     candidates.sort((a, b) => b.score.compareTo(a.score));
-    return candidates.take(maxResults).toList();
+    final results = List<CheckoutSetupLeaveOption>.unmodifiable(
+      candidates.take(maxResults),
+    );
+    _topSetupLeavesCache[cacheKey] = results;
+    return results;
   }
 
   CheckoutSetupLeaveOption? bestSetupLeaveForNarrowFieldCount({
@@ -559,6 +1018,431 @@ class CheckoutPlanner {
       maxResults: 1,
     );
     return results.isEmpty ? null : results.first;
+  }
+
+  CheckoutSetupLeaveOption? _bestDeepSetupOption(
+    List<CheckoutSetupLeaveOption> options, {
+    required int startScore,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int leavePreference,
+    required int outerBullPreference,
+    required int bullPreference,
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    CheckoutSetupLeaveOption? bestDirectDouble;
+    for (final remaining in <int>[
+      32,
+      40,
+      36,
+      24,
+      20,
+      16,
+      8,
+      12,
+      28,
+      18,
+      14,
+      10,
+      6,
+      4,
+      2,
+      50,
+      26,
+      22,
+      38,
+      34,
+      30,
+    ]) {
+      if (remaining >= startScore) {
+        continue;
+      }
+      final routes = allRoutesToTargetRemaining(
+        startScore: startScore,
+        targetScore: remaining,
+        dartsLeft: dartsLeft,
+      );
+      for (final route in routes) {
+        if (!isAllowedSetupRoute(route)) {
+          continue;
+        }
+        final finishRoute = bestFinishRoute(
+          score: remaining,
+          dartsLeft: 3,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (finishRoute == null || finishRoute.isEmpty) {
+          continue;
+        }
+        final breakdown = setupLeaveScoreBreakdown(
+          setupRoute: route,
+          startScore: startScore,
+          remainingScore: remaining,
+          finishRoute: finishRoute,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        final option = CheckoutSetupLeaveOption(
+          setupRoute: route,
+          remainingScore: remaining,
+          finishRoute: finishRoute,
+          score: breakdown.totalScore,
+          breakdown: breakdown,
+        );
+        if (bestDirectDouble == null ||
+            _compareDeepDirectDoubleCandidates(
+                  option,
+                  bestDirectDouble,
+                  startScore: startScore,
+                  dartsLeft: dartsLeft,
+                  checkoutRequirement: checkoutRequirement,
+                  playStyle: playStyle,
+                  outerBullPreference: outerBullPreference,
+                  bullPreference: bullPreference,
+                  preferredDoubles: preferredDoubles,
+                  dislikedDoubles: dislikedDoubles,
+                ) <
+                0) {
+          bestDirectDouble = option;
+        }
+      }
+    }
+    if (bestDirectDouble != null) {
+      return bestDirectDouble;
+    }
+
+    final deepCandidates = options
+        .where((entry) => entry.remainingScore <= 79)
+        .toList(growable: false);
+    final directDoubleCandidates = deepCandidates
+        .where((entry) => _isDirectDoubleLeave(entry.remainingScore))
+        .toList(growable: false);
+    if (directDoubleCandidates.isNotEmpty) {
+      directDoubleCandidates.sort(
+        (a, b) => _compareDeepDirectDoubleCandidates(
+          a,
+          b,
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        ),
+      );
+      return directDoubleCandidates.first;
+    }
+
+    final finishUpTo99 = options
+        .where((entry) => entry.remainingScore <= 99)
+        .toList(growable: false);
+    if (finishUpTo99.isEmpty) {
+      return null;
+    }
+    finishUpTo99.sort((a, b) {
+      final intentCompare = _deepFirstDartIntentValue(
+        b,
+        startScore: startScore,
+        dartsLeft: dartsLeft,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+        outerBullPreference: outerBullPreference,
+        bullPreference: bullPreference,
+      ).compareTo(
+        _deepFirstDartIntentValue(
+          a,
+          startScore: startScore,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        ),
+      );
+      if (intentCompare != 0) {
+        return intentCompare;
+      }
+      return setupLeaveEffectiveScore(
+        b,
+        preferredDoubles: preferredDoubles,
+        dislikedDoubles: dislikedDoubles,
+      ).compareTo(
+        setupLeaveEffectiveScore(
+          a,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+        ),
+      );
+    });
+    return finishUpTo99.first;
+  }
+
+  CheckoutSetupLeaveOption? _bestSetupOptionForRange(
+    List<CheckoutSetupLeaveOption> options, {
+    required int minRemaining,
+    required int maxRemaining,
+    required int startScore,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int leavePreference,
+    required int outerBullPreference,
+    required int bullPreference,
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    final fromExisting = options
+        .where(
+          (entry) =>
+              entry.remainingScore >= minRemaining &&
+              entry.remainingScore <= maxRemaining,
+        )
+        .toList(growable: false);
+    if (fromExisting.isNotEmpty) {
+      final sorted = fromExisting.toList()
+        ..sort(
+          (a, b) => setupLeaveEffectiveScore(
+            b,
+            preferredDoubles: preferredDoubles,
+            dislikedDoubles: dislikedDoubles,
+          ).compareTo(
+            setupLeaveEffectiveScore(
+              a,
+              preferredDoubles: preferredDoubles,
+              dislikedDoubles: dislikedDoubles,
+            ),
+          ),
+        );
+      return sorted.first;
+    }
+
+    CheckoutSetupLeaveOption? best;
+    for (var remaining = minRemaining; remaining <= maxRemaining; remaining += 1) {
+      if (remaining >= startScore) {
+        continue;
+      }
+      final routes = allRoutesToTargetRemaining(
+        startScore: startScore,
+        targetScore: remaining,
+        dartsLeft: dartsLeft,
+      );
+      for (final route in routes) {
+        if (!isAllowedSetupRoute(route)) {
+          continue;
+        }
+        final finishRoute = bestFinishRoute(
+          score: remaining,
+          dartsLeft: 3,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (finishRoute == null || finishRoute.isEmpty) {
+          continue;
+        }
+        final breakdown = setupLeaveScoreBreakdown(
+          setupRoute: route,
+          startScore: startScore,
+          remainingScore: remaining,
+          finishRoute: finishRoute,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          leavePreference: leavePreference,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        final option = CheckoutSetupLeaveOption(
+          setupRoute: route,
+          remainingScore: remaining,
+          finishRoute: finishRoute,
+          score: breakdown.totalScore,
+          breakdown: breakdown,
+        );
+        if (best == null ||
+            setupLeaveEffectiveScore(
+                  option,
+                  preferredDoubles: preferredDoubles,
+                  dislikedDoubles: dislikedDoubles,
+                ) >
+                setupLeaveEffectiveScore(
+                  best,
+                  preferredDoubles: preferredDoubles,
+                  dislikedDoubles: dislikedDoubles,
+                )) {
+          best = option;
+        }
+      }
+    }
+    return best;
+  }
+
+  int _compareDeepDirectDoubleCandidates(
+    CheckoutSetupLeaveOption a,
+    CheckoutSetupLeaveOption b, {
+    required int startScore,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+  }) {
+    final aGoodDouble = _isGoodDeepDoubleLeave(a.remainingScore);
+    final bGoodDouble = _isGoodDeepDoubleLeave(b.remainingScore);
+    final doubleCompare = _deepDirectDoubleValue(
+      b.remainingScore,
+    ).compareTo(_deepDirectDoubleValue(a.remainingScore));
+    if (doubleCompare != 0) {
+      return doubleCompare;
+    }
+    final intentCompare = _deepFirstDartIntentValue(
+      b,
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    ).compareTo(
+      _deepFirstDartIntentValue(
+        a,
+        startScore: startScore,
+        dartsLeft: dartsLeft,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+        outerBullPreference: outerBullPreference,
+        bullPreference: bullPreference,
+      ),
+    );
+    if (intentCompare != 0) {
+      return intentCompare;
+    }
+    if (aGoodDouble && bGoodDouble) {
+      final pathCompare =
+          b.breakdown.routeGuidance.compareTo(a.breakdown.routeGuidance);
+      if (pathCompare != 0) {
+        return pathCompare;
+      }
+    }
+    return setupLeaveEffectiveScore(
+      b,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    ).compareTo(
+      setupLeaveEffectiveScore(
+        a,
+        preferredDoubles: preferredDoubles,
+        dislikedDoubles: dislikedDoubles,
+      ),
+    );
+  }
+
+  int _deepDirectDoubleValue(int remainingScore) {
+    if (remainingScore == 50) {
+      return 40;
+    }
+    if (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven) {
+      return _isGoodDeepDoubleLeave(remainingScore) ? 100 : 20;
+    }
+    return 0;
+  }
+
+  bool _isGoodDeepDoubleLeave(int remainingScore) {
+    if (remainingScore <= 1 || remainingScore > 40 || !remainingScore.isEven) {
+      return false;
+    }
+    final doubleValue = remainingScore ~/ 2;
+    var twos = 0;
+    var value = doubleValue;
+    while (value > 0 && value.isEven) {
+      twos += 1;
+      value ~/= 2;
+    }
+    return twos >= 3;
+  }
+
+  int _deepFirstDartIntentValue(
+    CheckoutSetupLeaveOption option, {
+    required int startScore,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (option.setupRoute.isEmpty || dartsLeft <= 1) {
+      return 0;
+    }
+    final first = option.setupRoute.first;
+    if (first.isTriple) {
+      final fallbackRemaining = startScore - first.baseValue;
+      final fallbackFinish = bestFinishRoute(
+        score: fallbackRemaining,
+        dartsLeft: dartsLeft - 1,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+        outerBullPreference: outerBullPreference,
+        bullPreference: bullPreference,
+      );
+      if (fallbackFinish != null && fallbackFinish.isNotEmpty) {
+        return 220;
+      }
+      return 80;
+    }
+    if (first.isBull) {
+      final fallbackRemaining = startScore - 25;
+      final fallbackFinish = bestFinishRoute(
+        score: fallbackRemaining,
+        dartsLeft: dartsLeft - 1,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+        outerBullPreference: outerBullPreference,
+        bullPreference: bullPreference,
+      );
+      if (fallbackFinish != null && fallbackFinish.isNotEmpty) {
+        return 180;
+      }
+      return 40;
+    }
+    if (first.isDouble && !first.isBull) {
+      return -180;
+    }
+    if (!isNarrowField(first) && first.baseValue >= 15) {
+      return -120;
+    }
+    return 0;
+  }
+
+  CheckoutSetupFinishBand? classifySetupFinishBand(int remainingScore) {
+    if (remainingScore <= 79) {
+      return CheckoutSetupFinishBand.deep;
+    }
+    if (remainingScore >= 100 && remainingScore <= 130) {
+      return CheckoutSetupFinishBand.medium;
+    }
+    if (remainingScore >= 160 && remainingScore <= 170) {
+      return CheckoutSetupFinishBand.justFinish;
+    }
+    return null;
+  }
+
+  bool _isDirectDoubleLeave(int remainingScore) {
+    return remainingScore == 50 ||
+        (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven);
   }
 
   CheckoutContinuationPlan? bestContinuationPlan({
@@ -682,25 +1566,23 @@ class CheckoutPlanner {
     int bullPreference = 50,
   }) {
     final dartsUsedScore = 1280 - (route.length * 140);
-    final twoDartCheckoutBonus = route.length == 2 ? 70 : 0;
-    final narrowFieldPenalty = route.where(isNarrowField).length * 150;
+    final twoDartCheckoutBonus = 0;
+    final narrowFieldPenalty = _narrowFieldPenalty(
+      route,
+      defaultPenalty: 150,
+    );
     final outerBullPenalty =
         route.where((entry) => entry.label == '25').length *
             _outerBullPenaltyValue(0, outerBullPreference);
-    final earlyBullPenalty = route
-            .take(route.length > 1 ? route.length - 1 : 0)
-            .where((entry) => entry.isBull)
-            .length *
-        _bullPenaltyValue(46, bullPreference, scale: 1);
     final finalBullPenalty =
         route.isNotEmpty && route.last.isBull
-            ? _bullPenaltyValue(30, bullPreference, scale: 1)
+            ? _bullPenaltyValue(65, bullPreference, scale: 1)
             : 0;
     final endingDoubleDoubleBonus = doubleDoubleEndingBonus(route);
     final goodDoubleBonus = doublePreference(route.last);
     final continuityBonus = continuityScore(route);
     final comfortBonus = comfortScore(route) +
-        _checkoutTripleFallbackComfortRelief(
+        _checkoutFallbackComfortRelief(
           route: route,
           startScore: startScore,
           totalDarts: totalDarts,
@@ -744,7 +1626,6 @@ class CheckoutPlanner {
         robustnessBonus -
         narrowFieldPenalty -
         outerBullPenalty -
-        earlyBullPenalty -
         finalBullPenalty;
   }
 
@@ -757,19 +1638,32 @@ class CheckoutPlanner {
     int outerBullPreference = 50,
     int bullPreference = 50,
   }) {
+    final cacheKey = <Object>[
+      route.map((entry) => entry.label).join('-'),
+      startScore,
+      totalDarts,
+      checkoutRequirement,
+      playStyle,
+      outerBullPreference,
+      bullPreference,
+    ].join('|');
+    final cached = _routeScoreBreakdownCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
     final dartsUsedScore = 1280 - (route.length * 140);
-    final twoDartCheckoutBonus = route.length == 2 ? 70 : 0;
-    final earlyBullPenalty = route
-            .take(route.length > 1 ? route.length - 1 : 0)
-            .where((entry) => entry.isBull)
-            .length *
-        _bullPenaltyValue(46, bullPreference, scale: 1);
-    final finalBullPenalty =
-        route.isNotEmpty && route.last.isBull
-            ? _bullPenaltyValue(30, bullPreference, scale: 1)
-            : 0;
-    final outerBullPenalty = route.where((entry) => entry.label == '25').length *
-        _outerBullPenaltyValue(0, outerBullPreference);
+    final twoDartCheckoutBonus = 0;
+      final narrowFieldPenalty = _narrowFieldPenalty(
+        route,
+        defaultPenalty: 150,
+      );
+      final finalBullPenalty =
+          route.isNotEmpty && route.last.isBull
+              ? _bullPenaltyValue(65, bullPreference, scale: 1)
+              : 0;
+      final outerBullPenalty = route.where((entry) => entry.label == '25').length *
+          _outerBullPenaltyValue(0, outerBullPreference);
+      final endingDoubleDoubleBonus = doubleDoubleEndingBonus(route);
 
     final robustnessAnalysis = _robustnessDetails(
       route: route,
@@ -781,7 +1675,7 @@ class CheckoutPlanner {
       bullPreference: bullPreference,
     );
 
-    final comfortRelief = _checkoutTripleFallbackComfortRelief(
+    final comfortRelief = _checkoutFallbackComfortRelief(
       route: route,
       startScore: startScore,
       totalDarts: totalDarts,
@@ -791,17 +1685,20 @@ class CheckoutPlanner {
       bullPreference: bullPreference,
     );
 
-    return CheckoutRouteScoreBreakdown(
-      dartPathScore: dartsUsedScore + twoDartCheckoutBonus,
-      comfort: comfortScore(route) + comfortRelief,
-      robustness: robustnessAnalysis.total +
-          singleOr25DoubleAccessBonus(
-            route: route,
-            startScore: startScore,
-          ),
-      doubleQuality: route.isEmpty ? 0 : doublePreference(route.last),
-      bullPenalty: earlyBullPenalty + finalBullPenalty + outerBullPenalty,
-      segmentFlow: continuityScore(route),
+      final breakdown = CheckoutRouteScoreBreakdown(
+        dartPathScore: dartsUsedScore + twoDartCheckoutBonus,
+        comfort: comfortScore(route) + comfortRelief,
+        robustness: robustnessAnalysis.total +
+            singleOr25DoubleAccessBonus(
+              route: route,
+              startScore: startScore,
+            ),
+        doubleQuality:
+            (route.isEmpty ? 0 : doublePreference(route.last)) +
+            endingDoubleDoubleBonus,
+        narrowFieldPenalty: narrowFieldPenalty,
+        bullPenalty: finalBullPenalty + outerBullPenalty,
+        segmentFlow: continuityScore(route),
       dartPathDetails: _dartPathDetails(
         routeLength: route.length,
         baseScore: dartsUsedScore,
@@ -828,15 +1725,24 @@ class CheckoutPlanner {
                 startScore: startScore,
               )}',
       ],
-      doubleQualityDetails: _doubleDetails(route.isEmpty ? null : route.last),
+        doubleQualityDetails: <String>[
+          ..._doubleDetails(route.isEmpty ? null : route.last),
+          if (endingDoubleDoubleBonus > 0)
+            'Double-Double-Endbonus: +$endingDoubleDoubleBonus',
+        ],
+      narrowFieldDetails: _narrowFieldDetails(
+        route: route,
+        penalty: narrowFieldPenalty,
+      ),
       bullPenaltyDetails: _bullPenaltyDetails(
         route: route,
-        earlyBullPenalty: earlyBullPenalty,
         finalBullPenalty: finalBullPenalty,
         outerBullPenalty: outerBullPenalty,
       ),
       segmentFlowDetails: _segmentFlowDetails(route),
     );
+    _routeScoreBreakdownCache[cacheKey] = breakdown;
+    return breakdown;
   }
 
   int simpleRouteScore(
@@ -846,19 +1752,17 @@ class CheckoutPlanner {
     int bullPreference = 50,
   }) {
     final dartsUsedScore = 1180 - (route.length * 135);
-    final twoDartCheckoutBonus = route.length == 2 ? 55 : 0;
-    final narrowFieldPenalty = route.where(isNarrowField).length * 120;
+    final twoDartCheckoutBonus = 0;
+    final narrowFieldPenalty = _narrowFieldPenalty(
+      route,
+      defaultPenalty: 120,
+    );
     final outerBullPenalty =
         route.where((entry) => entry.label == '25').length *
             _outerBullPenaltyValue(0, outerBullPreference);
-    final earlyBullPenalty = route
-            .take(route.length > 1 ? route.length - 1 : 0)
-            .where((entry) => entry.isBull)
-            .length *
-        _bullPenaltyValue(46, bullPreference, scale: 1);
     final finalBullPenalty =
         route.isNotEmpty && route.last.isBull
-            ? _bullPenaltyValue(30, bullPreference, scale: 1)
+            ? _bullPenaltyValue(65, bullPreference, scale: 1)
             : 0;
     final endingDoubleDoubleBonus = doubleDoubleEndingBonus(route);
 
@@ -870,7 +1774,6 @@ class CheckoutPlanner {
         continuityScore(route) -
         narrowFieldPenalty -
         outerBullPenalty -
-        earlyBullPenalty -
         finalBullPenalty;
 
     switch (playStyle) {
@@ -899,16 +1802,46 @@ class CheckoutPlanner {
       return -999999;
     }
 
-    final dartsUsedScore = 1000 - (route.length * 120);
+    final routeBreakdown = routeScoreBreakdown(
+      route: route,
+      startScore: startScore,
+      totalDarts: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    final setupComfortRelief = _setupComfortRelief(
+      route: route,
+      startScore: startScore,
+      totalDarts: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    final baseRouteScore =
+        scoreRoute(
+          route: route,
+          startScore: startScore,
+          totalDarts: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        ) -
+        routeBreakdown.dartPathScore +
+        setupComfortRelief.total;
     final unusedDartPenalty = (dartsLeft - route.length) * 140;
-    final comfortBonus = setupComfortScore(route);
-    final continuityBonus = continuityScore(route);
-    final narrowFieldPenalty = route.where(isNarrowField).length * 150;
-    final outerBullPenalty =
-        route.where((entry) => entry.label == '25').length *
-            _outerBullPenaltyValue(0, outerBullPreference);
-    final earlyBullPenalty = route.where((entry) => entry.isBull).length *
-        _bullPenaltyValue(46, bullPreference, scale: 1);
+    final setupGuaranteeBonus = _setupGuaranteedFinishAfterMissBonus(
+      route: route,
+      startScore: startScore,
+      totalDarts: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
     final targetCheckout = bestFinishRoute(
       score: targetScore,
       dartsLeft: 3,
@@ -920,22 +1853,18 @@ class CheckoutPlanner {
     final targetLeaveBonus = targetCheckout == null
         ? _targetPreference(targetScore)
         : 220 +
-            (simpleRouteScore(
-                  targetCheckout,
+            (scoreRoute(
+                  route: targetCheckout,
+                  startScore: targetScore,
+                  totalDarts: 3,
+                  checkoutRequirement: checkoutRequirement,
                   playStyle: playStyle,
                   outerBullPreference: outerBullPreference,
                   bullPreference: bullPreference,
                 ) ~/
-                3);
+                4);
 
-    return dartsUsedScore +
-        comfortBonus +
-        continuityBonus +
-        targetLeaveBonus -
-        unusedDartPenalty -
-        narrowFieldPenalty -
-        earlyBullPenalty -
-        outerBullPenalty;
+    return baseRouteScore + targetLeaveBonus + setupGuaranteeBonus - unusedDartPenalty;
   }
 
   int scoreSetupLeave({
@@ -950,20 +1879,83 @@ class CheckoutPlanner {
     int outerBullPreference = 50,
     int bullPreference = 50,
   }) {
-    final leaveScore = scoreRouteToTargetRemaining(
+    return setupLeaveScoreBreakdown(
+      setupRoute: setupRoute,
+      startScore: startScore,
+      remainingScore: remainingScore,
+      finishRoute: finishRoute,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: leavePreference,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    ).totalScore;
+  }
+
+  CheckoutSetupScoreBreakdown setupLeaveScoreBreakdown({
+    required List<DartThrowResult> setupRoute,
+    required int startScore,
+    required int remainingScore,
+    required List<DartThrowResult> finishRoute,
+    required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+    int leavePreference = 50,
+    int outerBullPreference = 50,
+    int bullPreference = 50,
+  }) {
+    final cacheKey = <Object>[
+      setupRoute.map((entry) => entry.label).join('-'),
+      startScore,
+      remainingScore,
+      finishRoute.map((entry) => entry.label).join('-'),
+      dartsLeft,
+      checkoutRequirement,
+      playStyle,
+      leavePreference,
+      outerBullPreference,
+      bullPreference,
+    ].join('|');
+    final cached = _setupScoreBreakdownCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+    final routeBreakdown = routeScoreBreakdown(
       route: setupRoute,
       startScore: startScore,
-      targetScore: remainingScore,
-      dartsLeft: dartsLeft,
+      totalDarts: dartsLeft,
       checkoutRequirement: checkoutRequirement,
       playStyle: playStyle,
       outerBullPreference: outerBullPreference,
       bullPreference: bullPreference,
     );
-    final finishScore = scoreRoute(
-      route: finishRoute,
-      startScore: remainingScore,
-      totalDarts: 3,
+    final setupComfortRelief = _setupComfortRelief(
+      route: setupRoute,
+      startScore: startScore,
+      totalDarts: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    final adjustedSetupComfort = routeBreakdown.comfort + setupComfortRelief.total;
+    final setupGuaranteeBonus = _setupGuaranteedFinishAfterMissBonus(
+      route: setupRoute,
+      startScore: startScore,
+      totalDarts: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    final earlySetupBullPenalty = _earlySetupBullPenalty(setupRoute);
+    final earlySetupDoublePenalty = _earlySetupDoublePenalty(setupRoute);
+    final leaveScore = scoreRouteToTargetRemaining(
+      route: setupRoute,
+      startScore: startScore,
+      targetScore: remainingScore,
+      dartsLeft: dartsLeft,
       checkoutRequirement: checkoutRequirement,
       playStyle: playStyle,
       outerBullPreference: outerBullPreference,
@@ -978,13 +1970,241 @@ class CheckoutPlanner {
       outerBullPreference: outerBullPreference,
       bullPreference: bullPreference,
     );
-    final simpleWeight = (130 - leavePreference).clamp(30, 130);
-    final finishWeight = (30 + leavePreference).clamp(30, 130);
+    final simpleWeight = (145 - (leavePreference ~/ 2)).clamp(80, 145);
+    final setupPathScore = (leaveScore * simpleWeight) ~/ 100;
+    final baseLeaveQuality = leaveQualityBonus(
+      remainingScore: remainingScore,
+      finishRoute: finishRoute,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    final leaveQuality = baseLeaveQuality + setupGuaranteeBonus;
+    final routeGuidance =
+        (routeBreakdown.segmentFlow * 2) - routeBreakdown.narrowFieldPenalty;
+    final totalScore =
+        routeGuidance +
+        leaveQuality -
+        missPenalty -
+        earlySetupBullPenalty -
+        earlySetupDoublePenalty;
 
-    return (((leaveScore * simpleWeight) +
-                ((finishScore ~/ 2) * finishWeight)) ~/
-            100) -
-        missPenalty;
+    final breakdown = CheckoutSetupScoreBreakdown(
+      setupPathScore: setupPathScore,
+      routeGuidance: routeGuidance,
+      leaveQuality: leaveQuality,
+      missPenalty: missPenalty,
+      totalScore: totalScore,
+      setupPathDetails: <String>[
+        'Stellweg-Basis ohne Dart-Weg: $leaveScore',
+        'Der Dart-Weg zaehlt im Stell Rechner nicht mit, weil hier derselbe Besuch bewertet wird.',
+        if (setupComfortRelief.total > 0)
+          'Fruehe Doppel/Triple werden im Stell Rechner neutralisiert: +${setupComfortRelief.total}',
+        'Mit Stell-Gewicht $simpleWeight% ergibt das +$setupPathScore',
+        'Route-Basis: Komfort ${adjustedSetupComfort >= 0 ? '+' : ''}$adjustedSetupComfort',
+        'Route-Basis: Robustheit ${routeBreakdown.robustness >= 0 ? '+' : ''}${routeBreakdown.robustness}',
+        'Route-Basis: Doppel ${routeBreakdown.doubleQuality >= 0 ? '+' : ''}${routeBreakdown.doubleQuality}',
+        'Route-Basis: Bull-Malus ${routeBreakdown.bullPenalty > 0 ? '-' : '+'}${routeBreakdown.bullPenalty}',
+        'Route-Basis: Segmentfluss ${routeBreakdown.segmentFlow >= 0 ? '+' : ''}${routeBreakdown.segmentFlow}',
+        ...setupComfortRelief.details,
+        ...routeBreakdown.robustnessDetails,
+        ...routeBreakdown.doubleQualityDetails,
+        ...routeBreakdown.bullPenaltyDetails,
+        ...routeBreakdown.segmentFlowDetails,
+      ],
+      routeGuidanceDetails: <String>[
+        'Schmale Felder im Stellweg: -${routeBreakdown.narrowFieldPenalty}',
+        'Segmentfluss im Stellweg doppelt gewichtet: ${routeBreakdown.segmentFlow >= 0 ? '+' : ''}${routeBreakdown.segmentFlow * 2}',
+        'Gesamt fuer Wegfuehrung: ${routeGuidance >= 0 ? '+' : ''}$routeGuidance',
+        ...routeBreakdown.narrowFieldDetails,
+        ...routeBreakdown.segmentFlowDetails,
+      ],
+      leaveQualityDetails: _leaveQualityDetails(
+        remainingScore: remainingScore,
+        bonus: baseLeaveQuality,
+        finishRoute: finishRoute,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+        outerBullPreference: outerBullPreference,
+        bullPreference: bullPreference,
+      ) +
+          (setupGuaranteeBonus > 0
+              ? _setupGuaranteedFinishAfterMissDetails(
+                  route: setupRoute,
+                  startScore: startScore,
+                  totalDarts: dartsLeft,
+                  checkoutRequirement: checkoutRequirement,
+                  playStyle: playStyle,
+                  outerBullPreference: outerBullPreference,
+                  bullPreference: bullPreference,
+                  bonus: setupGuaranteeBonus,
+                )
+              : const <String>[]),
+      missPenaltyDetails: <String>[
+        'Miss-Risiko fuer den Stellweg: -$missPenalty',
+        if (earlySetupBullPenalty > 0)
+          'Fruehe BULL im Stellweg: -$earlySetupBullPenalty',
+        if (earlySetupDoublePenalty > 0)
+          'Fruehe Doppel im Stellweg: -$earlySetupDoublePenalty',
+      ],
+    );
+    _setupScoreBreakdownCache[cacheKey] = breakdown;
+    return breakdown;
+  }
+
+  int targetRemainingBonus({
+    required int remainingScore,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (remainingScore <= 1) {
+      return 0;
+    }
+    if (remainingScore == 50) {
+      return 140 + doublePreference(rules.createBull());
+    }
+    if (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven) {
+      return 340 + doublePreference(rules.createDouble(remainingScore ~/ 2));
+    }
+    final finishRoute = bestFinishRoute(
+      score: remainingScore,
+      dartsLeft: 3,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (finishRoute == null || finishRoute.isEmpty) {
+      return 0;
+    }
+    return 60 +
+        (scoreRoute(
+              route: finishRoute,
+              startScore: remainingScore,
+              totalDarts: 3,
+              checkoutRequirement: checkoutRequirement,
+              playStyle: playStyle,
+              outerBullPreference: outerBullPreference,
+              bullPreference: bullPreference,
+            ) ~/
+            8);
+  }
+
+  int leaveQualityBonus({
+    required int remainingScore,
+    required List<DartThrowResult> finishRoute,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (remainingScore <= 1) {
+      return 0;
+    }
+    if (finishRoute.isEmpty) {
+      return 0;
+    }
+    final finishScore = scoreRoute(
+      route: finishRoute,
+      startScore: remainingScore,
+      totalDarts: 3,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (remainingScore == 50) {
+      return 180 +
+          doublePreference(rules.createBull()) +
+          _lowLeaveDepthBonus(remainingScore) +
+          (finishScore ~/ 10);
+    }
+    if (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven) {
+      return 220 +
+          doublePreference(rules.createDouble(remainingScore ~/ 2)) +
+          _lowLeaveDepthBonus(remainingScore) +
+          (finishScore ~/ 10);
+    }
+    return 140 +
+        (finishScore ~/ 4) +
+        _lowFinishDepthBonus(remainingScore);
+  }
+
+  List<String> _leaveQualityDetails({
+    required int remainingScore,
+    required int bonus,
+    required List<DartThrowResult> finishRoute,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (remainingScore <= 1) {
+      return <String>['Kein gueltiger Restwert fuer einen Stell-Bonus.'];
+    }
+    if (finishRoute.isEmpty) {
+      return <String>[
+        'Kein direktes Doppel-Leave und kein gueltiges Folgefinish: +0',
+      ];
+    }
+    final finishScore = scoreRoute(
+      route: finishRoute,
+      startScore: remainingScore,
+      totalDarts: 3,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (remainingScore == 50) {
+      return <String>[
+        'Direkter BULL-Rest $remainingScore.',
+        'Leave-Qualitaet wie im Checkout Rechner: BULL = +${doublePreference(rules.createBull())}',
+        'Tiefer guter Rest: +${_lowLeaveDepthBonus(remainingScore)}',
+        'Garantiertes Finish ueber ${finishRoute.map((entry) => entry.label).join(' | ')}: +${finishScore ~/ 10}',
+        'Basis fuer direktes Finish-Leave: +180',
+        'Gesamt: +$bonus',
+      ];
+    }
+    if (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven) {
+      final doubleThrow = rules.createDouble(remainingScore ~/ 2);
+      return <String>[
+        'Direktes Doppel-Leave $remainingScore Rest.',
+        'Leave-Qualitaet wie im Checkout Rechner: ${doubleThrow.label} = +${doublePreference(doubleThrow)}',
+        'Tiefer guter Rest: +${_lowLeaveDepthBonus(remainingScore)}',
+        'Garantiertes Finish ueber ${finishRoute.map((entry) => entry.label).join(' | ')}: +${finishScore ~/ 10}',
+        'Basis fuer direktes Finish-Leave: +220',
+        'Gesamt: +$bonus',
+      ];
+    }
+    return <String>[
+      'Garantiertes Finish auf $remainingScore Rest.',
+      'Bestes Finish danach ${finishRoute.map((entry) => entry.label).join(' | ')}',
+      'Finish-Qualitaet des Leaves: +${finishScore ~/ 4}',
+      'Tiefes gutes Folgefinish: +${_lowFinishDepthBonus(remainingScore)}',
+      'Basis fuer garantiertes Finish-Leave: +140',
+      'Gesamt: +$bonus',
+    ];
+  }
+
+  int _lowLeaveDepthBonus(int remainingScore) {
+    if (remainingScore == 50) {
+      return 16;
+    }
+    if (remainingScore > 1 && remainingScore <= 40 && remainingScore.isEven) {
+      return ((42 - remainingScore).clamp(0, 40)) * 4;
+    }
+    return 0;
+  }
+
+  int _lowFinishDepthBonus(int remainingScore) {
+    if (remainingScore <= 1) {
+      return 0;
+    }
+    return ((81 - remainingScore).clamp(0, 50)) ~/ 2;
   }
 
   int setupMissPenalty({
@@ -1013,19 +2233,6 @@ class CheckoutPlanner {
           bullPreference: bullPreference,
           isPrimaryMiss: index == 0,
         );
-
-        for (final neighbor in rules.adjacentSegments(dartThrow.baseValue)) {
-          penalty += _penaltyForSetupMiss(
-            remainingScore: remaining - neighbor,
-            dartsLeft: dartsAfterThis,
-            checkoutRequirement: checkoutRequirement,
-            playStyle: playStyle,
-            outerBullPreference: outerBullPreference,
-            bullPreference: bullPreference,
-            isPrimaryMiss: index == 0,
-            isNeighborMiss: true,
-          );
-        }
       } else if (dartThrow.isDouble && !dartThrow.isBull) {
         penalty += _penaltyForSetupMiss(
           remainingScore: remaining - dartThrow.baseValue,
@@ -1036,6 +2243,17 @@ class CheckoutPlanner {
           bullPreference: bullPreference,
           isPrimaryMiss: index == 0,
         );
+        if (dartsAfterThis > 0) {
+          penalty += _penaltyForDoubleZeroMiss(
+            remainingScore: remaining,
+            dartsLeft: dartsAfterThis,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+            isPrimaryMiss: index == 0,
+          );
+        }
       } else if (dartThrow.isBull && dartsAfterThis > 0) {
         penalty += _penaltyForSetupMiss(
           remainingScore: remaining - 25,
@@ -1090,6 +2308,48 @@ class CheckoutPlanner {
     return isNeighborMiss ? 18 : 26;
   }
 
+  int _penaltyForDoubleZeroMiss({
+    required int remainingScore,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+    bool isPrimaryMiss = false,
+  }) {
+    if (remainingScore <= 1 || dartsLeft <= 0) {
+      return 0;
+    }
+
+    final exactFinish = bestFinishRoute(
+      score: remainingScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (exactFinish != null && exactFinish.isNotEmpty) {
+      return isPrimaryMiss ? 24 : 12;
+    }
+
+    final continuation = bestContinuationPlan(
+      score: remainingScore,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (continuation == null || continuation.throws.isEmpty) {
+      return isPrimaryMiss ? 110 : 70;
+    }
+
+    return continuation.immediateFinish
+        ? (isPrimaryMiss ? 24 : 12)
+        : (isPrimaryMiss ? 70 : 42);
+  }
+
   int robustnessScore({
     required List<DartThrowResult> route,
     required int startScore,
@@ -1122,6 +2382,7 @@ class CheckoutPlanner {
     var remaining = startScore;
     var score = 0;
     final details = <String>[];
+    final isThreeDartFinish = route.length == 3;
 
     for (var index = 0; index < route.length; index += 1) {
       final dartThrow = route[index];
@@ -1131,7 +2392,6 @@ class CheckoutPlanner {
         final singleFallbackRemaining = remaining - dartThrow.baseValue;
         if (singleFallbackRemaining > 1) {
           final urgencyBonus = index == 0 ? 42 : 0;
-          final urgencyPenalty = index == 0 ? 36 : 0;
           final exactFallback = bestFinishRoute(
             score: singleFallbackRemaining,
             dartsLeft: dartsAfterThis,
@@ -1167,35 +2427,49 @@ class CheckoutPlanner {
               startScore: singleFallbackRemaining,
             );
             final firstDartImmediateFinishBonus =
-                index == 0 && exactFallback.length <= dartsAfterThis ? 60 : 0;
-            final partScore = 28 +
-                urgencyBonus +
-                firstDartImmediateFinishBonus +
-                (fallbackScore ~/ 11) +
-                fallbackFinishBonus +
-                oneDartFinishBonus +
-                noTripleFallbackBonus +
-                bullRescueBonus -
-                narrowFallbackPenalty +
-                sameSegmentFallbackBonus +
-                doubleLeaveBonus;
+                index == 0 && exactFallback.length <= dartsAfterThis ? 90 : 0;
+            final rawPartScore =
+                index == 0
+                    ? 180
+                    : 28 +
+                        urgencyBonus +
+                        firstDartImmediateFinishBonus +
+                        (fallbackScore ~/ 11) +
+                        fallbackFinishBonus +
+                        oneDartFinishBonus +
+                        noTripleFallbackBonus +
+                        bullRescueBonus -
+                        narrowFallbackPenalty +
+                        sameSegmentFallbackBonus +
+                        doubleLeaveBonus;
+            final threeDartReduction =
+                isThreeDartFinish ? (index == 0 ? 45 : 60) : 0;
+            final partScore = rawPartScore - threeDartReduction;
             score += partScore;
             details.add(
               '${index + 1}. Dart ${dartThrow.label} -> Single-Fallback ${singleFallbackRemaining}: '
               '${partScore >= 0 ? '+' : ''}$partScore',
             );
             details.add(
-              '  Basis +28, Dringlichkeit ${urgencyBonus >= 0 ? '+' : ''}$urgencyBonus, '
-              'Finish-offen ${firstDartImmediateFinishBonus >= 0 ? '+' : ''}$firstDartImmediateFinishBonus, '
-              'Fallback-Qualitaet ${((fallbackScore ~/ 11) >= 0 ? '+' : '')}${fallbackScore ~/ 11}, '
-              'Doppel ${fallbackFinishBonus >= 0 ? '+' : ''}$fallbackFinishBonus, '
-              '1-Dart-Finish ${oneDartFinishBonus >= 0 ? '+' : ''}$oneDartFinishBonus, '
-              'ohne Triple ${noTripleFallbackBonus >= 0 ? '+' : ''}$noTripleFallbackBonus, '
-              'Bull-Rettung ${bullRescueBonus >= 0 ? '+' : ''}$bullRescueBonus, '
-              'Schmalfeld -$narrowFallbackPenalty, '
-              'gleiches Segment ${sameSegmentFallbackBonus >= 0 ? '+' : ''}$sameSegmentFallbackBonus, '
-              'Doppel-Leave ${doubleLeaveBonus >= 0 ? '+' : ''}$doubleLeaveBonus',
+              index == 0
+                  ? '  Einheitlicher 1. Dart-Finish-Fallback: +150'
+                  : '  Basis +28, Dringlichkeit ${urgencyBonus >= 0 ? '+' : ''}$urgencyBonus, '
+                      'Finish-offen ${firstDartImmediateFinishBonus >= 0 ? '+' : ''}$firstDartImmediateFinishBonus, '
+                      'Fallback-Qualitaet ${((fallbackScore ~/ 11) >= 0 ? '+' : '')}${fallbackScore ~/ 11}, '
+                      'Doppel ${fallbackFinishBonus >= 0 ? '+' : ''}$fallbackFinishBonus, '
+                      '1-Dart-Finish ${oneDartFinishBonus >= 0 ? '+' : ''}$oneDartFinishBonus, '
+                      'ohne Triple ${noTripleFallbackBonus >= 0 ? '+' : ''}$noTripleFallbackBonus, '
+                      'Bull-Rettung ${bullRescueBonus >= 0 ? '+' : ''}$bullRescueBonus, '
+                      'Schmalfeld -$narrowFallbackPenalty, '
+                      'gleiches Segment ${sameSegmentFallbackBonus >= 0 ? '+' : ''}$sameSegmentFallbackBonus, '
+                      'Doppel-Leave ${doubleLeaveBonus >= 0 ? '+' : ''}$doubleLeaveBonus',
             );
+            if (threeDartReduction > 0) {
+              details.add(
+                '  3-Dart-Finish-Reduktion ${threeDartReduction >= 0 ? '-' : '+'}$threeDartReduction, '
+                'damit Fallback und Hauptweg nicht doppelt belohnt werden.',
+              );
+            }
           } else {
             final fallbackPlan = bestContinuationPlan(
               score: singleFallbackRemaining,
@@ -1220,7 +2494,7 @@ class CheckoutPlanner {
                               urgencyBonus +
                               (index == 0 ? 18 : 0) +
                               (fallbackScore ~/ 36)
-                          : -6 - urgencyPenalty + (fallbackScore ~/ 90);
+                          : -24 - (index == 0 ? 40 : 12) + (fallbackScore ~/ 120);
               score += partScore;
               details.add(
                 '${index + 1}. Dart ${dartThrow.label} -> Plan-Fallback ${singleFallbackRemaining}: '
@@ -1230,11 +2504,11 @@ class CheckoutPlanner {
                 '  ${fallbackPlan.immediateFinish ? 'Sofort-Finish' : 'Setup-Plan'}, '
                 'Dringlichkeit ${urgencyBonus >= 0 ? '+' : ''}$urgencyBonus, '
                 '1. Dart-Extra ${index == 0 && fallbackPlan.immediateFinish ? '+18' : '+0'}, '
-                'Plan-Qualitaet ${((fallbackScore ~/ (fallbackPlan.immediateFinish ? 36 : 90)) >= 0 ? '+' : '')}'
-                '${fallbackScore ~/ (fallbackPlan.immediateFinish ? 36 : 90)}',
+                'Plan-Qualitaet ${((fallbackScore ~/ (fallbackPlan.immediateFinish ? 36 : 120)) >= 0 ? '+' : '')}'
+                '${fallbackScore ~/ (fallbackPlan.immediateFinish ? 36 : 120)}',
               );
             } else {
-              final partScore = dartsAfterThis == 1 ? 0 : -(44 + urgencyPenalty);
+              final partScore = dartsAfterThis == 1 ? 0 : -(index == 0 ? 100 : 80);
               score += partScore;
               details.add(
                 '${index + 1}. Dart ${dartThrow.label} -> kein brauchbarer Single-Fallback: $partScore',
@@ -1273,29 +2547,44 @@ class CheckoutPlanner {
               startScore: outerBullFallbackRemaining,
             );
             final firstDartImmediateFinishBonus =
-                index == 0 && exactFallback.length <= dartsAfterThis ? 38 : 0;
-            final partScore = 22 +
-                (index == 0 ? 28 : 10) +
-                firstDartImmediateFinishBonus +
-                (fallbackScore ~/ 12) +
-                finishBonus +
-                oneDartFinishBonus +
-                repeatedBullBonus +
-                doubleLeaveBonus;
+                index == 0 && exactFallback.length <= dartsAfterThis ? 60 : 0;
+            final bullFallbackBonus = index == 0 ? 48 : 24;
+            final rawPartScore =
+                index == 0
+                    ? 180
+                    : 22 +
+                        bullFallbackBonus +
+                        firstDartImmediateFinishBonus +
+                        (fallbackScore ~/ 12) +
+                        finishBonus +
+                        oneDartFinishBonus +
+                        repeatedBullBonus +
+                        doubleLeaveBonus;
+            final threeDartReduction =
+                isThreeDartFinish ? (index == 0 ? 45 : 60) : 0;
+            final partScore = rawPartScore - threeDartReduction;
             score += partScore;
             details.add(
               '${index + 1}. Dart BULL -> 25-Fallback ${outerBullFallbackRemaining}: '
               '${partScore >= 0 ? '+' : ''}$partScore',
             );
             details.add(
-              '  Basis +22, Bull-Dringlichkeit ${((index == 0 ? 28 : 10) >= 0 ? '+' : '')}${index == 0 ? 28 : 10}, '
-              'Finish-offen ${firstDartImmediateFinishBonus >= 0 ? '+' : ''}$firstDartImmediateFinishBonus, '
-              'Fallback-Qualitaet ${((fallbackScore ~/ 12) >= 0 ? '+' : '')}${fallbackScore ~/ 12}, '
-              'Doppel ${finishBonus >= 0 ? '+' : ''}$finishBonus, '
-              '1-Dart-Finish ${oneDartFinishBonus >= 0 ? '+' : ''}$oneDartFinishBonus, '
-              'Bull-Kette ${repeatedBullBonus >= 0 ? '+' : ''}$repeatedBullBonus, '
-              'Doppel-Leave ${doubleLeaveBonus >= 0 ? '+' : ''}$doubleLeaveBonus',
+              index == 0
+                  ? '  Einheitlicher 1. Dart-Finish-Fallback: +150'
+                  : '  Basis +22, Bull-Dringlichkeit ${bullFallbackBonus >= 0 ? '+' : ''}$bullFallbackBonus, '
+                      'Finish-offen ${firstDartImmediateFinishBonus >= 0 ? '+' : ''}$firstDartImmediateFinishBonus, '
+                      'Fallback-Qualitaet ${((fallbackScore ~/ 12) >= 0 ? '+' : '')}${fallbackScore ~/ 12}, '
+                      'Doppel ${finishBonus >= 0 ? '+' : ''}$finishBonus, '
+                      '1-Dart-Finish ${oneDartFinishBonus >= 0 ? '+' : ''}$oneDartFinishBonus, '
+                      'Bull-Kette ${repeatedBullBonus >= 0 ? '+' : ''}$repeatedBullBonus, '
+                      'Doppel-Leave ${doubleLeaveBonus >= 0 ? '+' : ''}$doubleLeaveBonus',
             );
+            if (threeDartReduction > 0) {
+              details.add(
+                '  3-Dart-Finish-Reduktion ${threeDartReduction >= 0 ? '-' : '+'}$threeDartReduction, '
+                'damit Fallback und Hauptweg nicht doppelt belohnt werden.',
+              );
+            }
           } else {
             final fallbackPlan = bestContinuationPlan(
               score: outerBullFallbackRemaining,
@@ -1317,9 +2606,9 @@ class CheckoutPlanner {
                       ? 0
                       : fallbackPlan.immediateFinish
                           ? 18 +
-                              (index == 0 ? 18 : 18) +
+                              (index == 0 ? 34 : 24) +
                               (fallbackScore ~/ 40)
-                          : -6 - (index == 0 ? 18 : 8) + (fallbackScore ~/ 96);
+                          : -24 - (index == 0 ? 40 : 12) + (fallbackScore ~/ 120);
               score += partScore;
               details.add(
                 '${index + 1}. Dart BULL -> 25-Fallback ${outerBullFallbackRemaining}: '
@@ -1327,18 +2616,62 @@ class CheckoutPlanner {
               );
               details.add(
                 '  ${fallbackPlan.immediateFinish ? 'Sofort-Finish' : 'Setup-Plan'}, '
-                'Bull-Extra ${((index == 0 ? 18 : 18) >= 0 ? '+' : '')}${index == 0 ? 18 : 18}, '
-                'Plan-Qualitaet ${((fallbackScore ~/ (fallbackPlan.immediateFinish ? 40 : 96)) >= 0 ? '+' : '')}'
-                '${fallbackScore ~/ (fallbackPlan.immediateFinish ? 40 : 96)}',
+                'Bull-Extra ${((fallbackPlan.immediateFinish ? (index == 0 ? 34 : 24) : 0) >= 0 ? '+' : '')}'
+                '${fallbackPlan.immediateFinish ? (index == 0 ? 34 : 24) : 0}, '
+                'Plan-Qualitaet ${((fallbackScore ~/ (fallbackPlan.immediateFinish ? 40 : 120)) >= 0 ? '+' : '')}'
+                '${fallbackScore ~/ (fallbackPlan.immediateFinish ? 40 : 120)}',
               );
             } else {
-              final partScore = dartsAfterThis == 1 ? 0 : -(index == 0 ? 26 : 14);
+              final partScore = dartsAfterThis == 1 ? 0 : -(index == 0 ? 42 : 14);
               score += partScore;
               details.add(
                 '${index + 1}. Dart BULL -> kein brauchbarer 25-Fallback ${outerBullFallbackRemaining}: $partScore',
               );
             }
           }
+        }
+      }
+
+      if (dartThrow.isDouble && !dartThrow.isBull && dartsAfterThis > 0) {
+        final exactFallback = bestFinishRoute(
+          score: remaining,
+          dartsLeft: dartsAfterThis,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (exactFallback != null && exactFallback.isNotEmpty) {
+          final partScore = index == 0 ? -24 : -12;
+          score += partScore;
+          details.add(
+            '${index + 1}. Dart ${dartThrow.label} -> Miss-Fallback ohne Punkte $remaining: $partScore',
+          );
+          details.add(
+            '  Fruehes Doppel kann bei Fehlwurf 0 Punkte lassen, obwohl noch ein Finish offen bleibt.',
+          );
+        } else {
+          final continuation = bestContinuationPlan(
+            score: remaining,
+            dartsLeft: dartsAfterThis,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+          );
+          final partScore =
+              continuation == null || continuation.throws.isEmpty
+                  ? (index == 0 ? -110 : -70)
+                  : continuation.immediateFinish
+                      ? (index == 0 ? -24 : -12)
+                      : (index == 0 ? -70 : -42);
+          score += partScore;
+          details.add(
+            '${index + 1}. Dart ${dartThrow.label} -> Miss-Fallback ohne Punkte $remaining: $partScore',
+          );
+          details.add(
+            '  Fruehes Doppel kann bei Fehlwurf 0 Punkte lassen und den Weg deutlich verschlechtern.',
+          );
         }
       }
 
@@ -1412,20 +2745,197 @@ class CheckoutPlanner {
 
       if (!isLast) {
         if (dartThrow.isTriple) {
-          score -= 48;
+          score -= 75;
         } else if (dartThrow.isBull) {
-          score -= 48;
+          score -= 85;
         } else if (dartThrow.isDouble && !dartThrow.isBull) {
-          score -= 56;
+          score -= 100;
         } else if (dartThrow.label == '25') {
-          score += 0;
+          score -= 50;
         } else if (!dartThrow.isBull) {
-          score += 20;
+          score += 75;
         }
       }
     }
 
     return score;
+  }
+
+  _SetupComfortRelief _setupComfortRelief({
+    required List<DartThrowResult> route,
+    required int startScore,
+    required int totalDarts,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (route.isEmpty) {
+      return const _SetupComfortRelief(total: 0, details: <String>[]);
+    }
+
+    var relief = 0;
+    final details = <String>[];
+    var remaining = startScore;
+    for (var index = 0; index < route.length; index += 1) {
+      final dartThrow = route[index];
+      final dartsAfterThis = totalDarts - index - 1;
+      if (dartThrow.isTriple) {
+        if (dartsAfterThis > 0) {
+          final singleFallbackRemaining = remaining - dartThrow.baseValue;
+          final finishFallback = bestFinishRoute(
+            score: singleFallbackRemaining,
+            dartsLeft: dartsAfterThis,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+          );
+          if (finishFallback != null && finishFallback.isNotEmpty) {
+            relief += 75;
+            details.add(
+              '${dartThrow.label}: +75 Komfort-Entlastung im Stell Rechner (Finish-Fallback $singleFallbackRemaining vorhanden)',
+            );
+          }
+        }
+      } else if (dartThrow.isBull) {
+        if (dartsAfterThis > 0) {
+          final outerBullFallbackRemaining = remaining - 25;
+          final finishFallback = bestFinishRoute(
+            score: outerBullFallbackRemaining,
+            dartsLeft: dartsAfterThis,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            outerBullPreference: outerBullPreference,
+            bullPreference: bullPreference,
+          );
+          if (finishFallback != null && finishFallback.isNotEmpty) {
+            relief += 85;
+            details.add(
+              'BULL: +85 Komfort-Entlastung im Stell Rechner (Finish-Fallback $outerBullFallbackRemaining vorhanden)',
+            );
+          }
+        }
+      } else if (dartThrow.isDouble && !dartThrow.isBull) {
+        relief += 100;
+        details.add(
+          '${dartThrow.label}: +100 Komfort-Entlastung im Stell Rechner (fruehes Doppel neutralisiert)',
+        );
+      }
+      remaining -= dartThrow.scoredPoints;
+    }
+
+    return _SetupComfortRelief(total: relief, details: details);
+  }
+
+  int _setupGuaranteedFinishAfterMissBonus({
+    required List<DartThrowResult> route,
+    required int startScore,
+    required int totalDarts,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+  }) {
+    if (route.isEmpty || totalDarts <= 1) {
+      return 0;
+    }
+
+    final first = route.first;
+    int? fallbackRemaining;
+    if (first.isTriple || (first.isDouble && !first.isBull)) {
+      fallbackRemaining = startScore - first.baseValue;
+    } else if (first.isBull) {
+      fallbackRemaining = startScore - 25;
+    }
+
+    if (fallbackRemaining == null || fallbackRemaining <= 1) {
+      return 0;
+    }
+
+    final fallbackFinish = bestFinishRoute(
+      score: fallbackRemaining,
+      dartsLeft: totalDarts - 1,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (fallbackFinish == null || fallbackFinish.isEmpty) {
+      return 0;
+    }
+
+    return 220 + (scoreRoute(
+              route: fallbackFinish,
+              startScore: fallbackRemaining,
+              totalDarts: totalDarts - 1,
+              checkoutRequirement: checkoutRequirement,
+              playStyle: playStyle,
+              outerBullPreference: outerBullPreference,
+              bullPreference: bullPreference,
+            ) ~/
+            10);
+  }
+
+  List<String> _setupGuaranteedFinishAfterMissDetails({
+    required List<DartThrowResult> route,
+    required int startScore,
+    required int totalDarts,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required int outerBullPreference,
+    required int bullPreference,
+    required int bonus,
+  }) {
+    if (route.isEmpty || totalDarts <= 1) {
+      return const <String>[];
+    }
+
+    final first = route.first;
+    int? fallbackRemaining;
+    String? missLabel;
+    if (first.isTriple || (first.isDouble && !first.isBull)) {
+      fallbackRemaining = startScore - first.baseValue;
+      missLabel = first.isTriple
+          ? 'Single statt ${first.label}'
+          : 'Single statt ${first.label}';
+    } else if (first.isBull) {
+      fallbackRemaining = startScore - 25;
+      missLabel = '25 statt BULL';
+    }
+
+    if (fallbackRemaining == null || fallbackRemaining <= 1 || missLabel == null) {
+      return const <String>[];
+    }
+
+    final fallbackFinish = bestFinishRoute(
+      score: fallbackRemaining,
+      dartsLeft: totalDarts - 1,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      outerBullPreference: outerBullPreference,
+      bullPreference: bullPreference,
+    );
+    if (fallbackFinish == null || fallbackFinish.isEmpty) {
+      return const <String>[];
+    }
+
+    return <String>[
+      'Finish-Garantie nach 1. Dart-Miss: +$bonus',
+      '$missLabel laesst mit ${fallbackFinish.map((entry) => entry.label).join(' | ')} trotzdem einen kompletten Checkout offen.',
+    ];
+  }
+
+  int _earlySetupBullPenalty(List<DartThrowResult> route) {
+    return route.take(2).where((entry) => entry.isBull).length * 50;
+  }
+
+  int _earlySetupDoublePenalty(List<DartThrowResult> route) {
+    return route
+            .take(2)
+            .where((entry) => entry.isDouble && !entry.isBull)
+            .length *
+        120;
   }
 
   int setupComfortScore(List<DartThrowResult> route) {
@@ -1436,22 +2946,22 @@ class CheckoutPlanner {
     var score = 0;
     for (final dartThrow in route) {
       if (dartThrow.isTriple) {
-        score -= 58;
+        score -= 75;
       } else if (dartThrow.isBull) {
-        score -= 58;
+        score -= 85;
       } else if (dartThrow.isDouble && !dartThrow.isBull) {
-        score -= 56;
+        score -= 100;
       } else if (dartThrow.label == '25') {
-        score += 0;
+        score -= 50;
       } else if (!dartThrow.isBull) {
-        score += 20;
+        score += 75;
       }
     }
 
     return score;
   }
 
-  int _checkoutTripleFallbackComfortRelief({
+  int _checkoutFallbackComfortRelief({
     required List<DartThrowResult> route,
     required int startScore,
     required int totalDarts,
@@ -1466,22 +2976,37 @@ class CheckoutPlanner {
     for (var index = 0; index < route.length - 1; index += 1) {
       final dartThrow = route[index];
       final dartsAfterThis = totalDarts - index - 1;
-      if (!dartThrow.isTriple || dartsAfterThis <= 0) {
+      if (dartsAfterThis <= 0) {
         remaining -= dartThrow.scoredPoints;
         continue;
       }
 
-      final singleFallbackRemaining = remaining - dartThrow.baseValue;
-      final continuation = bestContinuationPlan(
-        score: singleFallbackRemaining,
-        dartsLeft: dartsAfterThis,
-        checkoutRequirement: checkoutRequirement,
-        playStyle: playStyle,
-        outerBullPreference: outerBullPreference,
-        bullPreference: bullPreference,
-      );
-      if (continuation != null && continuation.throws.isNotEmpty) {
-        relief += 48;
+      if (dartThrow.isTriple) {
+        final singleFallbackRemaining = remaining - dartThrow.baseValue;
+        final finishFallback = bestFinishRoute(
+          score: singleFallbackRemaining,
+          dartsLeft: dartsAfterThis,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (finishFallback != null && finishFallback.isNotEmpty) {
+          relief += 85;
+        }
+      } else if (dartThrow.isBull) {
+        final outerBullFallbackRemaining = remaining - 25;
+        final finishFallback = bestFinishRoute(
+          score: outerBullFallbackRemaining,
+          dartsLeft: dartsAfterThis,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (finishFallback != null && finishFallback.isNotEmpty) {
+          relief += 85;
+        }
       }
 
       remaining -= dartThrow.scoredPoints;
@@ -1495,16 +3020,14 @@ class CheckoutPlanner {
     required int baseScore,
     required int twoDartBonus,
   }) {
-    final details = <String>[
-      'Basis fuer $routeLength Dart: +$baseScore',
+    final total = baseScore + twoDartBonus;
+    return <String>[
+      'Zusammengefasster Weg-Score fuer $routeLength Dart: +$total',
+      if (twoDartBonus != 0)
+        'Darin enthalten ist ein 2-Dart-Bonus von +$twoDartBonus',
+      if (twoDartBonus == 0)
+        'Kein zusaetzlicher 2-Dart-Bonus.',
     ];
-    if (twoDartBonus != 0) {
-      details.add('2-Dart-Bonus: +$twoDartBonus');
-    }
-    if (twoDartBonus == 0) {
-      details.add('Kein zusaetzlicher 2-Dart-Bonus.');
-    }
-    return details;
   }
 
   List<String> _comfortDetails(
@@ -1520,11 +3043,11 @@ class CheckoutPlanner {
     var remaining = startScore;
     for (var index = 0; index < route.length - 1; index += 1) {
       final dartThrow = route[index];
+      final dartsAfterThis = totalDarts - index - 1;
       if (dartThrow.isTriple) {
-        details.add('${dartThrow.label}: -48 als fruehes Triple');
-        final dartsAfterThis = totalDarts - index - 1;
+        details.add('${dartThrow.label}: -75 als fruehes Triple');
         final singleFallbackRemaining = remaining - dartThrow.baseValue;
-        final continuation = bestContinuationPlan(
+        final finishFallback = bestFinishRoute(
           score: singleFallbackRemaining,
           dartsLeft: dartsAfterThis,
           checkoutRequirement: checkoutRequirement,
@@ -1532,19 +3055,33 @@ class CheckoutPlanner {
           outerBullPreference: outerBullPreference,
           bullPreference: bullPreference,
         );
-        if (continuation != null && continuation.throws.isNotEmpty) {
+        if (finishFallback != null && finishFallback.isNotEmpty) {
           details.add(
-            '${dartThrow.label}: +48 Komfort-Entlastung wegen Single-Fallback $singleFallbackRemaining',
+            '${dartThrow.label}: +75 Komfort-Entlastung wegen Finish-Fallback $singleFallbackRemaining',
           );
         }
       } else if (dartThrow.isBull) {
-        details.add('BULL: -48 wie ein fruehes Triple');
+        details.add('BULL: -85 als frueher BULL');
+        final outerBullFallbackRemaining = remaining - 25;
+        final finishFallback = bestFinishRoute(
+          score: outerBullFallbackRemaining,
+          dartsLeft: dartsAfterThis,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          outerBullPreference: outerBullPreference,
+          bullPreference: bullPreference,
+        );
+        if (finishFallback != null && finishFallback.isNotEmpty) {
+          details.add(
+            'BULL: +85 Komfort-Entlastung wegen Finish-Fallback $outerBullFallbackRemaining',
+          );
+        }
       } else if (dartThrow.isDouble && !dartThrow.isBull) {
-        details.add('${dartThrow.label}: -56 als fruehes Doppel');
+        details.add('${dartThrow.label}: -100 als fruehes Doppel');
       } else if (dartThrow.label == '25') {
-        details.add('25: +0 wie ein normales Single-Feld');
+        details.add('25: -50 als fruehes schmales Feld');
       } else if (!dartThrow.isBull) {
-        details.add('${dartThrow.label}: +20 als fruehes Single');
+        details.add('${dartThrow.label}: +75 als fruehes Single');
       }
       remaining -= dartThrow.scoredPoints;
     }
@@ -1572,9 +3109,8 @@ class CheckoutPlanner {
       value ~/= 2;
     }
 
-    final score = 36 + (halvingCount * 12);
+    final score = halvingCount * 12;
     return <String>[
-      '${finalThrow.label}: Basis +36',
       '${finalThrow.baseValue} ist $halvingCount mal durch 2 teilbar: +${halvingCount * 12}',
       'Gesamt: +$score',
     ];
@@ -1582,17 +3118,11 @@ class CheckoutPlanner {
 
   List<String> _bullPenaltyDetails({
     required List<DartThrowResult> route,
-    required int earlyBullPenalty,
     required int finalBullPenalty,
     required int outerBullPenalty,
   }) {
     final details = <String>[];
-    final earlyBullCount =
-        route.take(route.length > 1 ? route.length - 1 : 0).where((entry) => entry.isBull).length;
     final outerBullCount = route.where((entry) => entry.label == '25').length;
-    if (earlyBullCount > 0) {
-      details.add('Fruehe BULL-Treffer x$earlyBullCount: -$earlyBullPenalty');
-    }
     if (route.isNotEmpty && route.last.isBull) {
       details.add('BULL als Schlussdart: -$finalBullPenalty');
     }
@@ -1603,6 +3133,30 @@ class CheckoutPlanner {
       details.add('Kein Bull-Malus in dieser Route.');
     }
     return details;
+  }
+
+  List<String> _narrowFieldDetails({
+    required List<DartThrowResult> route,
+    required int penalty,
+  }) {
+    final narrowFields = route.where(isNarrowField).toList();
+    if (narrowFields.isEmpty || penalty == 0) {
+      return <String>['Kein Malus fuer schmale Felder.'];
+    }
+    return <String>[
+      ...List<String>.generate(route.length, (index) {
+        final dartThrow = route[index];
+        if (!isNarrowField(dartThrow)) {
+          return '';
+        }
+        return '${dartThrow.label}: -${_singleNarrowFieldPenalty(
+          dartThrow,
+          isLast: index == route.length - 1,
+          defaultPenalty: 150,
+        )}';
+      }).where((detail) => detail.isNotEmpty),
+      'Gesamtmalus: -$penalty',
+    ];
   }
 
   List<String> _segmentFlowDetails(List<DartThrowResult> route) {
@@ -1709,9 +3263,9 @@ class CheckoutPlanner {
 
       remaining -= dartThrow.scoredPoints;
       if (remaining == 50) {
-        bestBonus = index == 0 ? 300 : 250;
+        bestBonus = 50;
       } else if (remaining > 1 && remaining <= 40 && remaining.isEven) {
-        bestBonus = index == 0 ? 300 : 250;
+        bestBonus = 50;
       }
     }
 
@@ -1795,6 +3349,24 @@ class CheckoutPlanner {
     if (dartThrow.isBull) {
       return 25;
     }
+    if (dartThrow.baseValue == 16) {
+      return 36;
+    }
+    if (dartThrow.baseValue == 8) {
+      return 32;
+    }
+    if (dartThrow.baseValue == 20 ||
+        dartThrow.baseValue == 12 ||
+        dartThrow.baseValue == 4) {
+      return 30;
+    }
+    if (dartThrow.baseValue == 10 ||
+        dartThrow.baseValue == 18 ||
+        dartThrow.baseValue == 14 ||
+        dartThrow.baseValue == 6 ||
+        dartThrow.baseValue == 2) {
+      return 28;
+    }
     var halvingCount = 0;
     var value = dartThrow.baseValue;
     while (value > 0 && value.isEven) {
@@ -1802,18 +3374,51 @@ class CheckoutPlanner {
       value ~/= 2;
     }
 
-    return 36 + (halvingCount * 12);
+    return halvingCount * 12;
   }
 
   bool isNarrowField(DartThrowResult dartThrow) {
-    if (dartThrow.label == '25') {
-      return false;
+      return dartThrow.label == '25' ||
+          dartThrow.isTriple ||
+          dartThrow.isDouble ||
+          dartThrow.isBull;
+  }
+
+  int _narrowFieldPenalty(
+    List<DartThrowResult> route, {
+    required int defaultPenalty,
+  }) {
+    var total = 0;
+    for (var index = 0; index < route.length; index += 1) {
+      final dartThrow = route[index];
+      if (!isNarrowField(dartThrow)) {
+        continue;
+      }
+      total += _singleNarrowFieldPenalty(
+        dartThrow,
+        isLast: index == route.length - 1,
+        defaultPenalty: defaultPenalty,
+      );
     }
-    return dartThrow.isTriple || dartThrow.isDouble || dartThrow.isBull;
+    return total;
+  }
+
+  int _singleNarrowFieldPenalty(
+    DartThrowResult dartThrow, {
+    required bool isLast,
+    required int defaultPenalty,
+  }) {
+    if (dartThrow.label == '25') {
+      return 25;
+    }
+    if (dartThrow.isDouble && !dartThrow.isBull && !isLast) {
+      return 175;
+    }
+    return 50;
   }
 
   bool isSingleOrOuterBull(DartThrowResult dartThrow) {
-    return (!dartThrow.isDouble && !dartThrow.isTriple && !dartThrow.isBull) ||
+      return (!dartThrow.isDouble && !dartThrow.isTriple && !dartThrow.isBull) ||
         dartThrow.label == '25';
   }
 

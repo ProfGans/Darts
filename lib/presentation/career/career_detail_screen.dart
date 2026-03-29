@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/routes.dart';
@@ -11,6 +12,85 @@ import '../../domain/rankings/ranking_engine.dart';
 import '../../domain/x01/x01_models.dart';
 import 'career_player_detail_screen.dart';
 
+Future<bool> _runCareerTournamentSimulation({
+  required CareerDefinition career,
+  required CareerCalendarItem item,
+  bool calledFromSeason = false,
+}) async {
+  if (!CareerRepository.instance.shouldTournamentTakePlace(
+    item,
+    career: career,
+  )) {
+    return false;
+  }
+
+  final repository = CareerRepository.instance;
+  final completedBefore =
+      repository.activeCareer?.currentSeason.completedItemIds.length ?? 0;
+  final action = AppDebug.instance.startAction(
+    'Karriere',
+    'Turnier-Simulation "${item.name}"',
+  );
+  try {
+    final tournamentRepository = TournamentRepository.instance;
+    final buildStopwatch = Stopwatch()..start();
+    tournamentRepository.createCareerTournament(
+      career: career,
+      item: item,
+      silent: calledFromSeason,
+    );
+    buildStopwatch.stop();
+    AppDebug.instance.info(
+      'Performance',
+      'Turnieraufbau "${item.name}": ${buildStopwatch.elapsedMilliseconds} ms',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    final simulationStopwatch = Stopwatch()..start();
+    await tournamentRepository.simulateCurrentTournamentUntilComplete(
+      includeHumanMatches: true,
+      emitProgressUpdates: !calledFromSeason,
+    );
+    simulationStopwatch.stop();
+    AppDebug.instance.info(
+      'Performance',
+      'Turniersimulation "${item.name}": ${simulationStopwatch.elapsedMilliseconds} ms',
+    );
+    if (tournamentRepository.currentBracket?.isCompleted ?? false) {
+      final commitStopwatch = Stopwatch()..start();
+      tournamentRepository.commitCurrentCareerTournament(
+        silent: calledFromSeason,
+      );
+      commitStopwatch.stop();
+      AppDebug.instance.info(
+        'Performance',
+        'Karriere-Commit "${item.name}": ${commitStopwatch.elapsedMilliseconds} ms',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    } else {
+      AppDebug.instance.error(
+        'Karriere',
+        'Turnier "${item.name}" wurde nicht abgeschlossen.',
+      );
+    }
+    action.complete();
+  } catch (error) {
+    action.fail(error);
+    rethrow;
+  }
+
+  final completedAfter =
+      repository.activeCareer?.currentSeason.completedItemIds.length ??
+          completedBefore;
+  final progressed = completedAfter > completedBefore;
+  if (!progressed) {
+    AppDebug.instance.error(
+      'Karriere',
+      'Turnier "${item.name}" hat keinen Saison-Fortschritt erzeugt.',
+    );
+  }
+  return progressed;
+}
+
 class CareerDetailScreen extends StatefulWidget {
   const CareerDetailScreen({super.key});
 
@@ -21,6 +101,10 @@ class CareerDetailScreen extends StatefulWidget {
 class _CareerDetailScreenState extends State<CareerDetailScreen> {
   bool _isSimulatingTournament = false;
   String? _simulationStatus;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows &&
+      _isSimulatingTournament;
 
   void _openPlayerHistory(BuildContext context, String playerId) {
     Navigator.of(context).push(
@@ -71,10 +155,12 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
 
         return Scaffold(
           appBar: AppBar(title: Text(career.name)),
-          body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-              children: <Widget>[
+          body: ExcludeSemantics(
+            excluding: _suppressAccessibilityUpdates,
+            child: SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                children: <Widget>[
                 const _ScreenLevelLabel(label: 'Jetzt wichtig'),
                 _CareerFocusDashboard(
                   career: career,
@@ -83,6 +169,9 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
                   runningCareerTournament: runningCareerTournament,
                   isSimulatingTournament: _isSimulatingTournament,
                   simulationStatus: _simulationStatus,
+                  detailedSimulationStatus:
+                      tournamentRepository.simulationProgressLabel,
+                  simulationProgress: tournamentRepository.simulationProgress,
                   canFinishSeason: canFinishSeason,
                   onStartCareer: repository.startCareer,
                   onFinishSeason: repository.finishCurrentSeason,
@@ -180,7 +269,8 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
                                   _openPlayerHistory(context, playerId),
                             ),
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -253,67 +343,30 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
     required CareerDefinition career,
     required CareerCalendarItem item,
   }) async {
-    if (!CareerRepository.instance.shouldTournamentTakePlace(
-      item,
-      career: career,
-    )) {
-      return false;
-    }
     if (_isSimulatingTournament) {
       return false;
     }
-    final repository = CareerRepository.instance;
-    final completedBefore =
-        repository.activeCareer?.currentSeason.completedItemIds.length ?? 0;
-    setState(() {
-      _isSimulatingTournament = true;
-      _simulationStatus = 'Simuliere ${item.name}...';
-    });
-    final action = AppDebug.instance.startAction(
-      'Karriere',
-      'Turnier-Simulation "${item.name}"',
-    );
-    try {
-      final tournamentRepository = TournamentRepository.instance;
-      tournamentRepository.createCareerTournament(career: career, item: item);
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-      await tournamentRepository.simulateCurrentTournamentUntilComplete(
-        includeHumanMatches: true,
-      );
-      if (tournamentRepository.currentBracket?.isCompleted ?? false) {
-        tournamentRepository.commitCurrentCareerTournament();
-        await Future<void>.delayed(const Duration(milliseconds: 1));
-      } else {
-        AppDebug.instance.error(
-          'Karriere',
-          'Turnier "${item.name}" wurde nicht abgeschlossen.',
+      setState(() {
+        _isSimulatingTournament = true;
+        _simulationStatus = 'Baue ${item.name} auf...';
+      });
+      try {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+        return await _runCareerTournamentSimulation(
+          career: career,
+          item: item,
         );
-      }
-      action.complete();
-    } catch (error) {
-      action.fail(error);
-      rethrow;
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSimulatingTournament = false;
-          _simulationStatus = null;
-        });
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isSimulatingTournament = false;
+            _simulationStatus = null;
+          });
+        }
+        TournamentRepository.instance.clearSimulationProgress();
       }
     }
-    final completedAfter =
-        repository.activeCareer?.currentSeason.completedItemIds.length ??
-            completedBefore;
-    final progressed = completedAfter > completedBefore;
-    if (!progressed) {
-      AppDebug.instance.error(
-        'Karriere',
-        'Turnier "${item.name}" hat keinen Saison-Fortschritt erzeugt.',
-      );
-    }
-    return progressed;
   }
-}
 
 class _CareerSeasonCalendarScreen extends StatefulWidget {
   const _CareerSeasonCalendarScreen({
@@ -331,6 +384,10 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
   bool _isSimulatingTournament = false;
   bool _isSimulatingSeason = false;
   String? _simulationStatus;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows &&
+      (_isSimulatingTournament || _isSimulatingSeason);
 
   @override
   Widget build(BuildContext context) {
@@ -361,10 +418,12 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
           appBar: AppBar(
             title: const Text('Saisonkalender'),
           ),
-          body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              children: <Widget>[
+          body: ExcludeSemantics(
+            excluding: _suppressAccessibilityUpdates,
+            child: SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                children: <Widget>[
                 _SectionCard(
                   title: 'Saisonaktionen',
                   child: Column(
@@ -375,24 +434,23 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
                         completedCount:
                             loadedCareer.currentSeason.completedItemIds.length,
                       ),
-                      if (_simulationStatus != null) ...<Widget>[
-                        const SizedBox(height: 12),
-                        Text(
-                          _simulationStatus!,
+                        if (_simulationStatus != null) ...<Widget>[
+                          const SizedBox(height: 12),
+                          Text(
+                            _simulationStatus!,
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: const Color(0xFF27415A),
                                   ),
                         ),
-                      ],
-                      if (_isSimulatingTournament || _isSimulatingSeason) ...<Widget>[
-                        const SizedBox(height: 12),
-                        const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2.5),
-                        ),
-                      ],
+                        ],
+                        if (_isSimulatingTournament || _isSimulatingSeason) ...<Widget>[
+                          const SizedBox(height: 12),
+                          _SimulationProgressCard(
+                            label: tournamentRepository.simulationProgressLabel,
+                            progress: tournamentRepository.simulationProgress,
+                          ),
+                        ],
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
@@ -459,7 +517,8 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
                               .toList(),
                         ),
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -498,70 +557,36 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
     required CareerCalendarItem item,
     bool calledFromSeason = false,
   }) async {
-    if (!CareerRepository.instance.shouldTournamentTakePlace(
-      item,
-      career: career,
-    )) {
-      return false;
-    }
     if (_isSimulatingTournament || (_isSimulatingSeason && !calledFromSeason)) {
       return false;
     }
 
-    final repository = CareerRepository.instance;
-    final completedBefore =
-        repository.activeCareer?.currentSeason.completedItemIds.length ?? 0;
-    setState(() {
-      _isSimulatingTournament = true;
-      _simulationStatus = 'Simuliere ${item.name}...';
-    });
-    final action = AppDebug.instance.startAction(
-      'Karriere',
-      'Turnier-Simulation "${item.name}"',
-    );
-    try {
-      final tournamentRepository = TournamentRepository.instance;
-      tournamentRepository.createCareerTournament(career: career, item: item);
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-      await tournamentRepository.simulateCurrentTournamentUntilComplete(
-        includeHumanMatches: true,
+      setState(() {
+        _isSimulatingTournament = true;
+        _simulationStatus = calledFromSeason
+            ? 'Baue ${item.name} auf...'
+            : 'Baue ${item.name} auf...';
+      });
+      try {
+        return await _runCareerTournamentSimulation(
+        career: career,
+        item: item,
+        calledFromSeason: calledFromSeason,
       );
-      if (tournamentRepository.currentBracket?.isCompleted ?? false) {
-        tournamentRepository.commitCurrentCareerTournament();
-        await Future<void>.delayed(const Duration(milliseconds: 1));
-      } else {
-        AppDebug.instance.error(
-          'Karriere',
-          'Turnier "${item.name}" wurde nicht abgeschlossen.',
-        );
-      }
-      action.complete();
-    } catch (error) {
-      action.fail(error);
-      rethrow;
     } finally {
       if (mounted) {
         setState(() {
           _isSimulatingTournament = false;
-          if (!_isSimulatingSeason) {
-            _simulationStatus = null;
-          }
-        });
+            if (!_isSimulatingSeason) {
+              _simulationStatus = null;
+            }
+          });
+        }
+        if (!_isSimulatingSeason) {
+          TournamentRepository.instance.clearSimulationProgress();
+        }
       }
     }
-
-    final completedAfter =
-        repository.activeCareer?.currentSeason.completedItemIds.length ??
-            completedBefore;
-    final progressed = completedAfter > completedBefore;
-    if (!progressed) {
-      AppDebug.instance.error(
-        'Karriere',
-        'Turnier "${item.name}" hat keinen Saison-Fortschritt erzeugt.',
-      );
-    }
-    return progressed;
-  }
 
   Future<void> _simulateSeason({
     required CareerDefinition career,
@@ -608,13 +633,14 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       rethrow;
     } finally {
       if (mounted) {
-        setState(() {
-          _isSimulatingSeason = false;
-          _simulationStatus = null;
-        });
+          setState(() {
+            _isSimulatingSeason = false;
+            _simulationStatus = null;
+          });
+        }
+        TournamentRepository.instance.clearSimulationProgress();
       }
     }
-  }
 }
 
 class _CareerCalendarItemCard extends StatelessWidget {
@@ -1169,6 +1195,8 @@ class _CareerFocusDashboard extends StatelessWidget {
     required this.runningCareerTournament,
     required this.isSimulatingTournament,
     required this.simulationStatus,
+    required this.detailedSimulationStatus,
+    required this.simulationProgress,
     required this.canFinishSeason,
     required this.onStartCareer,
     required this.onFinishSeason,
@@ -1185,6 +1213,8 @@ class _CareerFocusDashboard extends StatelessWidget {
   final CareerTournamentContext? runningCareerTournament;
   final bool isSimulatingTournament;
   final String? simulationStatus;
+  final String? detailedSimulationStatus;
+  final double? simulationProgress;
   final bool canFinishSeason;
   final VoidCallback onStartCareer;
   final VoidCallback onFinishSeason;
@@ -1283,12 +1313,13 @@ class _CareerFocusDashboard extends StatelessWidget {
                           ),
                     ),
                   ],
-                  if (isSimulatingTournament) ...<Widget>[
+                  if ((isSimulatingTournament &&
+                          (detailedSimulationStatus?.isNotEmpty ?? false)) ||
+                      (simulationProgress != null)) ...<Widget>[
                     const SizedBox(height: 12),
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    _SimulationProgressCard(
+                      label: detailedSimulationStatus,
+                      progress: simulationProgress,
                     ),
                   ],
                 ],
@@ -2299,6 +2330,71 @@ class _ProgressBar extends StatelessWidget {
           child: LinearProgressIndicator(value: progress, minHeight: 10),
         ),
       ],
+    );
+  }
+}
+
+class _SimulationProgressCard extends StatelessWidget {
+  const _SimulationProgressCard({
+    required this.label,
+    required this.progress,
+  });
+
+  final String? label;
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDeterminateProgress = progress != null;
+    final percentLabel = hasDeterminateProgress
+        ? '${((progress! * 100).clamp(0, 100)).round()} %'
+        : null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label == null || label!.trim().isEmpty
+                      ? 'Simulation laeuft...'
+                      : label!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              if (percentLabel != null) ...<Widget>[
+                const SizedBox(width: 10),
+                Text(
+                  percentLabel,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

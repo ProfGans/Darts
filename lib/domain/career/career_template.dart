@@ -7,7 +7,6 @@ class CareerTemplate {
     this.participantMode = CareerParticipantMode.cpuOnly,
     this.playerProfileId,
     this.replaceWeakestPlayerWithHuman = false,
-    this.databasePlayers = const <CareerDatabasePlayer>[],
     this.careerTagDefinitions = const <CareerTagDefinition>[],
     this.seasonTagRules = const <CareerSeasonTagRule>[],
     required this.rankings,
@@ -19,7 +18,6 @@ class CareerTemplate {
   final CareerParticipantMode participantMode;
   final String? playerProfileId;
   final bool replaceWeakestPlayerWithHuman;
-  final List<CareerDatabasePlayer> databasePlayers;
   final List<CareerTagDefinition> careerTagDefinitions;
   final List<CareerSeasonTagRule> seasonTagRules;
   final List<CareerRankingDefinition> rankings;
@@ -29,7 +27,6 @@ class CareerTemplate {
     return <String, dynamic>{
       'id': id,
       'name': name,
-      'databasePlayers': databasePlayers.map((entry) => entry.toJson()).toList(),
       'careerTagDefinitions':
           careerTagDefinitions.map((entry) => entry.toJson()).toList(),
       'seasonTagRules': seasonTagRules.map((entry) => entry.toJson()).toList(),
@@ -48,14 +45,6 @@ class CareerTemplate {
       playerProfileId: json['playerProfileId'] as String?,
       replaceWeakestPlayerWithHuman:
           json['replaceWeakestPlayerWithHuman'] as bool? ?? false,
-      databasePlayers:
-          (json['databasePlayers'] as List<dynamic>? ?? const <dynamic>[])
-              .map(
-                (entry) => CareerDatabasePlayer.fromJson(
-                  (entry as Map).cast<String, dynamic>(),
-                ),
-              )
-              .toList(),
       careerTagDefinitions:
           (json['careerTagDefinitions'] as List<dynamic>? ?? const <dynamic>[])
               .map(

@@ -27,6 +27,12 @@ class CareerRepository extends ChangeNotifier {
   final RankingEngine _rankingEngine = const RankingEngine();
   final List<CareerDefinition> _careers = <CareerDefinition>[];
   String? _activeCareerId;
+  Map<String, String>? _cachedParticipantMap;
+  CareerStatisticsSummary? _cachedStatisticsSummary;
+  final Map<String, List<RankingStanding>> _cachedStandingsByRankingId =
+      <String, List<RankingStanding>>{};
+  final Map<String, CareerPlayerHistorySummary?> _cachedPlayerHistory =
+      <String, CareerPlayerHistorySummary?>{};
 
   List<CareerDefinition> get careers => List<CareerDefinition>.unmodifiable(_careers);
 
@@ -121,6 +127,7 @@ class CareerRepository extends ChangeNotifier {
       await AppStorage.instance.delete(_storageKey);
       _careers.clear();
       _activeCareerId = null;
+      _invalidateDerivedDataCaches();
       notifyListeners();
       return;
     }
@@ -134,11 +141,14 @@ class CareerRepository extends ChangeNotifier {
                 (entry as Map).cast<String, dynamic>(),
               ),
             )
+            .map(_normalizeLoadedCareer)
             .toList();
     _careers
       ..clear()
       ..addAll(loadedCareers);
     _activeCareerId = json['activeCareerId'] as String?;
+    _invalidateDerivedDataCaches();
+    await _persist();
     notifyListeners();
   }
 
@@ -156,6 +166,7 @@ class CareerRepository extends ChangeNotifier {
     );
     _careers.add(career);
     _activeCareerId = career.id;
+    _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
   }
@@ -163,13 +174,15 @@ class CareerRepository extends ChangeNotifier {
   void createCareerFromTemplate({
     required String name,
     required CareerTemplate template,
+    required List<CareerDatabasePlayer> databasePlayers,
     required CareerParticipantMode participantMode,
     String? playerProfileId,
     bool replaceWeakestPlayerWithHuman = false,
   }) {
     final trimmed = name.trim();
-    final databasePlayers = _templateDatabasePlayersWithHuman(
-      template: template,
+    final preparedDatabasePlayers = _templateDatabasePlayersWithHuman(
+      databasePlayers: databasePlayers,
+      careerTagDefinitions: template.careerTagDefinitions,
       participantMode: participantMode,
       playerProfileId: playerProfileId,
       replaceWeakestPlayerWithHuman: replaceWeakestPlayerWithHuman,
@@ -180,7 +193,7 @@ class CareerRepository extends ChangeNotifier {
       participantMode: participantMode,
       playerProfileId: playerProfileId,
       replaceWeakestPlayerWithHuman: replaceWeakestPlayerWithHuman,
-      databasePlayers: databasePlayers,
+      databasePlayers: preparedDatabasePlayers,
       careerTagDefinitions:
           List<CareerTagDefinition>.from(template.careerTagDefinitions),
       seasonTagRules: List<CareerSeasonTagRule>.from(template.seasonTagRules),
@@ -191,32 +204,36 @@ class CareerRepository extends ChangeNotifier {
       ),
       isStarted: false,
     );
-    _careers.add(career);
+    _careers.add(_normalizeLoadedCareer(career));
     _activeCareerId = career.id;
+    _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
   }
 
   List<CareerDatabasePlayer> _templateDatabasePlayersWithHuman({
-    required CareerTemplate template,
+    required List<CareerDatabasePlayer> databasePlayers,
+    required List<CareerTagDefinition> careerTagDefinitions,
     required CareerParticipantMode participantMode,
     required String? playerProfileId,
     required bool replaceWeakestPlayerWithHuman,
   }) {
-    final databasePlayers = List<CareerDatabasePlayer>.from(template.databasePlayers);
+    final normalizedPlayers = databasePlayers
+        .map(_normalizeCareerDatabasePlayer)
+        .toList();
     if (participantMode != CareerParticipantMode.withHuman) {
-      return databasePlayers;
+      return normalizedPlayers;
     }
 
     final PlayerProfile? human = playerProfileId == null
         ? PlayerRepository.instance.activePlayer
         : PlayerRepository.instance.playerById(playerProfileId);
     if (human == null) {
-      return databasePlayers;
+      return normalizedPlayers;
     }
 
     CareerDatabasePlayer? weakestPlayer;
-    for (final player in databasePlayers) {
+    for (final player in normalizedPlayers) {
       if (weakestPlayer == null || player.average < weakestPlayer.average) {
         weakestPlayer = player;
       }
@@ -224,27 +241,26 @@ class CareerRepository extends ChangeNotifier {
 
     final inheritedTags = replaceWeakestPlayerWithHuman
         ? (weakestPlayer?.careerTags ?? const <CareerPlayerTag>[])
-        : (template.careerTagDefinitions.any((definition) => definition.name == 'Non-Tour')
+        : (careerTagDefinitions.any((definition) => definition.name == 'Non-Tour')
             ? const <CareerPlayerTag>[CareerPlayerTag(tagName: 'Non-Tour')]
             : const <CareerPlayerTag>[]);
     final nationalityTags = _careerTagsForNationality(
       human.nationality,
-      template.careerTagDefinitions,
+      careerTagDefinitions,
     );
 
     if (replaceWeakestPlayerWithHuman && weakestPlayer != null) {
-      databasePlayers.removeWhere(
+      normalizedPlayers.removeWhere(
         (player) => player.databasePlayerId == weakestPlayer!.databasePlayerId,
       );
     }
 
-    final resolution = ComputerRepository.instance.resolveSkillsForTheoreticalAverage(
-      human.average,
-    );
-    databasePlayers.removeWhere(
+    final resolution = ComputerRepository.instance
+        .resolveSkillsForTheoreticalAverageQuick(human.average);
+    normalizedPlayers.removeWhere(
       (player) => player.databasePlayerId == human.id,
     );
-    databasePlayers.add(
+    normalizedPlayers.add(
       CareerDatabasePlayer(
         databasePlayerId: human.id,
         name: human.name,
@@ -262,7 +278,7 @@ class CareerRepository extends ChangeNotifier {
         ],
       ),
     );
-    return databasePlayers;
+    return normalizedPlayers;
   }
 
   List<CareerPlayerTag> _careerTagsForNationality(
@@ -398,12 +414,14 @@ class CareerRepository extends ChangeNotifier {
       ..clear()
       ..addAll(nextCareers);
     _activeCareerId ??= _careers.first.id;
+    _invalidateDerivedDataCaches();
     notifyListeners();
     await _persist();
   }
 
   void setActiveCareer(String careerId) {
     _activeCareerId = careerId;
+    _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
   }
@@ -413,6 +431,7 @@ class CareerRepository extends ChangeNotifier {
     if (_activeCareerId == careerId) {
       _activeCareerId = _careers.isEmpty ? null : _careers.first.id;
     }
+    _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
   }
@@ -482,7 +501,7 @@ class CareerRepository extends ChangeNotifier {
         career: career,
         player: _applyCareerTagDefinitions(
           career: career,
-          player: player,
+          player: _normalizeCareerDatabasePlayer(player),
         ),
       ),
     );
@@ -500,8 +519,38 @@ class CareerRepository extends ChangeNotifier {
         career: career,
         player: _applyCareerTagDefinitions(
           career: career,
-          player: player,
+          player: _normalizeCareerDatabasePlayer(player),
         ),
+      ),
+    );
+  }
+
+  void updateDatabasePlayers({
+    required List<CareerDatabasePlayer> players,
+  }) {
+    final career = activeCareer;
+    if (career == null || players.isEmpty) {
+      return;
+    }
+    final updatesById = <String, CareerDatabasePlayer>{};
+    for (final player in players) {
+      final normalized = _applyCareerTagDefinitions(
+        career: career,
+        player: _normalizeCareerDatabasePlayer(player),
+      );
+      updatesById[normalized.databasePlayerId] = normalized;
+    }
+    if (updatesById.isEmpty) {
+      return;
+    }
+    _replaceCareer(
+      career.copyWith(
+        databasePlayers: career.databasePlayers
+            .map(
+              (entry) =>
+                  updatesById[entry.databasePlayerId] ?? entry,
+            )
+            .toList(),
       ),
     );
   }
@@ -934,7 +983,7 @@ class CareerRepository extends ChangeNotifier {
         ranking: ranking,
         currentSeasonNumber: career.currentSeason.seasonNumber,
         completedTournaments: career.completedTournaments,
-        participants: _participantMap(career.participantMode),
+        participants: _participantMap(career),
       );
     }
     final updatedCareer = _applySeasonTagRules(
@@ -977,6 +1026,16 @@ class CareerRepository extends ChangeNotifier {
       runnerUp: runnerUp,
     );
     final playerX01Stats = _aggregateX01StatsForBracket(bracket);
+    final matchHistoryEvents = _extractMatchHistoryEventsForBracket(
+      seasonNumber: career.currentSeason.seasonNumber,
+      tournamentName: item.name,
+      bracket: bracket,
+    );
+    final nineDarterEvents = _extractNineDarterEventsForBracket(
+      seasonNumber: career.currentSeason.seasonNumber,
+      tournamentName: item.name,
+      bracket: bracket,
+    );
     final careerWithTournamentTagRules = _applyTournamentTagRules(
       career: career,
       item: item,
@@ -999,6 +1058,8 @@ class CareerRepository extends ChangeNotifier {
         playerPayouts: payoutData.payouts,
         playerResultLabels: payoutData.resultLabels,
         playerX01Stats: playerX01Stats,
+        nineDarterEvents: nineDarterEvents,
+        matchHistoryEvents: matchHistoryEvents,
       ),
     );
   }
@@ -1093,6 +1154,16 @@ class CareerRepository extends ChangeNotifier {
       runnerUp: runnerUp,
     );
     final playerX01Stats = _aggregateX01StatsForBracket(fullBracket);
+    final matchHistoryEvents = _extractMatchHistoryEventsForBracket(
+      seasonNumber: career.currentSeason.seasonNumber,
+      tournamentName: seriesName,
+      bracket: fullBracket,
+    );
+    final nineDarterEvents = _extractNineDarterEventsForBracket(
+      seasonNumber: career.currentSeason.seasonNumber,
+      tournamentName: seriesName,
+      bracket: fullBracket,
+    );
     final careerWithTagRules = _applyTournamentTagRules(
       career: updatedCareer,
       item: item.copyWith(name: seriesName),
@@ -1119,6 +1190,8 @@ class CareerRepository extends ChangeNotifier {
       playerPayouts: payoutData.payouts,
       playerResultLabels: payoutData.resultLabels,
       playerX01Stats: playerX01Stats,
+      nineDarterEvents: nineDarterEvents,
+      matchHistoryEvents: matchHistoryEvents,
       countsForRankingIds: item.countsForRankingIds,
     );
     _replaceCareer(
@@ -1185,6 +1258,7 @@ class CareerRepository extends ChangeNotifier {
             decidingLegDarts: stats.decidingLegDarts,
             decidingLegsPlayed: stats.decidingLegsPlayed,
             decidingLegsWon: stats.decidingLegsWon,
+            won9Darters: stats.won9Darters,
             won12Darters: stats.won12Darters,
             won15Darters: stats.won15Darters,
             won18Darters: stats.won18Darters,
@@ -1198,6 +1272,94 @@ class CareerRepository extends ChangeNotifier {
       }
     }
     return aggregated;
+  }
+
+  List<CareerNineDarterEvent> _extractNineDarterEventsForBracket({
+    required int seasonNumber,
+    required String tournamentName,
+    required TournamentBracket bracket,
+  }) {
+    final events = <CareerNineDarterEvent>[];
+    for (final round in bracket.rounds) {
+      for (final match in round.matches) {
+        final result = match.result;
+        if (result == null) {
+          continue;
+        }
+        for (final stats in result.participantStats) {
+          final count = stats.won9Darters > 0
+              ? stats.won9Darters
+              : (stats.bestLegDarts == 9 ? 1 : 0);
+          if (count <= 0) {
+            continue;
+          }
+          final opponent = match.playerA?.id == stats.participantId
+              ? match.playerB
+              : match.playerA;
+          for (var index = 0; index < count; index += 1) {
+            events.add(
+              CareerNineDarterEvent(
+                playerId: stats.participantId,
+                playerName: stats.participantName,
+                seasonNumber: seasonNumber,
+                tournamentName: tournamentName,
+                roundLabel: round.title,
+                opponentId: opponent?.id ?? '',
+                opponentName: opponent?.name ?? 'Unbekannter Gegner',
+                scoreText: result.scoreText,
+              ),
+            );
+          }
+        }
+      }
+    }
+    return events;
+  }
+
+  List<CareerMatchHistoryEvent> _extractMatchHistoryEventsForBracket({
+    required int seasonNumber,
+    required String tournamentName,
+    required TournamentBracket bracket,
+  }) {
+    final events = <CareerMatchHistoryEvent>[];
+    for (final round in bracket.rounds) {
+      for (final match in round.matches) {
+        final result = match.result;
+        if (result == null) {
+          continue;
+        }
+        final participantStats = result.participantStats;
+        if (participantStats.isEmpty) {
+          continue;
+        }
+        for (final stats in participantStats) {
+          final opponent = match.playerA?.id == stats.participantId
+              ? match.playerB
+              : match.playerA;
+          final average = stats.dartsThrown > 0
+              ? (stats.pointsScored * 3) / stats.dartsThrown
+              : 0.0;
+          final didWin = result.winnerId == stats.participantId;
+          events.add(
+            CareerMatchHistoryEvent(
+              playerId: stats.participantId,
+              playerName: stats.participantName,
+              opponentId: opponent?.id ?? '',
+              opponentName: opponent?.name ?? 'Unbekannter Gegner',
+              seasonNumber: seasonNumber,
+              tournamentName: tournamentName,
+              roundLabel: round.title,
+              scoreText: result.scoreText,
+              resultLabel: didWin
+                  ? 'Sieg'
+                  : (result.isDraw ? 'Unentschieden' : 'Niederlage'),
+              average: average,
+            ),
+          );
+        }
+      }
+    }
+    return events;
   }
 
   void skipCurrentTournament({
@@ -1233,6 +1395,11 @@ class CareerRepository extends ChangeNotifier {
       return const <RankingStanding>[];
     }
 
+    final cached = _cachedStandingsByRankingId[rankingId];
+    if (cached != null) {
+      return cached;
+    }
+
     CareerRankingDefinition? ranking;
     for (final entry in career.rankings) {
       if (entry.id == rankingId) {
@@ -1244,12 +1411,14 @@ class CareerRepository extends ChangeNotifier {
       return const <RankingStanding>[];
     }
 
-    return _rankingEngine.buildCareerStandings(
+    final standings = _rankingEngine.buildCareerStandings(
       ranking: ranking,
       currentSeasonNumber: career.currentSeason.seasonNumber,
       completedTournaments: career.completedTournaments,
-      participants: _participantMap(career.participantMode),
+      participants: _participantMap(career),
     );
+    _cachedStandingsByRankingId[rankingId] = standings;
+    return standings;
   }
 
   CareerStatisticsSummary? statisticsSummary() {
@@ -1258,11 +1427,18 @@ class CareerRepository extends ChangeNotifier {
       return null;
     }
 
-    return _statisticsEngine.buildSummary(
+    final cached = _cachedStatisticsSummary;
+    if (cached != null) {
+      return cached;
+    }
+
+    final summary = _statisticsEngine.buildSummary(
       currentSeasonNumber: career.currentSeason.seasonNumber,
       completedTournaments: career.completedTournaments,
-      participants: _participantMap(career.participantMode),
+      participants: _participantMap(career),
     );
+    _cachedStatisticsSummary = summary;
+    return summary;
   }
 
   CareerPlayerHistorySummary? playerHistory(String playerId) {
@@ -1278,12 +1454,18 @@ class CareerRepository extends ChangeNotifier {
     if (career == null) {
       return null;
     }
-    final participants = _participantMap(career.participantMode);
+    final cacheKey =
+        '$playerId|${filterMode.name}|${seasonNumber ?? 'all'}';
+    if (_cachedPlayerHistory.containsKey(cacheKey)) {
+      return _cachedPlayerHistory[cacheKey];
+    }
+
+    final participants = _participantMap(career);
     final playerName = participants[playerId];
     if (playerName == null) {
       return null;
     }
-    return _statisticsEngine.buildPlayerHistory(
+    final history = _statisticsEngine.buildPlayerHistory(
       playerId: playerId,
       playerName: playerName,
       currentSeasonNumber: career.currentSeason.seasonNumber,
@@ -1291,13 +1473,19 @@ class CareerRepository extends ChangeNotifier {
       filterMode: filterMode,
       seasonNumber: seasonNumber,
     );
+    _cachedPlayerHistory[cacheKey] = history;
+    return history;
   }
 
-  Map<String, String> _participantMap(CareerParticipantMode mode) {
-    final career = activeCareer;
+  Map<String, String> _participantMap(CareerDefinition career) {
+    final cached = _cachedParticipantMap;
+    if (cached != null) {
+      return cached;
+    }
+
     final entries = <String, String>{};
-    if (mode == CareerParticipantMode.withHuman) {
-      final playerId = career?.playerProfileId;
+    if (career.participantMode == CareerParticipantMode.withHuman) {
+      final playerId = career.playerProfileId;
       final PlayerProfile? human = playerId == null
           ? PlayerRepository.instance.activePlayer
           : PlayerRepository.instance.playerById(playerId);
@@ -1306,12 +1494,11 @@ class CareerRepository extends ChangeNotifier {
       }
     }
 
-    if (career != null) {
-      for (final player in career.databasePlayers) {
-        entries[player.databasePlayerId] = player.name;
-      }
+    for (final player in career.databasePlayers) {
+      entries[player.databasePlayerId] = player.name;
     }
 
+    _cachedParticipantMap = entries;
     return entries;
   }
 
@@ -1320,9 +1507,35 @@ class CareerRepository extends ChangeNotifier {
     if (index < 0) {
       return;
     }
-    _careers[index] = updatedCareer;
+    _careers[index] = _normalizeLoadedCareer(updatedCareer);
+    _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
+  }
+
+  void _invalidateDerivedDataCaches() {
+    _cachedParticipantMap = null;
+    _cachedStatisticsSummary = null;
+    _cachedStandingsByRankingId.clear();
+    _cachedPlayerHistory.clear();
+  }
+
+  CareerDefinition _normalizeLoadedCareer(CareerDefinition career) {
+    return career.copyWith(
+      databasePlayers: career.databasePlayers
+          .map(_normalizeCareerDatabasePlayer)
+          .toList(),
+    );
+  }
+
+  CareerDatabasePlayer _normalizeCareerDatabasePlayer(
+    CareerDatabasePlayer player,
+  ) {
+    final average = player.average;
+    if (average.isNaN || average.isInfinite) {
+      return player.copyWith(average: 0);
+    }
+    return player;
   }
 
   CareerLeagueSeriesState? _leagueSeriesState(

@@ -43,6 +43,12 @@ class _CareerRosterViewData {
   final List<ComputerPlayer> addablePlayers;
 }
 
+enum _TemplateCareerPoolMode {
+  empty,
+  allDatabasePlayers,
+  selectedDatabasePlayers,
+}
+
 class _CareerSetupScreenState extends State<CareerSetupScreen> {
   final CareerRepository _repository = CareerRepository.instance;
   final CareerTemplateRepository _templateRepository =
@@ -139,6 +145,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   final Set<String> _selectedDatabasePlayerIds = <String>{};
   final Set<String> _selectedCareerRosterPlayerIds = <String>{};
   final Set<String> _selectedDatabaseTagFilters = <String>{};
+  final Set<String> _selectedTemplateDatabasePlayerIds = <String>{};
+  final Set<String> _selectedTemplateDatabaseTagFilters = <String>{};
+  bool _isBusy = false;
+  String _busyMessage = '';
+  double? _busyProgress;
   final Set<String> _selectedQualificationTagNames = <String>{};
   final Set<String> _selectedQualificationExcludedTagNames = <String>{};
   final Set<String> _selectedFillTagNames = <String>{};
@@ -147,6 +158,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       <CareerQualificationCondition>[];
   bool _createAsSeries = false;
   bool _expandLeagueIntoMatchdays = false;
+  _TemplateCareerPoolMode _templateCareerPoolMode =
+      _TemplateCareerPoolMode.allDatabasePlayers;
   CareerLeagueSeriesQualificationMode _leagueSeriesQualificationMode =
       CareerLeagueSeriesQualificationMode.fixedAtStart;
   String? _editingSeriesGroupId;
@@ -231,14 +244,16 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               databasePlayers.isEmpty ? null : databasePlayers.first.id;
         }
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Karriere planen'),
-          ),
-          body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-              children: <Widget>[
+        return Stack(
+          children: <Widget>[
+            Scaffold(
+              appBar: AppBar(
+                title: const Text('Karriere planen'),
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                  children: <Widget>[
                 _buildCareerCard(
                   context,
                   careers: careers,
@@ -273,9 +288,55 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                   const SizedBox(height: 16),
                   _buildValidationCard(context, activeCareer),
                 ],
-              ],
+                  ],
+                ),
+              ),
             ),
-          ),
+            if (_isBusy) ...<Widget>[
+              const ModalBarrier(
+                dismissible: false,
+                color: Colors.black38,
+              ),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: CircularProgressIndicator(
+                              value: _busyProgress,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _busyMessage,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          if (_busyProgress != null) ...<Widget>[
+                            const SizedBox(height: 16),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: LinearProgressIndicator(
+                                value: _busyProgress,
+                                minHeight: 8,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         );
       },
     );
@@ -378,6 +439,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                   setState(() => _selectedTemplateId = value);
                 },
               ),
+              const SizedBox(height: 12),
+              _buildTemplatePoolSelector(context),
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: _createCareerFromTemplate,
@@ -996,7 +1059,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               contentPadding: EdgeInsets.zero,
               title: Text(template.name),
               subtitle: Text(
-                '${template.calendar.length} Turniere | ${template.rankings.length} Ranglisten | ${template.databasePlayers.length} Spieler',
+                '${template.calendar.length} Turniere | ${template.rankings.length} Ranglisten | Pool wird beim Erstellen gewaehlt',
               ),
               trailing: _templateRepository.isBuiltInTemplate(template.id)
                   ? const Chip(label: Text('App'))
@@ -2041,7 +2104,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     return '$attributesLabel | Limit: $limitLabel | $validityLabel | $expiryLabel | $initialRemovalLabel | $extensionRemovalLabel';
   }
 
-  void _applyTrainingModeToPool(CareerDefinition career) {
+  Future<void> _applyTrainingModeToPool(CareerDefinition career) async {
     final poolPlayers = _trainingPoolPlayers(career);
     if (poolPlayers.isEmpty) {
       return;
@@ -2062,32 +2125,52 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       ..sort((left, right) => left.average.compareTo(right.average));
     final currentMin = sortedPlayers.first.average;
     final currentMax = sortedPlayers.last.average;
-
-    for (var index = 0; index < sortedPlayers.length; index += 1) {
-      final player = sortedPlayers[index];
-      final double progress;
-      if (sortedPlayers.length == 1) {
-        progress = 0.5;
-      } else if ((currentMax - currentMin).abs() < 0.0001) {
-        progress = index / (sortedPlayers.length - 1);
-      } else {
-        progress = (player.average - currentMin) / (currentMax - currentMin);
-      }
-      final targetAverage = (targetMin + ((targetMax - targetMin) * progress))
-          .clamp(0, 180)
-          .toDouble();
-      final resolution = _computerRepository.resolveSkillsForTheoreticalAverage(
-        targetAverage,
-      );
-      _repository.updateDatabasePlayer(
-        player: player.copyWith(
-          average: resolution.theoreticalAverage,
-          skill: resolution.skill,
-          finishingSkill: resolution.finishingSkill,
-        ),
-      );
+    await _runBusyAction(
+      message:
+          'Trainingsmodus wird angewendet... (0/${sortedPlayers.length} Spieler)',
+      action: () async {
+        final updatedPlayers = <CareerDatabasePlayer>[];
+        for (var index = 0; index < sortedPlayers.length; index += 1) {
+          final player = sortedPlayers[index];
+          final double progress;
+          if (sortedPlayers.length == 1) {
+            progress = 0.5;
+          } else if ((currentMax - currentMin).abs() < 0.0001) {
+            progress = index / (sortedPlayers.length - 1);
+          } else {
+            progress = (player.average - currentMin) / (currentMax - currentMin);
+          }
+          final targetAverage = (targetMin + ((targetMax - targetMin) * progress))
+              .clamp(0, 180)
+              .toDouble();
+          final resolution =
+              _computerRepository.resolveSkillsForTheoreticalAverageQuick(
+            targetAverage,
+          );
+          updatedPlayers.add(
+            player.copyWith(
+              average: resolution.theoreticalAverage,
+              skill: resolution.skill,
+              finishingSkill: resolution.finishingSkill,
+            ),
+          );
+          if (mounted) {
+            setState(() {
+              _busyMessage =
+                  'Trainingsmodus wird angewendet... (${index + 1}/${sortedPlayers.length} Spieler)';
+              _busyProgress = (index + 1) / sortedPlayers.length;
+            });
+          }
+          if ((index + 1) % 8 == 0) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+        _repository.updateDatabasePlayers(players: updatedPlayers);
+      },
+    );
+    if (mounted) {
+      setState(() {});
     }
-    setState(() {});
   }
 
   void _createCareer() {
@@ -2108,7 +2191,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     setState(() {});
   }
 
-  void _createCareerFromTemplate() {
+  Future<void> _createCareerFromTemplate() async {
     final templateId = _selectedTemplateId;
     if (templateId == null) {
       return;
@@ -2124,23 +2207,401 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       return;
     }
 
-    _repository.createCareerFromTemplate(
-      name: _careerNameController.text,
-      template: selectedTemplate,
-      participantMode: _participantMode,
-      playerProfileId: _participantMode == CareerParticipantMode.withHuman
-          ? _selectedPlayerProfileId
-          : null,
-      replaceWeakestPlayerWithHuman:
-          _participantMode == CareerParticipantMode.withHuman &&
-              _replaceWeakestPlayerWithHuman,
+    final templateDatabasePlayers =
+        _templateCreationPoolPlayers(selectedTemplate);
+
+    final shouldContinue = await _confirmTemplateCreation(
+      selectedTemplate,
+      templateDatabasePlayers.length,
     );
-    _careerNameController.clear();
-    final activeCareer = _repository.activeCareer;
-    if (activeCareer != null) {
-      _applyCareerDefaults(activeCareer);
+    if (!shouldContinue || !mounted) {
+      return;
     }
-    setState(() {});
+
+    await _runBusyAction(
+      message: 'Karriere wird aus Vorlage erstellt...',
+      action: () async {
+        await Future<void>.delayed(Duration.zero);
+        _repository.createCareerFromTemplate(
+          name: _careerNameController.text,
+          template: selectedTemplate!,
+          databasePlayers: templateDatabasePlayers,
+          participantMode: _participantMode,
+          playerProfileId: _participantMode == CareerParticipantMode.withHuman
+              ? _selectedPlayerProfileId
+              : null,
+          replaceWeakestPlayerWithHuman:
+              _participantMode == CareerParticipantMode.withHuman &&
+                  _replaceWeakestPlayerWithHuman,
+        );
+        _careerNameController.clear();
+        final activeCareer = _repository.activeCareer;
+        if (activeCareer != null) {
+          _applyCareerDefaults(activeCareer);
+        }
+        if (mounted) {
+          setState(() {});
+        }
+      },
+    );
+  }
+
+  Future<bool> _confirmTemplateCreation(
+    CareerTemplate template,
+    int selectedPoolCount,
+  ) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Vorlage erstellen?'),
+          content: Text(
+            'Die Vorlage "${template.name}" wird als neue Karriere angelegt.\n\n'
+            '$selectedPoolCount Spieler aus dem aktuell gewaehlten Karriere-Pool, ${template.calendar.length} Turniere und ${template.rankings.length} Ranglisten werden uebernommen.\n\n'
+            'Je nach Vorlagengroesse kann das kurz dauern.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Erstellen'),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Widget _buildTemplatePoolSelector(BuildContext context) {
+    final template = _selectedTemplate();
+    final poolViewData = _buildTemplatePoolViewData();
+    final selectedCount = template == null
+        ? 0
+        : _templateCreationPoolPlayers(template).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        DropdownButtonFormField<_TemplateCareerPoolMode>(
+          key: ValueKey<_TemplateCareerPoolMode>(_templateCareerPoolMode),
+          initialValue: _templateCareerPoolMode,
+          decoration: const InputDecoration(
+            labelText: 'Karriere-Pool fuer Vorlage',
+          ),
+          items: const <DropdownMenuItem<_TemplateCareerPoolMode>>[
+            DropdownMenuItem(
+              value: _TemplateCareerPoolMode.empty,
+              child: Text('Leer starten'),
+            ),
+            DropdownMenuItem(
+              value: _TemplateCareerPoolMode.allDatabasePlayers,
+              child: Text('Alle Datenbankspieler'),
+            ),
+            DropdownMenuItem(
+              value: _TemplateCareerPoolMode.selectedDatabasePlayers,
+              child: Text('Auswahl aus Datenbank'),
+            ),
+          ],
+          onChanged: (value) {
+            if (value == null) {
+              return;
+            }
+            setState(() => _templateCareerPoolMode = value);
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _templateCareerPoolMode == _TemplateCareerPoolMode.empty
+              ? 'Die Karriere startet ohne vorbereiteten Karriere-Pool.'
+              : '$selectedCount Spieler werden beim Erstellen in den Karriere-Pool uebernommen.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        if (_templateCareerPoolMode ==
+            _TemplateCareerPoolMode.selectedDatabasePlayers) ...<Widget>[
+          const SizedBox(height: 12),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Pool-Auswahl aus Datenbank'),
+            subtitle: Text(
+              poolViewData.addablePlayers.isEmpty
+                  ? 'Keine Spieler verfuegbar'
+                  : '${_selectedTemplateDatabasePlayerIds.length} von ${poolViewData.addablePlayers.length} Spielern ausgewaehlt',
+            ),
+            children: <Widget>[
+              if (poolViewData.availableTags.isNotEmpty) ...<Widget>[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: poolViewData.availableTags
+                      .map(
+                        (tag) => FilterChip(
+                          label: Text(tag),
+                          selected:
+                              _selectedTemplateDatabaseTagFilters.contains(tag),
+                          onSelected: (_) {
+                            setState(() {
+                              if (_selectedTemplateDatabaseTagFilters
+                                  .contains(tag)) {
+                                _selectedTemplateDatabaseTagFilters.remove(tag);
+                              } else {
+                                _selectedTemplateDatabaseTagFilters.add(tag);
+                              }
+                            });
+                          },
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        _selectedTemplateDatabaseTagFilters.isEmpty
+                            ? 'Kein Datenbank-Tag-Filter aktiv'
+                            : 'Filter: ${_selectedTemplateDatabaseTagFilters.join(', ')}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    if (_selectedTemplateDatabaseTagFilters.isNotEmpty)
+                      TextButton(
+                        onPressed: () {
+                          setState(
+                            _selectedTemplateDatabaseTagFilters.clear,
+                          );
+                        },
+                        child: const Text('Filter loeschen'),
+                      ),
+                  ],
+                ),
+              ],
+              if (poolViewData.addablePlayers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Kein Datenbankspieler passt zur aktuellen Auswahl.'),
+                  ),
+                )
+              else ...<Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        '${_selectedTemplateDatabasePlayerIds.length} Spieler ausgewaehlt',
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          if (_selectedTemplateDatabasePlayerIds.length ==
+                              poolViewData.addablePlayers.length) {
+                            _selectedTemplateDatabasePlayerIds.clear();
+                          } else {
+                            _selectedTemplateDatabasePlayerIds
+                              ..clear()
+                              ..addAll(
+                                poolViewData.addablePlayers
+                                    .map((player) => player.id),
+                              );
+                          }
+                        });
+                      },
+                      child: Text(
+                        _selectedTemplateDatabasePlayerIds.length ==
+                                poolViewData.addablePlayers.length
+                            ? 'Auswahl leeren'
+                            : 'Alle waehlen',
+                      ),
+                    ),
+                  ],
+                ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: poolViewData.addablePlayers
+                          .map(
+                            (player) => CheckboxListTile(
+                              value: _selectedTemplateDatabasePlayerIds
+                                  .contains(player.id),
+                              onChanged: (_) {
+                                setState(() {
+                                  if (_selectedTemplateDatabasePlayerIds
+                                      .contains(player.id)) {
+                                    _selectedTemplateDatabasePlayerIds
+                                        .remove(player.id);
+                                  } else {
+                                    _selectedTemplateDatabasePlayerIds
+                                        .add(player.id);
+                                  }
+                                });
+                              },
+                              title: Text(player.name),
+                              subtitle: Text(
+                                '${player.theoreticalAverage.toStringAsFixed(1)} Theo Avg'
+                                '${player.tags.isEmpty ? '' : ' | ${player.tags.join(', ')}'}',
+                              ),
+                              controlAffinity:
+                                  ListTileControlAffinity.leading,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  CareerTemplate? _selectedTemplate() {
+    final templateId = _selectedTemplateId;
+    if (templateId == null) {
+      return null;
+    }
+    for (final template in _templateRepository.templates) {
+      if (template.id == templateId) {
+        return template;
+      }
+    }
+    return null;
+  }
+
+  _CareerRosterViewData _buildTemplatePoolViewData() {
+    final availablePlayers = _computerRepository.players;
+    final availableTags = availablePlayers
+        .expand((player) => player.tags)
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    _selectedTemplateDatabaseTagFilters.removeWhere(
+      (tag) => !availableTags.contains(tag),
+    );
+    final addablePlayers = availablePlayers
+        .where((player) {
+          if (_selectedTemplateDatabaseTagFilters.isEmpty) {
+            return true;
+          }
+          for (final tag in player.tags) {
+            if (_selectedTemplateDatabaseTagFilters.contains(tag)) {
+              return true;
+            }
+          }
+          return false;
+        })
+        .toList()
+      ..sort(
+        (left, right) =>
+            right.theoreticalAverage.compareTo(left.theoreticalAverage),
+      );
+    _selectedTemplateDatabasePlayerIds.removeWhere(
+      (playerId) => addablePlayers.every((player) => player.id != playerId),
+    );
+    return _CareerRosterViewData(
+      availableTags: availableTags,
+      addablePlayers: addablePlayers,
+    );
+  }
+
+  List<CareerDatabasePlayer> _templateCreationPoolPlayers(
+    CareerTemplate template,
+  ) {
+    switch (_templateCareerPoolMode) {
+      case _TemplateCareerPoolMode.empty:
+        return const <CareerDatabasePlayer>[];
+      case _TemplateCareerPoolMode.allDatabasePlayers:
+        return _computerRepository.players
+            .map(
+              (player) => _careerDatabasePlayerFromComputerPlayer(
+                player: player,
+                template: template,
+              ),
+            )
+            .toList();
+      case _TemplateCareerPoolMode.selectedDatabasePlayers:
+        return _computerRepository.players
+            .where(
+              (player) => _selectedTemplateDatabasePlayerIds.contains(player.id),
+            )
+            .map(
+              (player) => _careerDatabasePlayerFromComputerPlayer(
+                player: player,
+                template: template,
+              ),
+            )
+            .toList();
+    }
+  }
+
+  CareerDatabasePlayer _careerDatabasePlayerFromComputerPlayer({
+    required ComputerPlayer player,
+    required CareerTemplate template,
+  }) {
+    final tagDefinitionsByLowerName = <String, CareerTagDefinition>{
+      for (final definition in template.careerTagDefinitions)
+        definition.name.toLowerCase(): definition,
+    };
+    final careerTags = <CareerPlayerTag>[];
+    final seenTagNames = <String>{};
+    for (final rawTag in player.tags) {
+      final normalizedTag = rawTag.trim().toLowerCase();
+      final definition = tagDefinitionsByLowerName[normalizedTag];
+      if (definition == null || !seenTagNames.add(definition.name)) {
+        continue;
+      }
+      careerTags.add(
+        CareerPlayerTag(
+          tagName: definition.name,
+          remainingSeasons: definition.initialValiditySeasons,
+        ),
+      );
+    }
+    return CareerDatabasePlayer(
+      databasePlayerId: player.id,
+      name: player.name,
+      average: player.theoreticalAverage,
+      skill: player.skill,
+      finishingSkill: player.finishingSkill,
+      careerTags: careerTags,
+    );
+  }
+
+  Future<void> _runBusyAction({
+    required String message,
+    required Future<void> Function() action,
+  }) async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isBusy = true;
+      _busyMessage = message;
+      _busyProgress = null;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    try {
+      await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBusy = false;
+          _busyMessage = '';
+          _busyProgress = null;
+        });
+      }
+    }
   }
 
   void _addRanking() {
@@ -2743,12 +3204,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
 
   void _saveCurrentCareerAsTemplate(CareerDefinition career) {
     _templateRepository.saveTemplate(
-        name: _templateNameController.text.isEmpty
-            ? '${career.name} Vorlage'
-            : _templateNameController.text,
-        databasePlayers: List<CareerDatabasePlayer>.from(career.databasePlayers),
-        careerTagDefinitions:
-            List<CareerTagDefinition>.from(career.careerTagDefinitions),
+      name: _templateNameController.text.isEmpty
+          ? '${career.name} Vorlage'
+          : _templateNameController.text,
+      careerTagDefinitions:
+          List<CareerTagDefinition>.from(career.careerTagDefinitions),
       seasonTagRules: List<CareerSeasonTagRule>.from(career.seasonTagRules),
       rankings: List<CareerRankingDefinition>.from(career.rankings),
       calendar: List<CareerCalendarItem>.from(career.currentSeason.calendar),

@@ -1,8 +1,9 @@
 class AppSettings {
-  static const int currentSettingsVersion = 5;
+  static const int currentSettingsVersion = 9;
   static const int defaultComputerSpeedIndex = 1;
   static const int defaultRadiusCalibrationPercent = 100;
   static const int defaultSimulationSpreadPercent = 100;
+  static const bool defaultDebugOverlayEnabled = true;
   static const List<int> defaultX01QuickScores = <int>[
     26,
     41,
@@ -17,6 +18,7 @@ class AppSettings {
     this.computerSpeedIndex = defaultComputerSpeedIndex,
     this.radiusCalibrationPercent = defaultRadiusCalibrationPercent,
     this.simulationSpreadPercent = defaultSimulationSpreadPercent,
+    this.debugOverlayEnabled = defaultDebugOverlayEnabled,
     this.x01QuickScores = defaultX01QuickScores,
   });
 
@@ -24,6 +26,7 @@ class AppSettings {
   final int computerSpeedIndex;
   final int radiusCalibrationPercent;
   final int simulationSpreadPercent;
+  final bool debugOverlayEnabled;
   final List<int> x01QuickScores;
 
   static const AppSettings defaults = AppSettings();
@@ -33,6 +36,7 @@ class AppSettings {
     int? computerSpeedIndex,
     int? radiusCalibrationPercent,
     int? simulationSpreadPercent,
+    bool? debugOverlayEnabled,
     List<int>? x01QuickScores,
   }) {
     return AppSettings(
@@ -42,6 +46,7 @@ class AppSettings {
           radiusCalibrationPercent ?? this.radiusCalibrationPercent,
       simulationSpreadPercent:
           simulationSpreadPercent ?? this.simulationSpreadPercent,
+      debugOverlayEnabled: debugOverlayEnabled ?? this.debugOverlayEnabled,
       x01QuickScores: x01QuickScores ?? this.x01QuickScores,
     );
   }
@@ -52,6 +57,7 @@ class AppSettings {
       'computerSpeedIndex': computerSpeedIndex,
       'radiusCalibrationPercent': radiusCalibrationPercent,
       'simulationSpreadPercent': simulationSpreadPercent,
+      'debugOverlayEnabled': debugOverlayEnabled,
       'x01QuickScores': x01QuickScores,
     };
   }
@@ -69,6 +75,8 @@ class AppSettings {
       simulationSpreadPercent:
           (json['simulationSpreadPercent'] as num?)?.toInt() ??
           defaultSimulationSpreadPercent,
+      debugOverlayEnabled:
+          json['debugOverlayEnabled'] as bool? ?? defaultDebugOverlayEnabled,
       x01QuickScores: (json['x01QuickScores'] as List<dynamic>?)
               ?.map((entry) => (entry as num).toInt())
               .toList() ??

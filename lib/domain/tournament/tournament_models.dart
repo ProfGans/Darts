@@ -276,6 +276,7 @@ class TournamentPlayerMatchStats {
     this.decidingLegDarts = 0,
     this.decidingLegsPlayed = 0,
     this.decidingLegsWon = 0,
+    this.won9Darters = 0,
     this.won12Darters = 0,
     this.won15Darters = 0,
     this.won18Darters = 0,
@@ -325,6 +326,7 @@ class TournamentPlayerMatchStats {
   final int decidingLegDarts;
   final int decidingLegsPlayed;
   final int decidingLegsWon;
+  final int won9Darters;
   final int won12Darters;
   final int won15Darters;
   final int won18Darters;
@@ -375,6 +377,7 @@ class TournamentPlayerMatchStats {
       'decidingLegDarts': decidingLegDarts,
       'decidingLegsPlayed': decidingLegsPlayed,
       'decidingLegsWon': decidingLegsWon,
+      'won9Darters': won9Darters,
       'won12Darters': won12Darters,
       'won15Darters': won15Darters,
       'won18Darters': won18Darters,
@@ -382,14 +385,24 @@ class TournamentPlayerMatchStats {
   }
 
   static TournamentPlayerMatchStats fromJson(Map<String, dynamic> json) {
+    final pointsScored = (json['pointsScored'] as num?)?.toInt() ?? 0;
+    final dartsThrown = (json['dartsThrown'] as num?)?.toInt() ?? 0;
+    final legsPlayed = (json['legsPlayed'] as num?)?.toInt() ?? 0;
+    final normalizedFirstNine = _normalizeFirstNineSample(
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
+      legsPlayed: legsPlayed,
+      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
+      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+    );
     return TournamentPlayerMatchStats(
       participantId: json['participantId'] as String,
       participantName: json['participantName'] as String,
-      pointsScored: (json['pointsScored'] as num?)?.toInt() ?? 0,
-      dartsThrown: (json['dartsThrown'] as num?)?.toInt() ?? 0,
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
       visits: (json['visits'] as num?)?.toInt() ?? 0,
       legsWon: (json['legsWon'] as num?)?.toInt() ?? 0,
-      legsPlayed: (json['legsPlayed'] as num?)?.toInt() ?? 0,
+      legsPlayed: legsPlayed,
       legsStarted: (json['legsStarted'] as num?)?.toInt() ?? 0,
       legsWonAsStarter: (json['legsWonAsStarter'] as num?)?.toInt() ?? 0,
       legsWonWithoutStarter:
@@ -425,8 +438,8 @@ class TournamentPlayerMatchStats {
           (json['functionalDoubleAttempts'] as num?)?.toInt() ?? 0,
       functionalDoubleSuccesses:
           (json['functionalDoubleSuccesses'] as num?)?.toInt() ?? 0,
-      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
-      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+      firstNinePoints: normalizedFirstNine.points,
+      firstNineDarts: normalizedFirstNine.darts,
       highestFinish: (json['highestFinish'] as num?)?.toInt() ?? 0,
       bestLegDarts: (json['bestLegDarts'] as num?)?.toInt() ?? 0,
       totalFinishValue: (json['totalFinishValue'] as num?)?.toInt() ?? 0,
@@ -439,10 +452,34 @@ class TournamentPlayerMatchStats {
       decidingLegsPlayed:
           (json['decidingLegsPlayed'] as num?)?.toInt() ?? 0,
       decidingLegsWon: (json['decidingLegsWon'] as num?)?.toInt() ?? 0,
+      won9Darters: (json['won9Darters'] as num?)?.toInt() ?? 0,
       won12Darters: (json['won12Darters'] as num?)?.toInt() ?? 0,
       won15Darters: (json['won15Darters'] as num?)?.toInt() ?? 0,
       won18Darters: (json['won18Darters'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  static ({double points, int darts}) _normalizeFirstNineSample({
+    required int pointsScored,
+    required int dartsThrown,
+    required int legsPlayed,
+    required double firstNinePoints,
+    required int firstNineDarts,
+  }) {
+    final safePoints = firstNinePoints < 0 ? 0.0 : firstNinePoints;
+    final safeDarts = firstNineDarts < 0 ? 0 : firstNineDarts;
+    final maxFirstNineDarts = legsPlayed <= 0
+        ? dartsThrown
+        : ((legsPlayed * 9) < dartsThrown ? (legsPlayed * 9) : dartsThrown);
+    final legacyTotalSample = safeDarts == dartsThrown &&
+        safePoints == pointsScored.toDouble() &&
+        dartsThrown > maxFirstNineDarts;
+    final impossibleSample =
+        safeDarts > maxFirstNineDarts || safePoints > pointsScored;
+    if (legacyTotalSample || impossibleSample) {
+      return (points: 0.0, darts: 0);
+    }
+    return (points: safePoints, darts: safeDarts);
   }
 }
 

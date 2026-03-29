@@ -15,6 +15,141 @@ class TournamentEngine {
 
   final X01MatchSimulator _simulator;
 
+  void resetPerformanceTotals() {
+    _simulator.resetPerformanceTotals();
+    _simulator.botEngine.resetPerformanceTotals();
+  }
+
+  TournamentSimulationBatch simulateMatchesBatch({
+    required TournamentBracket bracket,
+    required BotProfile Function(String participantId) profileProvider,
+    required bool includeHumanMatches,
+    required int maxMatches,
+  }) {
+    return _simulateMatchesBatchFast(
+      bracket: bracket,
+      profileProvider: profileProvider,
+      includeHumanMatches: includeHumanMatches,
+      maxMatches: maxMatches,
+    );
+  }
+
+  TournamentSimulationBatch _simulateMatchesBatchFast({
+    required TournamentBracket bracket,
+    required BotProfile Function(String participantId) profileProvider,
+    required bool includeHumanMatches,
+    required int maxMatches,
+  }) {
+    final rounds = _cloneRounds(bracket.rounds);
+    var workingBracket = TournamentBracket(
+      definition: bracket.definition,
+      participants: bracket.participants,
+      rounds: rounds,
+    );
+    var simulatedMatches = 0;
+
+    while (!workingBracket.isCompleted && simulatedMatches < maxMatches) {
+      if (workingBracket.definition.format == TournamentFormat.leaguePlayoff &&
+          workingBracket.playoffRounds.isEmpty &&
+          _allRoundsCompleted(workingBracket.leagueRounds)) {
+        final playoffRounds = _buildPlayoffRounds(workingBracket);
+        if (playoffRounds.isNotEmpty) {
+          rounds.addAll(playoffRounds);
+          workingBracket = TournamentBracket(
+            definition: workingBracket.definition,
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          _autoAdvanceByesInPlace(
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          workingBracket = TournamentBracket(
+            definition: workingBracket.definition,
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          continue;
+        }
+      }
+
+      final nextMatchRef = _findNextSimulatableMatch(
+        rounds,
+        includeHumanMatches: includeHumanMatches,
+      );
+      if (nextMatchRef == null) {
+        return TournamentSimulationBatch(
+          bracket: workingBracket,
+          simulatedMatches: simulatedMatches,
+          madeProgress: false,
+        );
+      }
+
+      final match = rounds[nextMatchRef.roundIndex].matches[nextMatchRef.matchIndex];
+      final playerA = match.playerA!;
+      final playerB = match.playerB!;
+      final matchConfig = MatchConfig(
+        startScore: workingBracket.definition.startScore,
+        mode: workingBracket.definition.matchMode,
+        startRequirement: workingBracket.definition.startRequirement,
+        checkoutRequirement: workingBracket.definition.checkoutRequirement,
+        legsToWin: _legsToWinForMatch(
+          bracket: workingBracket,
+          roundNumber: match.roundNumber,
+        ),
+        setsToWin: _setsToWinForMatch(
+          bracket: workingBracket,
+          roundNumber: match.roundNumber,
+        ),
+        legsPerSet: workingBracket.definition.legsPerSet,
+      );
+      final simulation = _simulator.simulateAutoMatch(
+        playerA: SimulatedPlayer(
+          name: playerA.name,
+          profile: profileProvider(playerA.id),
+        ),
+        playerB: SimulatedPlayer(
+          name: playerB.name,
+          profile: profileProvider(playerB.id),
+        ),
+        config: matchConfig,
+        detailed: false,
+      );
+      final winner = simulation.winner.name == playerA.name ? playerA : playerB;
+      final result = TournamentMatchResult(
+        winnerId: winner.id,
+        winnerName: winner.name,
+        scoreText: simulation.scoreText,
+        participantStats: _participantStatsFromSimulation(
+          simulation: simulation,
+          playerA: playerA,
+          playerB: playerB,
+        ),
+      );
+
+      _applyResultInPlace(
+        rounds: rounds,
+        participants: workingBracket.participants,
+        roundIndex: nextMatchRef.roundIndex,
+        matchIndex: nextMatchRef.matchIndex,
+        result: result,
+        format: workingBracket.definition.format,
+      );
+      simulatedMatches += 1;
+      workingBracket = TournamentBracket(
+        definition: workingBracket.definition,
+        participants: workingBracket.participants,
+        rounds: rounds,
+      );
+    }
+
+    return TournamentSimulationBatch(
+      bracket: workingBracket,
+      simulatedMatches: simulatedMatches,
+      madeProgress: simulatedMatches > 0,
+    );
+  }
+
   TournamentBracket buildBracket({
     required TournamentDefinition definition,
     required List<TournamentParticipant> participants,
@@ -449,6 +584,234 @@ class TournamentEngine {
     return _autoAdvanceByes(_withAdvancedWinners(updatedBracket));
   }
 
+  List<TournamentRound> _cloneRounds(List<TournamentRound> rounds) {
+    return rounds
+        .map(
+          (round) => TournamentRound(
+            roundNumber: round.roundNumber,
+            title: round.title,
+            stage: round.stage,
+            matches: List<TournamentMatch>.from(round.matches),
+          ),
+        )
+        .toList();
+  }
+
+  _RoundMatchRef? _findNextSimulatableMatch(
+    List<TournamentRound> rounds, {
+    required bool includeHumanMatches,
+  }) {
+    for (var roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+      final round = rounds[roundIndex];
+      for (var matchIndex = 0; matchIndex < round.matches.length; matchIndex += 1) {
+        final match = round.matches[matchIndex];
+        if (match.status != TournamentMatchStatus.pending ||
+            !match.isReady ||
+            (match.isHumanMatch && !includeHumanMatches)) {
+          continue;
+        }
+        return _RoundMatchRef(roundIndex: roundIndex, matchIndex: matchIndex);
+      }
+    }
+    return null;
+  }
+
+  void _applyResultInPlace({
+    required List<TournamentRound> rounds,
+    required List<TournamentParticipant> participants,
+    required int roundIndex,
+    required int matchIndex,
+    required TournamentMatchResult result,
+    required TournamentFormat format,
+  }) {
+    final match = rounds[roundIndex].matches[matchIndex];
+    rounds[roundIndex].matches[matchIndex] = match.copyWith(
+      status: TournamentMatchStatus.completed,
+      result: result,
+    );
+
+    if (format == TournamentFormat.league) {
+      return;
+    }
+
+    if (format == TournamentFormat.leaguePlayoff &&
+        rounds[roundIndex].stage == TournamentRoundStage.league) {
+      return;
+    }
+
+    _advanceWinnerFromMatchInPlace(
+      rounds: rounds,
+      participants: participants,
+      roundIndex: roundIndex,
+      matchIndex: matchIndex,
+      winnerId: result.winnerId,
+    );
+    _autoAdvanceByesInPlace(participants: participants, rounds: rounds);
+  }
+
+  void _advanceWinnerFromMatchInPlace({
+    required List<TournamentRound> rounds,
+    required List<TournamentParticipant> participants,
+    required int roundIndex,
+    required int matchIndex,
+    required String? winnerId,
+  }) {
+    if (winnerId == null || roundIndex >= rounds.length - 1) {
+      return;
+    }
+    final winner = _findParticipant(participants, winnerId);
+    if (winner == null) {
+      return;
+    }
+    final targetIndex = matchIndex ~/ 2;
+    final target = rounds[roundIndex + 1].matches[targetIndex];
+    final updatedTarget = matchIndex.isEven
+        ? target.copyWith(playerA: winner)
+        : target.copyWith(playerB: winner);
+    final shouldReopenMatch =
+        updatedTarget.isReady &&
+        updatedTarget.status == TournamentMatchStatus.completed &&
+        updatedTarget.result?.winnerId == null;
+    rounds[roundIndex + 1].matches[targetIndex] = shouldReopenMatch
+        ? updatedTarget.copyWith(
+            status: TournamentMatchStatus.pending,
+            clearResult: true,
+          )
+        : updatedTarget;
+  }
+
+  void _autoAdvanceByesInPlace({
+    required List<TournamentParticipant> participants,
+    required List<TournamentRound> rounds,
+  }) {
+    while (true) {
+      final emptyRef = _nextEmptyMatchRef(rounds);
+      if (emptyRef != null) {
+        _applyResultInPlace(
+          rounds: rounds,
+          participants: participants,
+          roundIndex: emptyRef.roundIndex,
+          matchIndex: emptyRef.matchIndex,
+          result: const TournamentMatchResult(scoreText: 'Kein Match'),
+          format: TournamentFormat.knockout,
+        );
+        continue;
+      }
+
+      final byeRef = _nextByeMatchRef(rounds);
+      if (byeRef == null) {
+        return;
+      }
+      final match = rounds[byeRef.roundIndex].matches[byeRef.matchIndex];
+      final winner = match.playerA ?? match.playerB;
+      if (winner == null) {
+        return;
+      }
+      _applyResultInPlace(
+        rounds: rounds,
+        participants: participants,
+        roundIndex: byeRef.roundIndex,
+        matchIndex: byeRef.matchIndex,
+        result: TournamentMatchResult(
+          winnerId: winner.id,
+          winnerName: winner.name,
+          scoreText: 'Freilos',
+        ),
+        format: TournamentFormat.knockout,
+      );
+    }
+  }
+
+  _RoundMatchRef? _nextEmptyMatchRef(List<TournamentRound> rounds) {
+    for (var roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+      final round = rounds[roundIndex];
+      for (var matchIndex = 0; matchIndex < round.matches.length; matchIndex += 1) {
+        final match = round.matches[matchIndex];
+        final isEmptyMatch = match.playerA == null && match.playerB == null;
+        if (match.status != TournamentMatchStatus.pending || !isEmptyMatch) {
+          continue;
+        }
+        if (_canResolveByeMatchInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex,
+          matchIndex: matchIndex,
+        )) {
+          return _RoundMatchRef(roundIndex: roundIndex, matchIndex: matchIndex);
+        }
+      }
+    }
+    return null;
+  }
+
+  _RoundMatchRef? _nextByeMatchRef(List<TournamentRound> rounds) {
+    for (var roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+      final round = rounds[roundIndex];
+      for (var matchIndex = 0; matchIndex < round.matches.length; matchIndex += 1) {
+        final match = round.matches[matchIndex];
+        final hasSinglePlayer = (match.playerA != null) != (match.playerB != null);
+        if (match.status != TournamentMatchStatus.pending || !hasSinglePlayer) {
+          continue;
+        }
+        if (_canResolveByeMatchInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex,
+          matchIndex: matchIndex,
+        )) {
+          return _RoundMatchRef(roundIndex: roundIndex, matchIndex: matchIndex);
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _canResolveByeMatchInRounds({
+    required List<TournamentRound> rounds,
+    required int roundIndex,
+    required int matchIndex,
+  }) {
+    if (roundIndex == 0) {
+      return true;
+    }
+
+    return _isBranchResolvedInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex - 1,
+          matchIndex: matchIndex * 2,
+        ) &&
+        _isBranchResolvedInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex - 1,
+          matchIndex: (matchIndex * 2) + 1,
+        );
+  }
+
+  bool _isBranchResolvedInRounds({
+    required List<TournamentRound> rounds,
+    required int roundIndex,
+    required int matchIndex,
+  }) {
+    final match = rounds[roundIndex].matches[matchIndex];
+    if (match.status == TournamentMatchStatus.completed) {
+      return true;
+    }
+    if (match.playerA == null && match.playerB == null) {
+      return true;
+    }
+    if (roundIndex == 0) {
+      return false;
+    }
+    return _isBranchResolvedInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex - 1,
+          matchIndex: matchIndex * 2,
+        ) &&
+        _isBranchResolvedInRounds(
+          rounds: rounds,
+          roundIndex: roundIndex - 1,
+          matchIndex: (matchIndex * 2) + 1,
+        );
+  }
+
   TournamentBracket simulateNextCpuMatch({
     required TournamentBracket bracket,
     required BotProfile Function(String participantId) profileProvider,
@@ -666,6 +1029,7 @@ class TournamentEngine {
       decidingLegDarts: stats.decidingLegDarts,
       decidingLegsPlayed: stats.decidingLegsPlayed,
       decidingLegsWon: stats.decidingLegsWon,
+      won9Darters: stats.won9Darters,
       won12Darters: stats.won12Darters,
       won15Darters: stats.won15Darters,
       won18Darters: stats.won18Darters,
@@ -997,4 +1361,26 @@ class TournamentEngine {
     }
     return 'Runde $roundNumber';
   }
+}
+
+class TournamentSimulationBatch {
+  const TournamentSimulationBatch({
+    required this.bracket,
+    required this.simulatedMatches,
+    required this.madeProgress,
+  });
+
+  final TournamentBracket bracket;
+  final int simulatedMatches;
+  final bool madeProgress;
+}
+
+class _RoundMatchRef {
+  const _RoundMatchRef({
+    required this.roundIndex,
+    required this.matchIndex,
+  });
+
+  final int roundIndex;
+  final int matchIndex;
 }

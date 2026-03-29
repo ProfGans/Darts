@@ -99,7 +99,7 @@ class DartThrowResult {
       case CheckoutRequirement.doubleOut:
         return isFinishDouble;
       case CheckoutRequirement.masterOut:
-        return isFinishDouble || isFinishTriple;
+        return isFinishTriple;
     }
   }
 }

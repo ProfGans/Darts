@@ -1,7 +1,10 @@
+import 'dart:math';
+
+import '../../data/debug/app_debug.dart';
 import '../bot/bot_engine.dart';
-import 'checkout_planner.dart';
 import 'x01_match_engine.dart';
 import 'x01_models.dart';
+import 'x01_rules.dart';
 
 class SimulatedPlayer {
   const SimulatedPlayer({
@@ -32,6 +35,11 @@ class SimulatedVisitResult {
     required this.functionalDoubleOpportunity,
     required this.bullCheckoutOpportunity,
     required this.finishedOnBull,
+    required this.elapsedMicroseconds,
+    required this.botMicroseconds,
+    required this.botThrowCount,
+    required this.checkoutOpportunityMicroseconds,
+    required this.evaluateMicroseconds,
   });
 
   final int startScore;
@@ -51,6 +59,11 @@ class SimulatedVisitResult {
   final bool functionalDoubleOpportunity;
   final bool bullCheckoutOpportunity;
   final bool finishedOnBull;
+  final int elapsedMicroseconds;
+  final int botMicroseconds;
+  final int botThrowCount;
+  final int checkoutOpportunityMicroseconds;
+  final int evaluateMicroseconds;
 }
 
 class SimulatedVisitDebug {
@@ -183,6 +196,7 @@ class SimulatedPlayerStats {
     this.decidingLegDarts = 0,
     this.decidingLegsPlayed = 0,
     this.decidingLegsWon = 0,
+    this.won9Darters = 0,
     this.won12Darters = 0,
     this.won15Darters = 0,
     this.won18Darters = 0,
@@ -230,6 +244,7 @@ class SimulatedPlayerStats {
   final int decidingLegDarts;
   final int decidingLegsPlayed;
   final int decidingLegsWon;
+  final int won9Darters;
   final int won12Darters;
   final int won15Darters;
   final int won18Darters;
@@ -308,6 +323,14 @@ class _LegResult {
     required this.remainingScoreA,
     required this.remainingScoreB,
     required this.visitDebugs,
+    required this.elapsedMicroseconds,
+    required this.visitMicroseconds,
+    required this.botMicroseconds,
+    required this.visitCount,
+    required this.botThrowCount,
+    required this.checkoutOpportunityMicroseconds,
+    required this.evaluateMicroseconds,
+    required this.statsMicroseconds,
   });
 
   final String winner;
@@ -318,6 +341,14 @@ class _LegResult {
   final int remainingScoreA;
   final int remainingScoreB;
   final List<SimulatedVisitDebug> visitDebugs;
+  final int elapsedMicroseconds;
+  final int visitMicroseconds;
+  final int botMicroseconds;
+  final int visitCount;
+  final int botThrowCount;
+  final int checkoutOpportunityMicroseconds;
+  final int evaluateMicroseconds;
+  final int statsMicroseconds;
 }
 
 class _VisitLegState {
@@ -328,6 +359,59 @@ class _VisitLegState {
 
   final int score;
   final bool openedLeg;
+}
+
+class _SimulationPerfTotals {
+  int matchCount = 0;
+  int legCount = 0;
+  int visitCount = 0;
+  int botThrowCount = 0;
+  int matchMicroseconds = 0;
+  int legMicroseconds = 0;
+  int visitMicroseconds = 0;
+  int botMicroseconds = 0;
+  int checkoutOpportunityMicroseconds = 0;
+  int evaluateMicroseconds = 0;
+  int statsMicroseconds = 0;
+
+  void reset() {
+    matchCount = 0;
+    legCount = 0;
+    visitCount = 0;
+    botThrowCount = 0;
+    matchMicroseconds = 0;
+    legMicroseconds = 0;
+    visitMicroseconds = 0;
+    botMicroseconds = 0;
+    checkoutOpportunityMicroseconds = 0;
+    evaluateMicroseconds = 0;
+    statsMicroseconds = 0;
+  }
+
+  void record({
+    required int matchMicrosecondsValue,
+    required int legMicrosecondsValue,
+    required int visitMicrosecondsValue,
+    required int botMicrosecondsValue,
+    required int legCountValue,
+    required int visitCountValue,
+    required int botThrowCountValue,
+    required int checkoutOpportunityMicrosecondsValue,
+    required int evaluateMicrosecondsValue,
+    required int statsMicrosecondsValue,
+  }) {
+    matchCount += 1;
+    legCount += legCountValue;
+    visitCount += visitCountValue;
+    botThrowCount += botThrowCountValue;
+    matchMicroseconds += matchMicrosecondsValue;
+    legMicroseconds += legMicrosecondsValue;
+    visitMicroseconds += visitMicrosecondsValue;
+    botMicroseconds += botMicrosecondsValue;
+    checkoutOpportunityMicroseconds += checkoutOpportunityMicrosecondsValue;
+    evaluateMicroseconds += evaluateMicrosecondsValue;
+    statsMicroseconds += statsMicrosecondsValue;
+  }
 }
 
 class _SimulatedStatsAccumulator {
@@ -373,6 +457,7 @@ class _SimulatedStatsAccumulator {
   int decidingLegDarts = 0;
   int decidingLegsPlayed = 0;
   int decidingLegsWon = 0;
+  int won9Darters = 0;
   int won12Darters = 0;
   int won15Darters = 0;
   int won18Darters = 0;
@@ -422,6 +507,7 @@ class _SimulatedStatsAccumulator {
       decidingLegDarts: decidingLegDarts,
       decidingLegsPlayed: decidingLegsPlayed,
       decidingLegsWon: decidingLegsWon,
+      won9Darters: won9Darters,
       won12Darters: won12Darters,
       won15Darters: won15Darters,
       won18Darters: won18Darters,
@@ -433,19 +519,59 @@ class X01MatchSimulator {
   X01MatchSimulator({
     required this.matchEngine,
     required this.botEngine,
-  }) : _checkoutPlanner = CheckoutPlanner();
+  });
 
   final X01MatchEngine matchEngine;
   final BotEngine botEngine;
-  final CheckoutPlanner _checkoutPlanner;
+  final Map<String, int?> _checkoutOpportunityCache = <String, int?>{};
+  final Map<String, bool> _checkoutReachabilityCache = <String, bool>{};
+  final List<DartThrowResult> _allCheckoutThrows = const X01Rules().buildAllThrows()
+      .where((entry) => !entry.isMiss)
+      .toList(growable: false);
+  final _SimulationPerfTotals _perfTotals = _SimulationPerfTotals();
+
+  void resetPerformanceTotals() {
+    _perfTotals.reset();
+  }
+
+  SimulatedVisitResult simulateBotVisit({
+    required int startScore,
+    required bool hasOpenedLeg,
+    required StartRequirement startRequirement,
+    required SimulatedPlayer player,
+    required CheckoutRequirement checkoutRequirement,
+    bool detailed = true,
+    Random? random,
+  }) {
+    return _simulateVisit(
+      startScore: startScore,
+      hasOpenedLeg: hasOpenedLeg,
+      startRequirement: startRequirement,
+      player: player,
+      checkoutRequirement: checkoutRequirement,
+      detailed: detailed,
+      random: random,
+    );
+  }
 
   SimulatedMatchResult simulateAutoMatch({
     required SimulatedPlayer playerA,
     required SimulatedPlayer playerB,
     required MatchConfig config,
     bool detailed = true,
+    Random? random,
   }) {
+    final matchStopwatch = Stopwatch()..start();
     final state = _MatchState();
+    var legMicroseconds = 0;
+    var visitMicroseconds = 0;
+    var botMicroseconds = 0;
+    var legCount = 0;
+    var visitCount = 0;
+    var botThrowCount = 0;
+    var checkoutOpportunityMicroseconds = 0;
+    var evaluateMicroseconds = 0;
+    var statsMicroseconds = 0;
 
     while (!_isMatchFinished(state, config)) {
       final decidingLeg = _isCurrentLegDeciding(state, config);
@@ -457,7 +583,17 @@ class X01MatchSimulator {
         config: config,
         detailed: detailed,
         decidingLeg: decidingLeg,
+        random: random,
       );
+      legCount += 1;
+      legMicroseconds += legResult.elapsedMicroseconds;
+      visitMicroseconds += legResult.visitMicroseconds;
+      botMicroseconds += legResult.botMicroseconds;
+      visitCount += legResult.visitCount;
+      botThrowCount += legResult.botThrowCount;
+      checkoutOpportunityMicroseconds += legResult.checkoutOpportunityMicroseconds;
+      evaluateMicroseconds += legResult.evaluateMicroseconds;
+      statsMicroseconds += legResult.statsMicroseconds;
 
       if (legResult.winner == 'A') {
         state.legsA += 1;
@@ -473,6 +609,9 @@ class X01MatchSimulator {
             (state.playerStatsA.bestLegDarts == 0 ||
                 legResult.legDartsA < state.playerStatsA.bestLegDarts)) {
           state.playerStatsA.bestLegDarts = legResult.legDartsA;
+        }
+        if (legResult.legDartsA == 9) {
+          state.playerStatsA.won9Darters += 1;
         }
         if (legResult.legDartsA > 0 && legResult.legDartsA <= 12) {
           state.playerStatsA.won12Darters += 1;
@@ -497,6 +636,9 @@ class X01MatchSimulator {
             (state.playerStatsB.bestLegDarts == 0 ||
                 legResult.legDartsB < state.playerStatsB.bestLegDarts)) {
           state.playerStatsB.bestLegDarts = legResult.legDartsB;
+        }
+        if (legResult.legDartsB == 9) {
+          state.playerStatsB.won9Darters += 1;
         }
         if (legResult.legDartsB > 0 && legResult.legDartsB <= 12) {
           state.playerStatsB.won12Darters += 1;
@@ -568,6 +710,19 @@ class X01MatchSimulator {
 
       state.starter = state.starter == 'A' ? 'B' : 'A';
     }
+    matchStopwatch.stop();
+    _recordPerformanceSample(
+      matchMicroseconds: matchStopwatch.elapsedMicroseconds,
+      legMicroseconds: legMicroseconds,
+      visitMicroseconds: visitMicroseconds,
+      botMicroseconds: botMicroseconds,
+      legCount: legCount,
+      visitCount: visitCount,
+      botThrowCount: botThrowCount,
+      checkoutOpportunityMicroseconds: checkoutOpportunityMicroseconds,
+      evaluateMicroseconds: evaluateMicroseconds,
+      statsMicroseconds: statsMicroseconds,
+    );
 
     final winner = _isWinner(state, config, 'A') ? playerA : playerB;
     final averageA = _formatAverageValue(state.totalScoredA, state.dartsA);
@@ -622,7 +777,9 @@ class X01MatchSimulator {
     required MatchConfig config,
     required bool detailed,
     required bool decidingLeg,
+    Random? random,
   }) {
+    final legStopwatch = Stopwatch()..start();
     var scoreA = config.startScore;
     var scoreB = config.startScore;
     var openedA = config.startRequirement == StartRequirement.straightIn;
@@ -634,10 +791,18 @@ class X01MatchSimulator {
     var legDartsB = 0;
     var safetyTurns = 0;
     final visitDebugs = <SimulatedVisitDebug>[];
+    var visitMicroseconds = 0;
+    var botMicroseconds = 0;
+    var visitCount = 0;
+    var botThrowCount = 0;
+    var checkoutOpportunityMicroseconds = 0;
+    var evaluateMicroseconds = 0;
+    var statsMicroseconds = 0;
 
     while (true) {
       safetyTurns += 1;
       if (safetyTurns > 400) {
+        legStopwatch.stop();
         return _LegResult(
           winner: scoreA <= scoreB ? 'A' : 'B',
           legDartsA: legDartsA,
@@ -647,10 +812,19 @@ class X01MatchSimulator {
           remainingScoreA: scoreA,
           remainingScoreB: scoreB,
           visitDebugs: List<SimulatedVisitDebug>.from(visitDebugs),
+          elapsedMicroseconds: legStopwatch.elapsedMicroseconds,
+          visitMicroseconds: visitMicroseconds,
+          botMicroseconds: botMicroseconds,
+          visitCount: visitCount,
+          botThrowCount: botThrowCount,
+          checkoutOpportunityMicroseconds: checkoutOpportunityMicroseconds,
+          evaluateMicroseconds: evaluateMicroseconds,
+          statsMicroseconds: statsMicroseconds,
         );
       }
 
       if (turn == 'A') {
+        final legFirst9DartsBeforeVisitA = legFirst9DartsA;
         final result = _simulateVisit(
           startScore: scoreA,
           hasOpenedLeg: openedA,
@@ -658,7 +832,14 @@ class X01MatchSimulator {
           player: playerA,
           checkoutRequirement: config.checkoutRequirement,
           detailed: detailed,
+          random: random,
         );
+        visitCount += 1;
+        visitMicroseconds += result.elapsedMicroseconds;
+        botMicroseconds += result.botMicroseconds;
+        botThrowCount += result.botThrowCount;
+        checkoutOpportunityMicroseconds += result.checkoutOpportunityMicroseconds;
+        evaluateMicroseconds += result.evaluateMicroseconds;
         state.totalScoredA += result.scoredPoints;
         state.dartsA += result.dartsThrown;
         legDartsA += result.dartsThrown;
@@ -666,7 +847,8 @@ class X01MatchSimulator {
         if (result.checkedOut) {
           state.successfulChecksA += 1;
         }
-        _applyFirst9A(state, result, legFirst9DartsA);
+        final statsStopwatch = Stopwatch()..start();
+        _applyFirst9A(state, result, legFirst9DartsBeforeVisitA);
         legFirst9DartsA = (legFirst9DartsA + result.dartsThrown).clamp(0, 9);
         _recordMilestoneA(state, result.scoredPoints);
         _recordVisitStats(
@@ -674,8 +856,10 @@ class X01MatchSimulator {
           result: result,
           isWithThrow: starter == 'A',
           isDecidingLeg: decidingLeg,
-          legFirstNineDarts: legFirst9DartsA - result.dartsThrown,
+          legFirstNineDarts: legFirst9DartsBeforeVisitA,
         );
+        statsStopwatch.stop();
+        statsMicroseconds += statsStopwatch.elapsedMicroseconds;
         if (detailed) {
           visitDebugs.add(
             _buildVisitDebug(
@@ -688,6 +872,7 @@ class X01MatchSimulator {
         scoreA = result.newScore;
         openedA = result.openedLeg;
         if (result.checkedOut) {
+          legStopwatch.stop();
           return _LegResult(
             winner: 'A',
             legDartsA: legDartsA,
@@ -697,10 +882,19 @@ class X01MatchSimulator {
             remainingScoreA: scoreA,
             remainingScoreB: scoreB,
             visitDebugs: List<SimulatedVisitDebug>.from(visitDebugs),
+            elapsedMicroseconds: legStopwatch.elapsedMicroseconds,
+            visitMicroseconds: visitMicroseconds,
+            botMicroseconds: botMicroseconds,
+            visitCount: visitCount,
+            botThrowCount: botThrowCount,
+            checkoutOpportunityMicroseconds: checkoutOpportunityMicroseconds,
+            evaluateMicroseconds: evaluateMicroseconds,
+            statsMicroseconds: statsMicroseconds,
           );
         }
         turn = 'B';
       } else {
+        final legFirst9DartsBeforeVisitB = legFirst9DartsB;
         final result = _simulateVisit(
           startScore: scoreB,
           hasOpenedLeg: openedB,
@@ -708,7 +902,14 @@ class X01MatchSimulator {
           player: playerB,
           checkoutRequirement: config.checkoutRequirement,
           detailed: detailed,
+          random: random,
         );
+        visitCount += 1;
+        visitMicroseconds += result.elapsedMicroseconds;
+        botMicroseconds += result.botMicroseconds;
+        botThrowCount += result.botThrowCount;
+        checkoutOpportunityMicroseconds += result.checkoutOpportunityMicroseconds;
+        evaluateMicroseconds += result.evaluateMicroseconds;
         state.totalScoredB += result.scoredPoints;
         state.dartsB += result.dartsThrown;
         legDartsB += result.dartsThrown;
@@ -716,7 +917,8 @@ class X01MatchSimulator {
         if (result.checkedOut) {
           state.successfulChecksB += 1;
         }
-        _applyFirst9B(state, result, legFirst9DartsB);
+        final statsStopwatch = Stopwatch()..start();
+        _applyFirst9B(state, result, legFirst9DartsBeforeVisitB);
         legFirst9DartsB = (legFirst9DartsB + result.dartsThrown).clamp(0, 9);
         _recordMilestoneB(state, result.scoredPoints);
         _recordVisitStats(
@@ -724,8 +926,10 @@ class X01MatchSimulator {
           result: result,
           isWithThrow: starter == 'B',
           isDecidingLeg: decidingLeg,
-          legFirstNineDarts: legFirst9DartsB - result.dartsThrown,
+          legFirstNineDarts: legFirst9DartsBeforeVisitB,
         );
+        statsStopwatch.stop();
+        statsMicroseconds += statsStopwatch.elapsedMicroseconds;
         if (detailed) {
           visitDebugs.add(
             _buildVisitDebug(
@@ -738,6 +942,7 @@ class X01MatchSimulator {
         scoreB = result.newScore;
         openedB = result.openedLeg;
         if (result.checkedOut) {
+          legStopwatch.stop();
           return _LegResult(
             winner: 'B',
             legDartsA: legDartsA,
@@ -747,6 +952,14 @@ class X01MatchSimulator {
             remainingScoreA: scoreA,
             remainingScoreB: scoreB,
             visitDebugs: List<SimulatedVisitDebug>.from(visitDebugs),
+            elapsedMicroseconds: legStopwatch.elapsedMicroseconds,
+            visitMicroseconds: visitMicroseconds,
+            botMicroseconds: botMicroseconds,
+            visitCount: visitCount,
+            botThrowCount: botThrowCount,
+            checkoutOpportunityMicroseconds: checkoutOpportunityMicroseconds,
+            evaluateMicroseconds: evaluateMicroseconds,
+            statsMicroseconds: statsMicroseconds,
           );
         }
         turn = 'A';
@@ -761,59 +974,78 @@ class X01MatchSimulator {
     required SimulatedPlayer player,
     required CheckoutRequirement checkoutRequirement,
     required bool detailed,
+    Random? random,
   }) {
+    final visitStopwatch = Stopwatch()..start();
     var legState = _VisitLegState(
       score: startScore,
       openedLeg: hasOpenedLeg || startRequirement == StartRequirement.straightIn,
     );
     var scoredPoints = 0;
     var dartsThrown = 0;
-    final throws = <DartThrowResult>[];
+    final throws = detailed ? <DartThrowResult>[] : null;
     final targets = detailed ? <DartThrowResult>[] : null;
     final targetReasons = detailed ? <String>[] : null;
     final plannedRoutes = detailed ? <List<DartThrowResult>>[] : null;
     var doubleAttempts = 0;
+    final checkoutOpportunityStopwatch = Stopwatch()..start();
     final checkoutOpportunityDarts = _checkoutOpportunityDarts(
       startScore,
       checkoutRequirement,
     );
+    checkoutOpportunityStopwatch.stop();
     final functionalDoubleOpportunity = _isFunctionalDoubleOpportunity(startScore);
     final bullCheckoutOpportunity =
         (startScore == 50 || startScore == 25) &&
         checkoutOpportunityDarts != null;
+    var botMicroseconds = 0;
+    var botThrowCount = 0;
+    var evaluateMicroseconds = 0;
 
     for (var dart = 1; dart <= 3; dart += 1) {
+      final botStopwatch = Stopwatch()..start();
       final simulation = legState.openedLeg
           ? botEngine.simulateThrow(
               profile: player.profile,
               score: legState.score,
               dartsLeft: 4 - dart,
+              random: random,
             )
           : botEngine.simulateTargetThrow(
               target: matchEngine.rules.createDouble(20),
               score: legState.score,
               profile: player.profile,
               reason: 'Double-in opener',
+              random: random,
             );
+      botStopwatch.stop();
+      botMicroseconds += botStopwatch.elapsedMicroseconds;
+      botThrowCount += 1;
       final hit = simulation.hit;
       dartsThrown += 1;
-      throws.add(hit);
+      throws?.add(hit);
       targets?.add(simulation.target);
       targetReasons?.add(simulation.reason);
-      plannedRoutes?.add(List<DartThrowResult>.from(simulation.plannedRoute));
+      plannedRoutes?.add(simulation.plannedRoute);
       if (simulation.target.isDouble || simulation.target.isBull) {
         doubleAttempts += 1;
       }
 
-      final visitState = matchEngine.evaluateVisit(
+      final evaluateStopwatch = Stopwatch()..start();
+      final visitState = matchEngine.evaluateThrowProgress(
         currentScore: startScore,
-        throws: List<DartThrowResult>.from(throws),
+        scoredPointsBeforeThrow: scoredPoints,
+        hasOpenedLegBeforeVisit: hasOpenedLeg,
+        openedLegBeforeThrow: legState.openedLeg,
+        dartThrow: hit,
         startRequirement: startRequirement,
-        hasOpenedLeg: hasOpenedLeg,
         checkoutRequirement: checkoutRequirement,
       );
+      evaluateStopwatch.stop();
+      evaluateMicroseconds += evaluateStopwatch.elapsedMicroseconds;
 
       if (visitState.didBust) {
+        visitStopwatch.stop();
         return SimulatedVisitResult(
           startScore: startScore,
           newScore: startScore,
@@ -823,25 +1055,21 @@ class X01MatchSimulator {
           checkedOut: false,
           busted: true,
           doubleAttempts: doubleAttempts,
-          throws: detailed
-              ? List<DartThrowResult>.from(throws)
-              : const <DartThrowResult>[],
-          targets: detailed
-              ? List<DartThrowResult>.from(targets!)
-              : const <DartThrowResult>[],
-          targetReasons: detailed
-              ? List<String>.from(targetReasons!)
-              : const <String>[],
-          plannedRoutes: detailed
-              ? plannedRoutes!
-                  .map((entry) => List<DartThrowResult>.from(entry))
-                  .toList()
-              : const <List<DartThrowResult>>[],
+          throws: throws ?? const <DartThrowResult>[],
+          targets: targets ?? const <DartThrowResult>[],
+          targetReasons: targetReasons ?? const <String>[],
+          plannedRoutes: plannedRoutes ?? const <List<DartThrowResult>>[],
           finishLabel: '',
           checkoutOpportunityDarts: checkoutOpportunityDarts,
           functionalDoubleOpportunity: functionalDoubleOpportunity,
           bullCheckoutOpportunity: bullCheckoutOpportunity,
           finishedOnBull: false,
+          elapsedMicroseconds: visitStopwatch.elapsedMicroseconds,
+          botMicroseconds: botMicroseconds,
+          botThrowCount: botThrowCount,
+          checkoutOpportunityMicroseconds:
+              checkoutOpportunityStopwatch.elapsedMicroseconds,
+          evaluateMicroseconds: evaluateMicroseconds,
         );
       }
 
@@ -851,6 +1079,7 @@ class X01MatchSimulator {
         openedLeg: visitState.openedLeg,
       );
       if (legState.score == 0) {
+        visitStopwatch.stop();
         return SimulatedVisitResult(
           startScore: startScore,
           newScore: 0,
@@ -860,30 +1089,27 @@ class X01MatchSimulator {
           checkedOut: true,
           busted: false,
           doubleAttempts: doubleAttempts,
-          throws: detailed
-              ? List<DartThrowResult>.from(throws)
-              : const <DartThrowResult>[],
-          targets: detailed
-              ? List<DartThrowResult>.from(targets!)
-              : const <DartThrowResult>[],
-          targetReasons: detailed
-              ? List<String>.from(targetReasons!)
-              : const <String>[],
-          plannedRoutes: detailed
-              ? plannedRoutes!
-                  .map((entry) => List<DartThrowResult>.from(entry))
-                  .toList()
-              : const <List<DartThrowResult>>[],
+          throws: throws ?? const <DartThrowResult>[],
+          targets: targets ?? const <DartThrowResult>[],
+          targetReasons: targetReasons ?? const <String>[],
+          plannedRoutes: plannedRoutes ?? const <List<DartThrowResult>>[],
           finishLabel:
-              detailed ? throws.map((entry) => entry.label).join(' - ') : '',
+              detailed ? throws!.map((entry) => entry.label).join(' - ') : '',
           checkoutOpportunityDarts: checkoutOpportunityDarts,
           functionalDoubleOpportunity: functionalDoubleOpportunity,
           bullCheckoutOpportunity: bullCheckoutOpportunity,
-          finishedOnBull: throws.isNotEmpty && throws.last.isBull,
+          finishedOnBull: throws != null && throws.isNotEmpty && throws.last.isBull,
+          elapsedMicroseconds: visitStopwatch.elapsedMicroseconds,
+          botMicroseconds: botMicroseconds,
+          botThrowCount: botThrowCount,
+          checkoutOpportunityMicroseconds:
+              checkoutOpportunityStopwatch.elapsedMicroseconds,
+          evaluateMicroseconds: evaluateMicroseconds,
         );
       }
     }
 
+    visitStopwatch.stop();
     return SimulatedVisitResult(
       startScore: startScore,
       newScore: legState.score,
@@ -893,24 +1119,78 @@ class X01MatchSimulator {
       checkedOut: false,
       busted: false,
       doubleAttempts: doubleAttempts,
-      throws: detailed
-          ? List<DartThrowResult>.from(throws)
-          : const <DartThrowResult>[],
-      targets: detailed
-          ? List<DartThrowResult>.from(targets!)
-          : const <DartThrowResult>[],
-      targetReasons: detailed
-          ? List<String>.from(targetReasons!)
-          : const <String>[],
-      plannedRoutes: detailed
-          ? plannedRoutes!.map((entry) => List<DartThrowResult>.from(entry)).toList()
-          : const <List<DartThrowResult>>[],
+      throws: throws ?? const <DartThrowResult>[],
+      targets: targets ?? const <DartThrowResult>[],
+      targetReasons: targetReasons ?? const <String>[],
+      plannedRoutes: plannedRoutes ?? const <List<DartThrowResult>>[],
       finishLabel: '',
       checkoutOpportunityDarts: checkoutOpportunityDarts,
       functionalDoubleOpportunity: functionalDoubleOpportunity,
       bullCheckoutOpportunity: bullCheckoutOpportunity,
       finishedOnBull: false,
+      elapsedMicroseconds: visitStopwatch.elapsedMicroseconds,
+      botMicroseconds: botMicroseconds,
+      botThrowCount: botThrowCount,
+      checkoutOpportunityMicroseconds:
+          checkoutOpportunityStopwatch.elapsedMicroseconds,
+      evaluateMicroseconds: evaluateMicroseconds,
     );
+  }
+
+  void _recordPerformanceSample({
+    required int matchMicroseconds,
+    required int legMicroseconds,
+    required int visitMicroseconds,
+    required int botMicroseconds,
+    required int legCount,
+    required int visitCount,
+    required int botThrowCount,
+    required int checkoutOpportunityMicroseconds,
+    required int evaluateMicroseconds,
+    required int statsMicroseconds,
+  }) {
+    _perfTotals.record(
+      matchMicrosecondsValue: matchMicroseconds,
+      legMicrosecondsValue: legMicroseconds,
+      visitMicrosecondsValue: visitMicroseconds,
+      botMicrosecondsValue: botMicroseconds,
+      legCountValue: legCount,
+      visitCountValue: visitCount,
+      botThrowCountValue: botThrowCount,
+      checkoutOpportunityMicrosecondsValue: checkoutOpportunityMicroseconds,
+      evaluateMicrosecondsValue: evaluateMicroseconds,
+      statsMicrosecondsValue: statsMicroseconds,
+    );
+    if (_perfTotals.matchCount % 50 != 0) {
+      return;
+    }
+
+    final otherVisitMicroseconds =
+        (_perfTotals.visitMicroseconds -
+                _perfTotals.botMicroseconds -
+                _perfTotals.checkoutOpportunityMicroseconds -
+                _perfTotals.evaluateMicroseconds -
+                _perfTotals.statsMicroseconds)
+            .clamp(0, 1 << 62);
+    final otherMatchMicroseconds =
+        (_perfTotals.matchMicroseconds - _perfTotals.legMicroseconds).clamp(0, 1 << 62);
+    AppDebug.instance.info(
+      'Performance',
+      'X01-Kern ${_perfTotals.matchCount} Matches | '
+      'Match ${_formatPerfMs(_perfTotals.matchMicroseconds)} ms | '
+      'Legs ${_formatPerfMs(_perfTotals.legMicroseconds)} ms (${_perfTotals.legCount}) | '
+      'Visits ${_formatPerfMs(_perfTotals.visitMicroseconds)} ms (${_perfTotals.visitCount}) | '
+      'Bot ${_formatPerfMs(_perfTotals.botMicroseconds)} ms (${_perfTotals.botThrowCount} Wuerfe) | '
+      'Chance ${_formatPerfMs(_perfTotals.checkoutOpportunityMicroseconds)} ms | '
+      'Evaluate ${_formatPerfMs(_perfTotals.evaluateMicroseconds)} ms | '
+      'Stats ${_formatPerfMs(_perfTotals.statsMicroseconds)} ms | '
+      'Visit-Overhead ${_formatPerfMs(otherVisitMicroseconds)} ms | '
+      'Match-Overhead ${_formatPerfMs(otherMatchMicroseconds)} ms',
+    );
+  }
+
+  String _formatPerfMs(int microseconds) {
+    return (microseconds / 1000.0).toStringAsFixed(1);
   }
 
   void _recordVisitStats({
@@ -1153,17 +1433,116 @@ class X01MatchSimulator {
     int score,
     CheckoutRequirement checkoutRequirement,
   ) {
+    final cacheKey = '$score|${checkoutRequirement.name}';
+    if (_checkoutOpportunityCache.containsKey(cacheKey)) {
+      return _checkoutOpportunityCache[cacheKey];
+    }
+
     for (var dartsLeft = 1; dartsLeft <= 3; dartsLeft += 1) {
-      final route = _checkoutPlanner.bestFinishRoute(
+      if (_canCheckoutIn(
         score: score,
         dartsLeft: dartsLeft,
         checkoutRequirement: checkoutRequirement,
-      );
-      if (route != null && route.isNotEmpty) {
+      )) {
+        _checkoutOpportunityCache[cacheKey] = dartsLeft;
         return dartsLeft;
       }
     }
+
+    _checkoutOpportunityCache[cacheKey] = null;
     return null;
+  }
+
+  bool _canCheckoutIn({
+    required int score,
+    required int dartsLeft,
+    required CheckoutRequirement checkoutRequirement,
+  }) {
+    if (score <= 0 || dartsLeft <= 0) {
+      return false;
+    }
+    if (checkoutRequirement == CheckoutRequirement.doubleOut &&
+        !_couldBeDoubleOutCheckout(score)) {
+      return false;
+    }
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}';
+    final cached = _checkoutReachabilityCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+
+    for (final dartThrow in _allCheckoutThrows) {
+      final rest = score - dartThrow.scoredPoints;
+      if (rest < 0) {
+        continue;
+      }
+      if (rest == 0) {
+        final matches = dartThrow.matchesCheckoutRequirement(checkoutRequirement);
+        _checkoutReachabilityCache[cacheKey] = matches;
+        if (matches) {
+          return true;
+        }
+        continue;
+      }
+      if (dartsLeft == 1) {
+        continue;
+      }
+      if (_isDeadIntermediateScore(rest, checkoutRequirement)) {
+        continue;
+      }
+      if (_canCheckoutIn(
+        score: rest,
+        dartsLeft: dartsLeft - 1,
+        checkoutRequirement: checkoutRequirement,
+      )) {
+        _checkoutReachabilityCache[cacheKey] = true;
+        return true;
+      }
+    }
+
+    _checkoutReachabilityCache[cacheKey] = false;
+    return false;
+  }
+
+  bool _isDeadIntermediateScore(
+    int score,
+    CheckoutRequirement checkoutRequirement,
+  ) {
+    if (score <= 0) {
+      return true;
+    }
+    switch (checkoutRequirement) {
+      case CheckoutRequirement.singleOut:
+        return false;
+      case CheckoutRequirement.doubleOut:
+        return score == 1 || !_couldBeDoubleOutCheckout(score);
+      case CheckoutRequirement.masterOut:
+        return !_couldBeMasterOutCheckout(score);
+    }
+  }
+
+  bool _couldBeDoubleOutCheckout(int score) {
+    if (score < 2 || score > 170) {
+      return false;
+    }
+    switch (score) {
+      case 159:
+      case 162:
+      case 163:
+      case 165:
+      case 166:
+      case 168:
+      case 169:
+        return false;
+    }
+    return true;
+  }
+
+  bool _couldBeMasterOutCheckout(int score) {
+    if (score < 3 || score > 180) {
+      return false;
+    }
+    return true;
   }
 
   bool _isFunctionalDoubleOpportunity(int score) {

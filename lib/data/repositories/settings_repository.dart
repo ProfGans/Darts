@@ -11,9 +11,11 @@ class SettingsRepository extends ChangeNotifier {
 
   static const int _legacyRadiusBaselinePercent = 92;
   static const int _legacySimulationSpreadBaselinePercent = 115;
-  static const int _radiusDisplayNeutralPercent = 97;
-  static const int minRadiusCalibrationPercent = 65;
-  static const int maxRadiusCalibrationPercent = 152;
+  static const int _radiusDisplayNeutralPercent = 93;
+  static const int _previousRadiusDisplayNeutralPercent = 95;
+  static const int _incorrectRadiusDisplayNeutralPercent = 98;
+  static const int minRadiusCalibrationPercent = 50;
+  static const int maxRadiusCalibrationPercent = 150;
   static const int minSimulationSpreadPercent = 70;
   static const int maxSimulationSpreadPercent = 140;
 
@@ -72,11 +74,17 @@ class SettingsRepository extends ChangeNotifier {
   }
 
   AppSettings _normalizeSettings(AppSettings settings) {
-    final normalizedRadius = settings.settingsVersion <
-            AppSettings.currentSettingsVersion
-        ? (settings.radiusCalibrationPercent * 100 / _radiusDisplayNeutralPercent)
-            .round()
-        : settings.radiusCalibrationPercent;
+    final normalizedRadius = switch (settings.settingsVersion) {
+      >= AppSettings.currentSettingsVersion => settings.radiusCalibrationPercent,
+      8 => (settings.radiusCalibrationPercent *
+                  _incorrectRadiusDisplayNeutralPercent /
+                  _radiusDisplayNeutralPercent)
+              .round(),
+      _ => (settings.radiusCalibrationPercent *
+                  _previousRadiusDisplayNeutralPercent /
+                  _radiusDisplayNeutralPercent)
+              .round(),
+    };
 
     return settings.copyWith(
       settingsVersion: AppSettings.currentSettingsVersion,
@@ -88,6 +96,7 @@ class SettingsRepository extends ChangeNotifier {
         minSimulationSpreadPercent,
         maxSimulationSpreadPercent,
       ),
+      debugOverlayEnabled: settings.debugOverlayEnabled,
       x01QuickScores: List<int>.generate(6, (index) {
         final value = index < settings.x01QuickScores.length
             ? settings.x01QuickScores[index]

@@ -77,6 +77,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _theoreticalAverageController =
       TextEditingController(text: '60.0');
+  final TextEditingController _skillController = TextEditingController();
+  final TextEditingController _finishingSkillController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
   final TextEditingController _newTagController = TextEditingController();
 
@@ -109,6 +111,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   final List<String> _draftTags = <String>[];
   final List<String> _bulkNationalities = <String>[];
   final List<String> _bulkTags = <String>[];
+  bool _useCustomSkills = false;
 
   String? _filterNationality;
   String? _filterTag;
@@ -156,6 +159,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   void dispose() {
     _nameController.dispose();
     _theoreticalAverageController.dispose();
+    _skillController.dispose();
+    _finishingSkillController.dispose();
     _ageController.dispose();
     _newTagController.dispose();
     _bulkPrefixController.dispose();
@@ -305,15 +310,21 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     }
     final name = _nameController.text.trim();
     final targetAverage = _parseDouble(_theoreticalAverageController.text);
+    final customSkill = int.tryParse(_skillController.text.trim());
+    final customFinishingSkill = int.tryParse(
+      _finishingSkillController.text.trim(),
+    );
     final age = int.tryParse(_ageController.text.trim());
-    if (name.isEmpty || targetAverage == null) {
+    if (name.isEmpty || (!_useCustomSkills && targetAverage == null)) {
       return;
     }
 
     if (_editingId == null) {
       _repository.addPlayer(
         name: name,
-        targetTheoreticalAverage: targetAverage.clamp(0, 180).toDouble(),
+        targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
+        skill: _useCustomSkills ? customSkill : null,
+        finishingSkill: _useCustomSkills ? customFinishingSkill : null,
         age: age,
         nationality: _selectedNationality,
         tags: List<String>.from(_draftTags),
@@ -326,7 +337,9 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       _repository.updatePlayer(
         id: _editingId!,
         name: name,
-        targetTheoreticalAverage: targetAverage.clamp(0, 180).toDouble(),
+        targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
+        skill: _useCustomSkills ? customSkill : null,
+        finishingSkill: _useCustomSkills ? customFinishingSkill : null,
         age: age,
         nationality: _selectedNationality,
         tags: List<String>.from(_draftTags),
@@ -344,9 +357,12 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       _editingId = null;
       _nameController.clear();
       _theoreticalAverageController.text = '60.0';
+      _skillController.clear();
+      _finishingSkillController.clear();
       _ageController.clear();
       _selectedNationality = null;
       _draftTags.clear();
+      _useCustomSkills = false;
     });
   }
 
@@ -356,11 +372,14 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       _nameController.text = player.name;
       _theoreticalAverageController.text =
           player.theoreticalAverage.toStringAsFixed(1);
+      _skillController.text = player.skill.toString();
+      _finishingSkillController.text = player.finishingSkill.toString();
       _ageController.text = player.age?.toString() ?? '';
       _selectedNationality = player.nationality;
       _draftTags
         ..clear()
         ..addAll(player.tags);
+      _useCustomSkills = false;
     });
   }
 
@@ -472,6 +491,66 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
 
   void _tagCurrentPlayersAsReal() {
     _repository.assignTagToAllPlayers('Echter Spieler');
+  }
+
+  Future<void> _refreshTheoreticalAveragesWithLoading() async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final repository = _repository;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AnimatedBuilder(
+          animation: repository,
+          builder: (context, _) {
+            final progress = repository.theoreticalRefreshProgress;
+            final label = repository.theoreticalRefreshLabel.isNotEmpty
+                ? repository.theoreticalRefreshLabel
+                : 'Theoretische Averages werden neu berechnet...';
+            return AlertDialog(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(label),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  LinearProgressIndicator(
+                    value: progress > 0 && progress < 1 ? progress : null,
+                  ),
+                  if (progress > 0) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text('${(progress * 100).toStringAsFixed(0)}%'),
+                  ],
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    try {
+      await _repository.refreshTheoreticalAverages();
+    } finally {
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
+    }
+    _showMessage('Theoretische Averages wurden neu berechnet.');
   }
 
   void _showMessage(String message) {
@@ -687,14 +766,29 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   bool _validateManualInputs() {
     final name = _nameController.text.trim();
     final targetAverage = _parseDouble(_theoreticalAverageController.text);
+    final skill = int.tryParse(_skillController.text.trim());
+    final finishingSkill = int.tryParse(_finishingSkillController.text.trim());
     final age = int.tryParse(_ageController.text.trim());
     if (name.isEmpty) {
       _showMessage('Bitte einen Namen eingeben.');
       return false;
     }
-    if (targetAverage == null || targetAverage < 0 || targetAverage > 180) {
+    if (!_useCustomSkills &&
+        (targetAverage == null || targetAverage < 0 || targetAverage > 180)) {
       _showMessage('Theo Average muss zwischen 0 und 180 liegen.');
       return false;
+    }
+    if (_useCustomSkills) {
+      if (skill == null || skill < 1 || skill > 1000) {
+        _showMessage('Skill muss zwischen 1 und 1000 liegen.');
+        return false;
+      }
+      if (finishingSkill == null ||
+          finishingSkill < 1 ||
+          finishingSkill > 1000) {
+        _showMessage('Finishing Skill muss zwischen 1 und 1000 liegen.');
+        return false;
+      }
     }
     if (age != null && (age < 10 || age > 100)) {
       _showMessage('Alter muss zwischen 10 und 100 liegen.');
@@ -1121,6 +1215,52 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     );
   }
 
+  Future<void> _showTheoSkillValues(ComputerPlayer player) async {
+    final theme = Theme.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Skill-Werte - ${player.name}'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Theo Average: ${player.theoreticalAverage.toStringAsFixed(1)}',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: <Widget>[
+                    _StatisticTile(
+                      label: 'Skill',
+                      value: '${player.skill}',
+                    ),
+                    _StatisticTile(
+                      label: 'Finishing Skill',
+                      value: '${player.finishingSkill}',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Schliessen'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   List<ComputerPlayer> _visiblePlayers({required bool bulkOnly}) {
     final query = _searchController.text.trim().toLowerCase();
     final minTheo = _parseDouble(_filterMinTheoController.text);
@@ -1317,6 +1457,20 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   }
 
   Widget _buildManualCreationCard(BuildContext context) {
+    final customSkill = int.tryParse(_skillController.text.trim());
+    final customFinishingSkill = int.tryParse(_finishingSkillController.text.trim());
+    final customTheoPreview = customSkill != null &&
+            customSkill >= 1 &&
+            customSkill <= 1000 &&
+            customFinishingSkill != null &&
+            customFinishingSkill >= 1 &&
+            customFinishingSkill <= 1000
+        ? _repository.estimateTheoreticalAverageForSkills(
+            skill: customSkill,
+            finishingSkill: customFinishingSkill,
+          )
+        : null;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1328,15 +1482,56 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               decoration: const InputDecoration(labelText: 'Name'),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _theoreticalAverageController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Ziel Theo Average',
-                helperText:
-                    '0 bis 180. Skill und Finishing Skill werden automatisch berechnet.',
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Skill-Werte manuell bearbeiten'),
+              subtitle: const Text(
+                'Ausgeschaltet: nur Theo eingeben. Eingeschaltet: Skill und Finishing Skill direkt setzen.',
               ),
+              value: _useCustomSkills,
+              onChanged: (value) {
+                setState(() {
+                  _useCustomSkills = value;
+                });
+              },
             ),
+            const SizedBox(height: 12),
+            if (_useCustomSkills) ...<Widget>[
+              TextField(
+                controller: _skillController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Skill',
+                  helperText: '1 bis 1000',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _finishingSkillController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Finishing Skill',
+                  helperText: '1 bis 1000',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                customTheoPreview == null
+                    ? 'Abgeleiteter Theo Average: -'
+                    : 'Abgeleiteter Theo Average: ${customTheoPreview.toStringAsFixed(1)}',
+              ),
+            ] else
+              TextField(
+                controller: _theoreticalAverageController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Ziel Theo Average',
+                  helperText:
+                      '0 bis 180. Skill und Finishing Skill werden automatisch berechnet.',
+                ),
+              ),
             const SizedBox(height: 12),
             TextField(
               controller: _ageController,
@@ -1423,7 +1618,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                   child: const Text('Zuruecksetzen'),
                 ),
                 OutlinedButton(
-                  onPressed: _repository.refreshTheoreticalAverages,
+                  onPressed: _refreshTheoreticalAveragesWithLoading,
                   child: const Text('Theo Averages neu berechnen'),
                 ),
               ],
@@ -1871,6 +2066,10 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               children: <Widget>[
                 OutlinedButton(
                   onPressed: () => _selectVisiblePlayers(visiblePlayers),
+                  child: const Text('Alle auswaehlen'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _selectVisiblePlayers(visiblePlayers),
                   child: const Text('Gefilterte auswaehlen'),
                 ),
                 OutlinedButton(
@@ -2237,7 +2436,15 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
           ),
         if (_visibleColumns.contains('source')) DataCell(Text(sourceLabel)),
         if (_visibleColumns.contains('theo'))
-          DataCell(Text(player.theoreticalAverage.toStringAsFixed(1))),
+          DataCell(
+            Text(
+              player.theoreticalAverage.toStringAsFixed(1),
+              style: const TextStyle(
+                decoration: TextDecoration.underline,
+              ),
+            ),
+            onTap: () => _showTheoSkillValues(player),
+          ),
         if (_visibleColumns.contains('real'))
           DataCell(Text(player.average.toStringAsFixed(1))),
         if (_visibleColumns.contains('age'))

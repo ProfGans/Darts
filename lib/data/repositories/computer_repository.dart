@@ -6,10 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../domain/bot/bot_engine.dart';
-import '../../domain/career/career_template.dart';
+import '../../domain/x01/x01_match_engine.dart';
+import '../../domain/x01/x01_models.dart';
 import '../../presentation/match/bob27_result_models.dart';
 import '../../presentation/match/cricket_result_models.dart';
 import '../../presentation/match/match_result_models.dart';
+import '../../domain/x01/x01_match_simulator.dart';
 import '../models/generated_name_catalog.dart';
 import '../models/nationality_catalog.dart';
 import '../models/computer_player.dart';
@@ -70,21 +72,30 @@ class ComputerRepository extends ChangeNotifier {
   static final ComputerRepository instance = ComputerRepository._();
 
   static const _storageKey = 'computer_players';
+  static const _skillResolutionVersion = 2;
   static const _bundledDefaultsAssetPath =
       'assets/data/default_computer_players.json';
-  static const _bundledTemplateAssetPath =
-      'assets/templates/basic_pdc_template.json';
   static const bulkTag = 'Bulk';
   static const realPlayerTag = 'Echter Spieler';
   static const List<String> officialNationalities =
       NationalityCatalog.officialNationalities;
+  static const int _manualTheoReferenceMatchCount = 100;
 
   final BotEngine _botEngine = BotEngine();
+  late final X01MatchSimulator _theoreticalMatchSimulator = X01MatchSimulator(
+    matchEngine: X01MatchEngine(),
+    botEngine: _botEngine,
+  );
   final List<ComputerPlayer> _players = <ComputerPlayer>[];
   final List<String> _tagDefinitions = <String>[];
   final List<String> _nationalityDefinitions = <String>[];
   final List<_RepositorySnapshot> _undoStack = <_RepositorySnapshot>[];
+  final Map<String, ComputerSkillResolution> _resolutionCache =
+      <String, ComputerSkillResolution>{};
   int _changeToken = 0;
+  bool _isRefreshingTheoreticalAverages = false;
+  double _theoreticalRefreshProgress = 0;
+  String _theoreticalRefreshLabel = '';
 
   List<ComputerPlayer> get players =>
       List<ComputerPlayer>.unmodifiable(_players);
@@ -93,10 +104,14 @@ class ComputerRepository extends ChangeNotifier {
       List<String>.unmodifiable(_nationalityDefinitions);
   bool get canUndo => _undoStack.isNotEmpty;
   int get changeToken => _changeToken;
+  bool get isRefreshingTheoreticalAverages => _isRefreshingTheoreticalAverages;
+  double get theoreticalRefreshProgress => _theoreticalRefreshProgress;
+  String get theoreticalRefreshLabel => _theoreticalRefreshLabel;
 
   @override
   void notifyListeners() {
     _changeToken += 1;
+    _resolutionCache.clear();
     super.notifyListeners();
   }
 
@@ -196,9 +211,10 @@ class ComputerRepository extends ChangeNotifier {
         return payload;
       }
     } catch (_) {
-      // Fall back to rebuilding defaults from the bundled career template.
+      // Fall back to stored defaults only; career templates no longer define
+      // the database player pool.
     }
-    return _buildBundledDefaultsFromTemplateAsset();
+    return null;
   }
 
   bool _isValidStoragePayload(Map<String, dynamic>? payload) {
@@ -220,68 +236,6 @@ class ComputerRepository extends ChangeNotifier {
           map['finishingSkill'] is num &&
           map['theoreticalAverage'] is num;
     });
-  }
-
-  Future<Map<String, dynamic>?> _buildBundledDefaultsFromTemplateAsset() async {
-    try {
-      final raw = await rootBundle.loadString(_bundledTemplateAssetPath);
-      final decoded = jsonDecode(raw.replaceFirst('\uFEFF', ''));
-      final payload = decoded is Map<String, dynamic>
-          ? decoded
-          : decoded is Map
-              ? decoded.cast<String, dynamic>()
-              : null;
-      if (payload == null) {
-        return null;
-      }
-
-      final template = CareerTemplate.fromJson(payload);
-      final nowIso = DateTime.now().toIso8601String();
-      final players = template.databasePlayers.map((entry) {
-        final tags = <String>{
-          realPlayerTag,
-          ...entry.careerTags.map((tag) => tag.tagName.trim()).where(
-                (tag) => tag.isNotEmpty,
-              ),
-        }.toList();
-        return <String, dynamic>{
-          'id': entry.databasePlayerId,
-          'name': entry.name,
-          'skill': entry.skill,
-          'finishingSkill': entry.finishingSkill,
-          'theoreticalAverage': entry.average,
-          'createdAt': nowIso,
-          'updatedAt': nowIso,
-          'lastModifiedReason': 'bundled_asset',
-          'source': ComputerPlayerSource.imported.storageValue,
-          'isFavorite': false,
-          'isProtected': false,
-          'tags': tags,
-          'matchesPlayed': 0,
-          'matchesWon': 0,
-          'average': 0,
-          'history': const <dynamic>[],
-        };
-      }).toList();
-
-      final rebuiltPayload = <String, dynamic>{
-        'tagDefinitions': <String>[
-          realPlayerTag,
-          ...template.databasePlayers
-              .expand((entry) => entry.careerTags.map((tag) => tag.tagName))
-              .where((tag) => tag.trim().isNotEmpty)
-              .toSet()
-              .toList()
-            ..sort(),
-        ],
-        'nationalityDefinitions': officialNationalities,
-        'players': players,
-      };
-
-      return _isValidStoragePayload(rebuiltPayload) ? rebuiltPayload : null;
-    } catch (_) {
-      return null;
-    }
   }
 
   void _captureSnapshot() {
@@ -356,6 +310,8 @@ class ComputerRepository extends ChangeNotifier {
   void addPlayer({
     required String name,
     required double targetTheoreticalAverage,
+    int? skill,
+    int? finishingSkill,
     int? age,
     String? nationality,
     List<String> tags = const <String>[],
@@ -370,6 +326,18 @@ class ComputerRepository extends ChangeNotifier {
     final now = DateTime.now();
     final resolution =
         resolveSkillsForTheoreticalAverage(targetTheoreticalAverage);
+    final normalizedSkill = skill?.clamp(1, 1000).toInt();
+    final normalizedFinishingSkill = finishingSkill?.clamp(1, 1000).toInt();
+    final resolvedSkill = normalizedSkill ?? resolution.skill;
+    final resolvedFinishingSkill =
+        normalizedFinishingSkill ?? resolution.finishingSkill;
+    final resolvedTheo =
+        normalizedSkill != null && normalizedFinishingSkill != null
+            ? _estimateTheoreticalAverage(
+                skill: resolvedSkill,
+                finishingSkill: resolvedFinishingSkill,
+              )
+            : resolution.theoreticalAverage;
     final normalizedNationality = _normalizeNationality(nationality);
     final normalizedTags = _normalizeTags(tags);
     _tagDefinitions
@@ -379,9 +347,9 @@ class ComputerRepository extends ChangeNotifier {
           ComputerPlayer(
             id: '',
             name: trimmed,
-            skill: resolution.skill,
-            finishingSkill: resolution.finishingSkill,
-            theoreticalAverage: resolution.theoreticalAverage,
+            skill: resolvedSkill,
+            finishingSkill: resolvedFinishingSkill,
+            theoreticalAverage: resolvedTheo,
             createdAt: now,
             updatedAt: now,
             lastModifiedReason: 'manual_create',
@@ -399,9 +367,9 @@ class ComputerRepository extends ChangeNotifier {
           ComputerPlayer(
             id: '',
             name: trimmed,
-            skill: resolution.skill,
-            finishingSkill: resolution.finishingSkill,
-            theoreticalAverage: resolution.theoreticalAverage,
+            skill: resolvedSkill,
+            finishingSkill: resolvedFinishingSkill,
+            theoreticalAverage: resolvedTheo,
             createdAt: now,
             updatedAt: now,
             lastModifiedReason: 'manual_create',
@@ -416,9 +384,9 @@ class ComputerRepository extends ChangeNotifier {
       ComputerPlayer(
         id: 'computer-${DateTime.now().microsecondsSinceEpoch}-${trimmed.length}',
         name: trimmed,
-        skill: resolution.skill,
-        finishingSkill: resolution.finishingSkill,
-        theoreticalAverage: resolution.theoreticalAverage,
+        skill: resolvedSkill,
+        finishingSkill: resolvedFinishingSkill,
+        theoreticalAverage: resolvedTheo,
         createdAt: now,
         updatedAt: now,
         lastModifiedReason: 'manual_create',
@@ -540,22 +508,6 @@ class ComputerRepository extends ChangeNotifier {
         nextPlayers[index] = imported;
         continue;
       }
-
-      final nameIndex = nextPlayers.indexWhere(
-        (entry) => entry.name.toLowerCase() == imported.name.toLowerCase(),
-      );
-      if (nameIndex >= 0) {
-        nextPlayers[nameIndex] = imported;
-        continue;
-      }
-      final duplicateIndex = _findLikelyDuplicateIndex(
-        players: nextPlayers,
-        candidate: imported,
-      );
-      if (duplicateIndex >= 0) {
-        nextPlayers[duplicateIndex] = imported;
-        continue;
-      }
       nextPlayers.add(imported);
     }
 
@@ -580,6 +532,8 @@ class ComputerRepository extends ChangeNotifier {
     required String id,
     required String name,
     required double targetTheoreticalAverage,
+    int? skill,
+    int? finishingSkill,
     int? age,
     String? nationality,
     List<String> tags = const <String>[],
@@ -595,13 +549,25 @@ class ComputerRepository extends ChangeNotifier {
 
     final resolution =
         resolveSkillsForTheoreticalAverage(targetTheoreticalAverage);
+    final normalizedSkill = skill?.clamp(1, 1000).toInt();
+    final normalizedFinishingSkill = finishingSkill?.clamp(1, 1000).toInt();
+    final resolvedSkill = normalizedSkill ?? resolution.skill;
+    final resolvedFinishingSkill =
+        normalizedFinishingSkill ?? resolution.finishingSkill;
+    final resolvedTheo =
+        normalizedSkill != null && normalizedFinishingSkill != null
+            ? _estimateTheoreticalAverage(
+                skill: resolvedSkill,
+                finishingSkill: resolvedFinishingSkill,
+              )
+            : resolution.theoreticalAverage;
     final normalizedNationality = _normalizeNationality(nationality);
     final normalizedTags = _normalizeTags(tags);
     _players[index] = _players[index].copyWith(
       name: name.trim(),
-      skill: resolution.skill,
-      finishingSkill: resolution.finishingSkill,
-      theoreticalAverage: resolution.theoreticalAverage,
+      skill: resolvedSkill,
+      finishingSkill: resolvedFinishingSkill,
+      theoreticalAverage: resolvedTheo,
       updatedAt: DateTime.now(),
       lastModifiedReason: 'manual_update',
       source: source ?? _players[index].source,
@@ -693,22 +659,136 @@ class ComputerRepository extends ChangeNotifier {
     double targetTheoreticalAverage,
   ) {
     final target = targetTheoreticalAverage.clamp(0, 180).toDouble();
+    final cacheKey = target.toStringAsFixed(4);
+    final cached = _resolutionCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
     final bestEqual = _findBestEqualCandidate(target);
     final bestSplit = _findBestSplitCandidate(target, fallback: bestEqual);
     const improvementEpsilon = 0.01;
 
-    if (bestSplit.error + improvementEpsilon < bestEqual.error) {
-      return bestSplit.toResolution();
+    final resolution = bestSplit.error + improvementEpsilon < bestEqual.error
+        ? bestSplit.toResolution()
+        : bestEqual.toResolution();
+    _resolutionCache[cacheKey] = resolution;
+    return resolution;
+  }
+
+  ComputerSkillResolution resolveSkillsForTheoreticalAverageQuick(
+    double targetTheoreticalAverage,
+  ) {
+    final target = targetTheoreticalAverage.clamp(0, 180).toDouble();
+    final cacheKey = 'quick:${target.toStringAsFixed(4)}';
+    final cached = _resolutionCache[cacheKey];
+    if (cached != null) {
+      return cached;
     }
-    return bestEqual.toResolution();
+    ComputerPlayer? closestPlayer;
+    var closestGap = double.infinity;
+    for (final player in _players) {
+      final gap = (player.theoreticalAverage - target).abs();
+      if (gap < closestGap) {
+        closestGap = gap;
+        closestPlayer = player;
+      }
+    }
+    if (closestPlayer == null) {
+      return resolveSkillsForTheoreticalAverage(target);
+    }
+    final resolution = ComputerSkillResolution(
+      skill: closestPlayer.skill,
+      finishingSkill: closestPlayer.finishingSkill,
+      theoreticalAverage: closestPlayer.theoreticalAverage,
+    );
+    _resolutionCache[cacheKey] = resolution;
+    return resolution;
   }
 
   Future<void> refreshTheoreticalAverages() async {
     _captureSnapshot();
-    final normalizedPlayers = _normalizePlayers(_players);
+    _isRefreshingTheoreticalAverages = true;
+    _theoreticalRefreshProgress = 0;
+    _theoreticalRefreshLabel = 'Theoretische Averages werden vorbereitet...';
+    notifyListeners();
+    try {
+      final normalizedPlayers = <ComputerPlayer>[];
+      final now = DateTime.now();
+      for (var index = 0; index < _players.length; index += 1) {
+        final player = _players[index];
+        _theoreticalRefreshLabel =
+            'Theo wird berechnet: ${player.name} (${index + 1}/${_players.length})';
+        _theoreticalRefreshProgress =
+            _players.isEmpty ? 0 : index / _players.length;
+        notifyListeners();
+        await Future<void>.delayed(Duration.zero);
+
+        final theoreticalAverage = await _estimateManualTheoreticalAverage(
+          skill: player.skill,
+          finishingSkill: player.finishingSkill,
+          playerName: player.name,
+          onProgress: (matchIndex, matchCount) {
+            final totalSteps = (_players.length * matchCount).clamp(1, 1 << 30);
+            final completedSteps = (index * matchCount) + matchIndex;
+            _theoreticalRefreshLabel =
+                'Theo wird berechnet: ${player.name} (${index + 1}/${_players.length}) '
+                '- Referenz-Match $matchIndex/$matchCount';
+            _theoreticalRefreshProgress = completedSteps / totalSteps;
+            notifyListeners();
+          },
+        );
+        normalizedPlayers.add(
+          _normalizePlayer(
+            player.copyWith(
+              theoreticalAverage: theoreticalAverage,
+              updatedAt: now,
+              lastModifiedReason: 'manual_theoretical_refresh',
+            ),
+          ),
+        );
+
+        _theoreticalRefreshProgress = (index + 1) / _players.length;
+        notifyListeners();
+        await Future<void>.delayed(Duration.zero);
+      }
+      _players
+        ..clear()
+        ..addAll(normalizedPlayers);
+      _sortPlayers();
+      notifyListeners();
+      await _persist();
+    } finally {
+      _isRefreshingTheoreticalAverages = false;
+      _theoreticalRefreshProgress = 0;
+      _theoreticalRefreshLabel = '';
+      notifyListeners();
+    }
+  }
+
+  Future<void> rebalanceSkillsFromCurrentTheoreticalAverages() async {
+    _captureSnapshot();
+    final now = DateTime.now();
+    final rebalancedPlayers = _players.map((player) {
+      final resolution = resolveSkillsForTheoreticalAverage(
+        player.theoreticalAverage,
+      );
+      final changed = resolution.skill != player.skill ||
+          resolution.finishingSkill != player.finishingSkill;
+      return _normalizePlayer(
+        player.copyWith(
+          skill: resolution.skill,
+          finishingSkill: resolution.finishingSkill,
+          theoreticalAverage: player.theoreticalAverage,
+          updatedAt: changed ? now : player.updatedAt,
+          lastModifiedReason: changed
+              ? 'theoretical_skill_rebalance'
+              : player.lastModifiedReason,
+        ),
+      );
+    }).toList();
     _players
       ..clear()
-      ..addAll(normalizedPlayers);
+      ..addAll(rebalancedPlayers);
     _sortPlayers();
     notifyListeners();
     await _persist();
@@ -978,31 +1058,121 @@ class ComputerRepository extends ChangeNotifier {
     );
   }
 
-  List<ComputerPlayer> _normalizePlayers(List<ComputerPlayer> players) {
+  List<ComputerPlayer> _normalizePlayers(
+    List<ComputerPlayer> players, {
+    bool recomputeTheoreticalAverage = false,
+  }) {
     return players
         .map(
           (player) => _normalizePlayer(
-            player.copyWith(
-            theoreticalAverage: _estimateTheoreticalAverage(
-              skill: player.skill,
-              finishingSkill: player.finishingSkill,
-            ),
-          ),
+            recomputeTheoreticalAverage
+                ? player.copyWith(
+                    theoreticalAverage: _estimateTheoreticalAverage(
+                      skill: player.skill,
+                      finishingSkill: player.finishingSkill,
+                    ),
+                  )
+                : player,
           ),
         )
         .toList();
+  }
+
+  double estimateTheoreticalAverageForSkills({
+    required int skill,
+    required int finishingSkill,
+  }) {
+    return _estimateTheoreticalAverage(
+      skill: skill,
+      finishingSkill: finishingSkill,
+    );
   }
 
   double _estimateTheoreticalAverage({
     required int skill,
     required int finishingSkill,
   }) {
-    return _botEngine.estimateThreeDartAverage(
-      SettingsRepository.instance.createBotProfile(
-        skill: skill,
-        finishingSkill: finishingSkill,
-      ),
+    return _estimateOfficialReferenceTheoAverage(
+      skill: skill,
+      finishingSkill: finishingSkill,
     );
+  }
+
+  Future<double> _estimateManualTheoreticalAverage({
+    required int skill,
+    required int finishingSkill,
+    String playerName = 'Spieler',
+    void Function(int matchIndex, int matchCount)? onProgress,
+  }) async {
+    final profile = SettingsRepository.instance.createBotProfile(
+      skill: skill,
+      finishingSkill: finishingSkill,
+    );
+    onProgress?.call(0, _manualTheoReferenceMatchCount);
+    await Future<void>.delayed(Duration.zero);
+    var totalAverage = 0.0;
+    for (var index = 0; index < _manualTheoReferenceMatchCount; index += 1) {
+      final matchIndex = index + 1;
+      onProgress?.call(matchIndex, _manualTheoReferenceMatchCount);
+      _theoreticalRefreshLabel =
+          'Theo wird berechnet: $playerName - Referenz-Match $matchIndex/$_manualTheoReferenceMatchCount';
+      notifyListeners();
+      await Future<void>.delayed(Duration.zero);
+      totalAverage += _simulateOfficialReferenceMatchAverage(
+        profile: profile,
+        matchIndex: index,
+      );
+      await Future<void>.delayed(Duration.zero);
+    }
+    await Future<void>.delayed(Duration.zero);
+    return (totalAverage / _manualTheoReferenceMatchCount)
+        .clamp(0, 180)
+        .toDouble();
+  }
+
+  double _estimateOfficialReferenceTheoAverage({
+    required int skill,
+    required int finishingSkill,
+  }) {
+    final profile = SettingsRepository.instance.createBotProfile(
+      skill: skill,
+      finishingSkill: finishingSkill,
+    );
+    var totalAverage = 0.0;
+    const matchCount = _manualTheoReferenceMatchCount;
+
+    for (var index = 0; index < matchCount; index += 1) {
+      totalAverage += _simulateOfficialReferenceMatchAverage(
+        profile: profile,
+        matchIndex: index,
+      );
+    }
+
+    return (totalAverage / matchCount).clamp(0, 180).toDouble();
+  }
+
+  double _simulateOfficialReferenceMatchAverage({
+    required BotProfile profile,
+    required int matchIndex,
+  }) {
+    final player = SimulatedPlayer(
+      name: 'Theo',
+      profile: profile,
+    );
+    const config = MatchConfig(
+      startScore: 501,
+      mode: MatchMode.legs,
+      checkoutRequirement: CheckoutRequirement.doubleOut,
+      legsToWin: 8,
+    );
+    final result = _theoreticalMatchSimulator.simulateAutoMatch(
+      playerA: player,
+      playerB: player,
+      config: config,
+      detailed: false,
+      random: Random(7919 * (matchIndex + 1)),
+    );
+    return ((result.averageA + result.averageB) / 2).clamp(0, 180).toDouble();
   }
 
   _SkillResolutionCandidate _findBestEqualCandidate(double target) {
@@ -1130,6 +1300,18 @@ class ComputerRepository extends ChangeNotifier {
 
     if (next.gap != current.gap) {
       return next.gap < current.gap ? next : current;
+    }
+
+    final nextMaxSkill = max(next.skill, next.finishingSkill);
+    final currentMaxSkill = max(current.skill, current.finishingSkill);
+    if (nextMaxSkill != currentMaxSkill) {
+      return nextMaxSkill < currentMaxSkill ? next : current;
+    }
+
+    final nextMinSkill = min(next.skill, next.finishingSkill);
+    final currentMinSkill = min(current.skill, current.finishingSkill);
+    if (nextMinSkill != currentMinSkill) {
+      return nextMinSkill < currentMinSkill ? next : current;
     }
 
     if (next.skill != current.skill) {
@@ -1273,10 +1455,36 @@ class ComputerRepository extends ChangeNotifier {
 
   Map<String, dynamic> _createStoragePayload() {
     return <String, dynamic>{
+      'skillResolutionVersion': _skillResolutionVersion,
       'tagDefinitions': _tagDefinitions,
       'nationalityDefinitions': _nationalityDefinitions,
       'players': _players.map((entry) => entry.toJson()).toList(),
     };
+  }
+
+  void _migratePlayersToBalancedSkillPreference() {
+    final now = DateTime.now();
+    final migratedPlayers = _players.map((player) {
+      final resolution = resolveSkillsForTheoreticalAverage(
+        player.theoreticalAverage,
+      );
+      final changed = resolution.skill != player.skill ||
+          resolution.finishingSkill != player.finishingSkill;
+      return _normalizePlayer(
+        player.copyWith(
+          skill: resolution.skill,
+          finishingSkill: resolution.finishingSkill,
+          theoreticalAverage: player.theoreticalAverage,
+          updatedAt: changed ? now : player.updatedAt,
+          lastModifiedReason:
+              changed ? 'skill_balance_migration' : player.lastModifiedReason,
+        ),
+      );
+    }).toList();
+    _players
+      ..clear()
+      ..addAll(migratedPlayers);
+    _sortPlayers();
   }
 
   ({int min, int max})? _resolveOptionalRange(int? first, int? second) {
@@ -1327,72 +1535,6 @@ class ComputerRepository extends ChangeNotifier {
       tags.add('Entwicklung');
     }
     return tags;
-  }
-
-  int _findLikelyDuplicateIndex({
-    required List<ComputerPlayer> players,
-    required ComputerPlayer candidate,
-  }) {
-    final candidateName = _normalizeNameForDuplicateCheck(candidate.name);
-    final candidateNationality = (candidate.nationality ?? '').trim().toLowerCase();
-    for (var index = 0; index < players.length; index += 1) {
-      final existing = players[index];
-      final existingName = _normalizeNameForDuplicateCheck(existing.name);
-      final exactName = existingName == candidateName;
-      final fuzzyName =
-          _levenshteinDistance(existingName, candidateName) <= 2 ||
-          existingName.contains(candidateName) ||
-          candidateName.contains(existingName);
-      final sameNationality =
-          (existing.nationality ?? '').trim().toLowerCase() ==
-              candidateNationality;
-      final similarTheo =
-          (existing.theoreticalAverage - candidate.theoreticalAverage).abs() <=
-              1.5;
-      if ((exactName || fuzzyName) && sameNationality && similarTheo) {
-        return index;
-      }
-    }
-    return -1;
-  }
-
-  String _normalizeNameForDuplicateCheck(String value) {
-    return value
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9 ]'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  int _levenshteinDistance(String left, String right) {
-    if (left == right) {
-      return 0;
-    }
-    if (left.isEmpty) {
-      return right.length;
-    }
-    if (right.isEmpty) {
-      return left.length;
-    }
-
-    final previous = List<int>.generate(right.length + 1, (index) => index);
-    final current = List<int>.filled(right.length + 1, 0);
-
-    for (var i = 0; i < left.length; i += 1) {
-      current[0] = i + 1;
-      for (var j = 0; j < right.length; j += 1) {
-        final substitutionCost = left[i] == right[j] ? 0 : 1;
-        current[j + 1] = min(
-          min(current[j] + 1, previous[j + 1] + 1),
-          previous[j] + substitutionCost,
-        );
-      }
-      for (var j = 0; j < current.length; j += 1) {
-        previous[j] = current[j];
-      }
-    }
-
-    return previous[right.length];
   }
 
   String _toCsvRow(List<String> values) {

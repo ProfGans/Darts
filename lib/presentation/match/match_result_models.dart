@@ -230,6 +230,7 @@ class MatchParticipantStats {
     required this.decidingLegDarts,
     required this.decidingLegsPlayed,
     required this.decidingLegsWon,
+    required this.won9Darters,
     required this.won12Darters,
     required this.won15Darters,
     required this.won18Darters,
@@ -279,6 +280,7 @@ class MatchParticipantStats {
   final int decidingLegDarts;
   final int decidingLegsPlayed;
   final int decidingLegsWon;
+  final int won9Darters;
   final int won12Darters;
   final int won15Darters;
   final int won18Darters;
@@ -320,6 +322,7 @@ class MatchParticipantStats {
       : (decidingLegsWon / decidingLegsPlayed) * 100;
   double get score180sPerLeg =>
       legsPlayed <= 0 ? 0 : scores180 / legsPlayed;
+  double get won9DarterQuote => legsWon <= 0 ? 0 : (won9Darters / legsWon) * 100;
   double get won12DarterQuote => legsWon <= 0 ? 0 : (won12Darters / legsWon) * 100;
   double get won15DarterQuote => legsWon <= 0 ? 0 : (won15Darters / legsWon) * 100;
   double get won18DarterQuote => legsWon <= 0 ? 0 : (won18Darters / legsWon) * 100;
@@ -370,6 +373,7 @@ class MatchParticipantStats {
       'decidingLegDarts': decidingLegDarts,
       'decidingLegsPlayed': decidingLegsPlayed,
       'decidingLegsWon': decidingLegsWon,
+      'won9Darters': won9Darters,
       'won12Darters': won12Darters,
       'won15Darters': won15Darters,
       'won18Darters': won18Darters,
@@ -428,6 +432,7 @@ class MatchParticipantStats {
       decidingLegDarts: (json['decidingLegDarts'] as num?)?.toInt() ?? 0,
       decidingLegsPlayed: (json['decidingLegsPlayed'] as num?)?.toInt() ?? 0,
       decidingLegsWon: (json['decidingLegsWon'] as num?)?.toInt() ?? 0,
+      won9Darters: (json['won9Darters'] as num?)?.toInt() ?? 0,
       won12Darters: (json['won12Darters'] as num?)?.toInt() ?? 0,
       won15Darters: (json['won15Darters'] as num?)?.toInt() ?? 0,
       won18Darters: (json['won18Darters'] as num?)?.toInt() ?? 0,

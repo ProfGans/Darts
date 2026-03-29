@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/background/background_task_runner.dart';
 import '../../domain/x01/checkout_planner.dart';
 import '../../domain/x01/x01_models.dart';
 import '../../domain/x01/x01_rules.dart';
@@ -17,19 +18,30 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
   final TextEditingController _scoreController =
       TextEditingController(text: '121');
   final TextEditingController _setupStartController =
-      TextEditingController(text: '121');
+      TextEditingController(text: '171');
   final TextEditingController _preferredDoublesController =
       TextEditingController();
   final TextEditingController _avoidedDoublesController =
       TextEditingController();
   int _dartsLeft = 3;
   CheckoutRequirement _checkoutRequirement = CheckoutRequirement.doubleOut;
-  double _leavePreference = 50;
   List<_CheckoutOption> _options = const <_CheckoutOption>[];
-  List<_BestFinishBucket> _bestFinishBuckets = const <_BestFinishBucket>[];
+  Map<_SetupFinishBand, _SetupLeavePresentation> _setupBandOptions =
+      const <_SetupFinishBand, _SetupLeavePresentation>{};
+  final Map<String, List<_CheckoutOption>> _checkoutOptionsCache =
+      <String, List<_CheckoutOption>>{};
+  final Map<String, Map<_SetupFinishBand, _SetupLeavePresentation>>
+  _setupBuildResultCache =
+      <String, Map<_SetupFinishBand, _SetupLeavePresentation>>{};
+  final Map<String, _SetupFallbackNode> _setupFallbackTreeCache =
+      <String, _SetupFallbackNode>{};
+  bool _isCalculating = false;
+  String _calculationLabel = '';
+  int _calculationRequestId = 0;
 
   static const CheckoutPlayStyle _standardPlayStyle =
       CheckoutPlayStyle.balanced;
+  static const int _standardSetupPreference = 85;
   static const int _standardOuterBullPreference = 50;
   static const int _standardBullPreference = 50;
 
@@ -65,37 +77,10 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
     _recalculate();
   }
 
-  void _recalculate() {
+  Future<void> _recalculate() async {
+    final requestId = ++_calculationRequestId;
     final score = int.tryParse(_scoreController.text.trim()) ?? 0;
     final setupStart = int.tryParse(_setupStartController.text.trim()) ?? 0;
-    setState(() {
-      if (_tabController.index == 0) {
-        _options = _buildCheckoutOptions(
-          score: score,
-          dartsLeft: _dartsLeft,
-          checkoutRequirement: _checkoutRequirement,
-          playStyle: _standardPlayStyle,
-        );
-      } else {
-        _bestFinishBuckets = _buildBestFinishBuckets(
-          startScore: setupStart,
-          dartsLeft: _dartsLeft,
-          checkoutRequirement: _checkoutRequirement,
-          playStyle: _standardPlayStyle,
-        );
-      }
-    });
-  }
-
-  List<_CheckoutOption> _buildCheckoutOptions({
-    required int score,
-    required int dartsLeft,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-  }) {
-    if (score <= 1 || dartsLeft <= 0) {
-      return const <_CheckoutOption>[];
-    }
     final preferredDoubles = _parsePreferredDoubleValues(
       _preferredDoublesController.text,
     );
@@ -103,155 +88,259 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
       _avoidedDoublesController.text,
     );
 
-    final finishes = _planner.allCheckoutRoutes(
-      score: score,
-      dartsLeft: dartsLeft,
-      checkoutRequirement: checkoutRequirement,
-      playStyle: playStyle,
-    );
+    if (_tabController.index == 0) {
+      final cacheKey = <Object>[
+        score,
+        _dartsLeft,
+        _checkoutRequirement,
+        _standardPlayStyle,
+        _preferredDoublesController.text.trim(),
+        _avoidedDoublesController.text.trim(),
+      ].join('|');
+      final cached = _checkoutOptionsCache[cacheKey];
+      if (cached != null) {
+        if (!mounted || requestId != _calculationRequestId) {
+          return;
+        }
+        setState(() {
+          _isCalculating = false;
+          _calculationLabel = '';
+          _options = cached;
+        });
+        return;
+      }
+    } else {
+      final cacheKey = <Object>[
+        setupStart,
+        _dartsLeft,
+        _checkoutRequirement,
+        _standardPlayStyle,
+        _preferredDoublesController.text.trim(),
+        _avoidedDoublesController.text.trim(),
+      ].join('|');
+      final cached = _setupBuildResultCache[cacheKey];
+      if (cached != null) {
+        if (!mounted || requestId != _calculationRequestId) {
+          return;
+        }
+        setState(() {
+          _isCalculating = false;
+          _calculationLabel = '';
+          _setupBandOptions = cached;
+        });
+        return;
+      }
+    }
 
-    final options = finishes
-        .map(
-          (route) {
-            final baseScore = _planner.scoreRoute(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              outerBullPreference: _standardOuterBullPreference,
-              bullPreference: _standardBullPreference,
-            );
-            final baseBreakdown = _planner.routeScoreBreakdown(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              outerBullPreference: _standardOuterBullPreference,
-              bullPreference: _standardBullPreference,
-            );
-            final adjustment = _doublePreferenceAdjustment(
-              route.isEmpty ? null : route.last,
-              preferredDoubles: preferredDoubles,
-              dislikedDoubles: dislikedDoubles,
-            );
-            return _CheckoutOption(
-              throws: route,
-              score: baseScore + adjustment,
-              breakdown: _applyDoubleAdjustmentToBreakdown(
-                baseBreakdown,
-                route.isEmpty ? null : route.last,
-                adjustment,
-              ),
-              missScenarios: _buildMissScenarios(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              outerBullPreference: _standardOuterBullPreference,
-              bullPreference: _standardBullPreference,
-            ),
-              fallbackHints: _buildFallbackHints(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              ),
-              rationaleHint: _buildRationaleHint(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              ),
-              badges: _buildBadges(
-              route: route,
-              startScore: score,
-              totalDarts: dartsLeft,
-              checkoutRequirement: checkoutRequirement,
-              playStyle: playStyle,
-              ),
-            );
-          },
-        )
-        .toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    if (mounted) {
+      setState(() {
+        _isCalculating = true;
+        _calculationLabel = _tabController.index == 0
+            ? 'Checkout-Wege werden berechnet'
+            : 'Stellwege werden berechnet';
+      });
+    }
+    await Future<void>.delayed(Duration.zero);
 
-    return options.take(8).toList();
+    try {
+      final result = await BackgroundTaskRunner.instance.runJob<Map<String, Object?>>(
+        taskType: 'checkout_calculator',
+        initialLabel: _tabController.index == 0
+            ? 'Checkout-Wege werden berechnet'
+            : 'Stellwege werden berechnet',
+        payload: <String, Object?>{
+          'mode': _tabController.index == 0 ? 'checkout' : 'setup',
+          'score': score,
+          'startScore': setupStart,
+          'dartsLeft': _dartsLeft,
+          'checkoutRequirement': _checkoutRequirement.name,
+          'playStyle': _standardPlayStyle.name,
+          'preferredDoubles': preferredDoubles.toList()..sort(),
+          'dislikedDoubles': dislikedDoubles.toList()..sort(),
+        },
+        onUpdate: (snapshot) {
+          if (!mounted || requestId != _calculationRequestId) {
+            return;
+          }
+          setState(() {
+            _calculationLabel = snapshot.label;
+          });
+        },
+      );
+      if (!mounted || requestId != _calculationRequestId) {
+        return;
+      }
+      setState(() {
+        if (_tabController.index == 0) {
+          _options = _checkoutOptionsFromBackgroundResult(result);
+        } else {
+          _setupBandOptions = _setupBandOptionsFromBackgroundResult(result);
+        }
+      });
+    } finally {
+      if (mounted && requestId == _calculationRequestId) {
+        setState(() {
+          _isCalculating = false;
+          _calculationLabel = '';
+        });
+      }
+    }
   }
 
-  List<_BestFinishBucket> _buildBestFinishBuckets({
+  _SetupFallbackNode _buildSetupFallbackTree({
+    required List<DartThrowResult> route,
+    required int startScore,
+    required int totalDarts,
+    required CheckoutRequirement checkoutRequirement,
+    required CheckoutPlayStyle playStyle,
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+    required _SetupFinishBand? targetBand,
+  }) {
+    final branches = <_SetupFallbackBranch>[];
+    var remaining = startScore;
+
+    for (var index = 0; index < route.length; index += 1) {
+      final dartThrow = route[index];
+      final dartsAfterThis = totalDarts - index - 1;
+      if (dartsAfterThis <= 0) {
+        remaining -= dartThrow.scoredPoints;
+        continue;
+      }
+
+      int? fallbackRemaining;
+      String? missLabel;
+      if (dartThrow.isTriple) {
+        fallbackRemaining = remaining - dartThrow.baseValue;
+        missLabel = 'Single statt ${dartThrow.label}';
+      } else if (dartThrow.isBull) {
+        fallbackRemaining = remaining - 25;
+        missLabel = '25 statt BULL';
+      }
+
+      if (fallbackRemaining != null &&
+          fallbackRemaining > 1 &&
+          missLabel != null) {
+        final fallbackRoute = _bestSetupFallbackRoute(
+          startScore: fallbackRemaining,
+          dartsLeft: dartsAfterThis,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+          preferredDoubles: preferredDoubles,
+          dislikedDoubles: dislikedDoubles,
+          targetBand: targetBand,
+        );
+
+        if (fallbackRoute != null && fallbackRoute.isNotEmpty) {
+          branches.add(
+            _SetupFallbackBranch(
+              dartIndex: index + 1,
+              triggerLabel: dartThrow.label,
+              missLabel: missLabel,
+              remainingScore: fallbackRemaining,
+              child: _buildSetupFallbackTree(
+                route: fallbackRoute,
+                startScore: fallbackRemaining,
+                totalDarts: dartsAfterThis,
+                checkoutRequirement: checkoutRequirement,
+                playStyle: playStyle,
+                preferredDoubles: preferredDoubles,
+                dislikedDoubles: dislikedDoubles,
+                targetBand: targetBand,
+              ),
+            ),
+          );
+        }
+      }
+
+      remaining -= dartThrow.scoredPoints;
+    }
+
+    return _SetupFallbackNode(
+      route: route,
+      startScore: startScore,
+      branches: branches,
+    );
+  }
+
+  List<DartThrowResult>? _bestSetupFallbackRoute({
     required int startScore,
     required int dartsLeft,
     required CheckoutRequirement checkoutRequirement,
     required CheckoutPlayStyle playStyle,
+    required Set<int> preferredDoubles,
+    required Set<int> dislikedDoubles,
+    required _SetupFinishBand? targetBand,
   }) {
-    if (startScore <= 1 || dartsLeft <= 0) {
-      return const <_BestFinishBucket>[];
+    if (!_planner.isValidSetupStartScore(startScore) || dartsLeft <= 0) {
+      return null;
     }
-    final preferredDoubles = _parsePreferredDoubleValues(
-      _preferredDoublesController.text,
-    );
-    final dislikedDoubles = _parsePreferredDoubleValues(
-      _avoidedDoublesController.text,
-    );
 
-    return List<_BestFinishBucket>.generate(4, (index) {
-      final options = _planner.topSetupLeavesForNarrowFieldCount(
-        startScore: startScore,
-        dartsLeft: dartsLeft,
-        narrowFieldCount: index,
-        checkoutRequirement: checkoutRequirement,
-        playStyle: playStyle,
-        leavePreference: _leavePreference.round(),
-        outerBullPreference: _standardOuterBullPreference,
-        bullPreference: _standardBullPreference,
-        maxResults: 3,
-      );
-      final sortedOptions = options.toList()
-        ..sort(
-          (a, b) => (_doublePreferenceAdjustment(
-                    b.finishRoute.isEmpty ? null : b.finishRoute.last,
-                    preferredDoubles: preferredDoubles,
-                    dislikedDoubles: dislikedDoubles,
-                  ) +
-                  b.score)
-              .compareTo(
-                _doublePreferenceAdjustment(
-                      a.finishRoute.isEmpty ? null : a.finishRoute.last,
-                      preferredDoubles: preferredDoubles,
-                      dislikedDoubles: dislikedDoubles,
-                    ) +
-                    a.score,
-              ),
-        );
-      return _BestFinishBucket(
-        narrowFieldCount: index,
-        options: sortedOptions
-            .map(
-              (option) => _SetupLeavePresentation(
-                option: option,
-                explanation: _buildSetupLeaveExplanation(
-                  option: option,
-                  startScore: startScore,
-                ),
-                missScenarios: _buildMissScenarios(
-                  route: option.setupRoute,
-                  startScore: startScore,
-                  totalDarts: dartsLeft,
-                  checkoutRequirement: checkoutRequirement,
-                  playStyle: playStyle,
-                  outerBullPreference: _standardOuterBullPreference,
-                  bullPreference: _standardBullPreference,
-                ),
-              ),
-            )
-            .toList(),
-      );
-    });
+    return _planner.bestSetupFallbackRoute(
+      startScore: startScore,
+      dartsLeft: dartsLeft,
+      targetBand: _toPlannerSetupFinishBand(targetBand),
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+      leavePreference: _standardSetupPreference,
+      outerBullPreference: _standardOuterBullPreference,
+      bullPreference: _standardBullPreference,
+      preferredDoubles: preferredDoubles,
+      dislikedDoubles: dislikedDoubles,
+    );
+  }
+
+  String _setupPresentationKey(_SetupLeavePresentation presentation) {
+    final sortedPreferred = presentation.preferredDoubles.toList()..sort();
+    final sortedDisliked = presentation.dislikedDoubles.toList()..sort();
+    return <Object>[
+      presentation.option.setupRoute.map((entry) => entry.label).join('|'),
+      presentation.option.remainingScore,
+      presentation.option.finishRoute.map((entry) => entry.label).join('|'),
+      presentation.option.score,
+      presentation.startScore,
+      presentation.dartsLeft,
+      presentation.checkoutRequirement,
+      presentation.playStyle,
+      presentation.targetBand?.name ?? 'none',
+      sortedPreferred,
+      sortedDisliked,
+    ].join('|');
+  }
+
+  _SetupFallbackNode _resolveSetupFallbackTree(
+    _SetupLeavePresentation presentation,
+  ) {
+    final cacheKey = _setupPresentationKey(presentation);
+    final cached = _setupFallbackTreeCache[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+    final tree = _buildSetupFallbackTree(
+      route: presentation.option.setupRoute,
+      startScore: presentation.startScore,
+      totalDarts: presentation.dartsLeft,
+      checkoutRequirement: presentation.checkoutRequirement,
+      playStyle: presentation.playStyle,
+      preferredDoubles: presentation.preferredDoubles,
+      dislikedDoubles: presentation.dislikedDoubles,
+      targetBand: presentation.targetBand,
+    );
+    _setupFallbackTreeCache[cacheKey] = tree;
+    return tree;
+  }
+
+  CheckoutSetupFinishBand? _toPlannerSetupFinishBand(_SetupFinishBand? band) {
+    switch (band) {
+      case _SetupFinishBand.deep:
+        return CheckoutSetupFinishBand.deep;
+      case _SetupFinishBand.medium:
+        return CheckoutSetupFinishBand.medium;
+      case _SetupFinishBand.justFinish:
+        return CheckoutSetupFinishBand.justFinish;
+      case null:
+        return null;
+    }
   }
 
   Set<int> _parsePreferredDoubleValues(String text) {
@@ -263,473 +352,6 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
         .toSet();
   }
 
-  int _doublePreferenceAdjustment(
-    DartThrowResult? finalThrow, {
-    required Set<int> preferredDoubles,
-    required Set<int> dislikedDoubles,
-  }) {
-    if (finalThrow == null || !finalThrow.isFinishDouble || finalThrow.isBull) {
-      return 0;
-    }
-    if (preferredDoubles.contains(finalThrow.baseValue)) {
-      return 150;
-    }
-    if (dislikedDoubles.contains(finalThrow.baseValue)) {
-      return -150;
-    }
-    return 0;
-  }
-
-  CheckoutRouteScoreBreakdown _applyDoubleAdjustmentToBreakdown(
-    CheckoutRouteScoreBreakdown breakdown,
-    DartThrowResult? finalThrow,
-    int adjustment,
-  ) {
-    if (adjustment == 0 || finalThrow == null) {
-      return breakdown;
-    }
-
-    return CheckoutRouteScoreBreakdown(
-      dartPathScore: breakdown.dartPathScore,
-      comfort: breakdown.comfort,
-      robustness: breakdown.robustness,
-      doubleQuality: breakdown.doubleQuality + adjustment,
-      bullPenalty: breakdown.bullPenalty,
-      segmentFlow: breakdown.segmentFlow,
-      dartPathDetails: breakdown.dartPathDetails,
-      comfortDetails: breakdown.comfortDetails,
-      robustnessDetails: breakdown.robustnessDetails,
-      doubleQualityDetails: <String>[
-        ...breakdown.doubleQualityDetails,
-        if (adjustment > 0)
-          'Persoenliche Doppel-Praeferenz fuer ${finalThrow.label}: +$adjustment',
-        if (adjustment < 0)
-          'Persoenlicher Malus fuer ${finalThrow.label}: $adjustment',
-      ],
-      bullPenaltyDetails: breakdown.bullPenaltyDetails,
-      segmentFlowDetails: breakdown.segmentFlowDetails,
-    );
-  }
-
-  List<_MissScenario> _buildMissScenarios({
-    required List<DartThrowResult> route,
-    required int startScore,
-    required int totalDarts,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-    int outerBullPreference = 50,
-    int bullPreference = 50,
-  }) {
-    final scenarios = <_MissScenario>[];
-    var remaining = startScore;
-
-    for (var index = 0; index < route.length; index += 1) {
-      final dartThrow = route[index];
-      final dartsAfterThis = totalDarts - index - 1;
-
-      if (dartThrow.isTriple) {
-        final singleRemaining = remaining - dartThrow.baseValue;
-        final singleText = _describeMissContinuation(
-          remainingScore: singleRemaining,
-          dartsLeft: dartsAfterThis,
-          checkoutRequirement: checkoutRequirement,
-          playStyle: playStyle,
-          outerBullPreference: outerBullPreference,
-          bullPreference: bullPreference,
-        );
-        if (singleText != null) {
-          scenarios.add(
-            _MissScenario(
-              label: 'Single statt ${dartThrow.label}',
-              outcome: singleText.text,
-              state: singleText.state,
-            ),
-          );
-        }
-
-        for (final neighbor in _rules.adjacentSegments(dartThrow.baseValue)) {
-          final neighborRemaining = remaining - neighbor;
-          final neighborText = _describeMissContinuation(
-            remainingScore: neighborRemaining,
-            dartsLeft: dartsAfterThis,
-            checkoutRequirement: checkoutRequirement,
-            playStyle: playStyle,
-            outerBullPreference: outerBullPreference,
-            bullPreference: bullPreference,
-          );
-          if (neighborText != null) {
-            scenarios.add(
-              _MissScenario(
-                label: 'Nachbar $neighbor statt ${dartThrow.label}',
-                outcome: neighborText.text,
-                state: neighborText.state,
-              ),
-            );
-          }
-        }
-      } else if (dartThrow.isDouble && !dartThrow.isBull) {
-        final singleRemaining = remaining - dartThrow.baseValue;
-        final fallbackDarts = dartsAfterThis;
-        final singleText = _describeMissContinuation(
-          remainingScore: singleRemaining,
-          dartsLeft: fallbackDarts,
-          checkoutRequirement: checkoutRequirement,
-          playStyle: playStyle,
-          outerBullPreference: outerBullPreference,
-          bullPreference: bullPreference,
-        );
-        if (singleText != null) {
-          scenarios.add(
-            _MissScenario(
-              label: 'Single statt ${dartThrow.label}',
-              outcome: singleText.text,
-              state: singleText.state,
-            ),
-          );
-        }
-      } else if (dartThrow.isBull) {
-        final outerBullRemaining = remaining - 25;
-        final outerBullText = _describeMissContinuation(
-          remainingScore: outerBullRemaining,
-          dartsLeft: dartsAfterThis,
-          checkoutRequirement: checkoutRequirement,
-          playStyle: playStyle,
-          outerBullPreference: outerBullPreference,
-          bullPreference: bullPreference,
-        );
-        if (outerBullText != null) {
-          scenarios.add(
-            _MissScenario(
-              label: '25 statt BULL',
-              outcome: outerBullText.text,
-              state: outerBullText.state,
-            ),
-          );
-        }
-      }
-
-      remaining -= dartThrow.scoredPoints;
-    }
-
-    return scenarios.take(4).toList();
-  }
-
-  _MissContinuation? _describeMissContinuation({
-    required int remainingScore,
-    required int dartsLeft,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-    int outerBullPreference = 50,
-    int bullPreference = 50,
-  }) {
-    if (remainingScore <= 1 || dartsLeft <= 0) {
-      return null;
-    }
-
-    final continuation = _planner.bestContinuationPlan(
-      score: remainingScore,
-      dartsLeft: dartsLeft,
-      checkoutRequirement: checkoutRequirement,
-      playStyle: playStyle,
-      outerBullPreference: outerBullPreference,
-      bullPreference: bullPreference,
-    );
-    if (continuation == null || continuation.throws.isEmpty) {
-      return _MissContinuation(
-        text: '$remainingScore Rest, kein guter Anschluss',
-        state: _MissScenarioState.bad,
-      );
-    }
-
-    final labels = continuation.throws.joinLabels(dartsLeft);
-    if (continuation.immediateFinish) {
-      return _MissContinuation(
-        text: '$remainingScore Rest, Finish ueber $labels',
-        state: _MissScenarioState.finish,
-      );
-    }
-    return _MissContinuation(
-      text: '$remainingScore Rest, weiter mit $labels',
-      state: _MissScenarioState.setup,
-    );
-  }
-
-  String _buildSetupLeaveExplanation({
-    required CheckoutSetupLeaveOption option,
-    required int startScore,
-  }) {
-    final setupNarrow = option.setupRoute.where(_planner.isNarrowField).length;
-    final baseFinishBreakdown = _planner.routeScoreBreakdown(
-      route: option.finishRoute,
-      startScore: option.remainingScore,
-      totalDarts: 3,
-      checkoutRequirement: _checkoutRequirement,
-      playStyle: _standardPlayStyle,
-      outerBullPreference: _standardOuterBullPreference,
-      bullPreference: _standardBullPreference,
-    );
-    final finishAdjustment = _doublePreferenceAdjustment(
-      option.finishRoute.isEmpty ? null : option.finishRoute.last,
-      preferredDoubles: _parsePreferredDoubleValues(
-        _preferredDoublesController.text,
-      ),
-      dislikedDoubles: _parsePreferredDoubleValues(
-        _avoidedDoublesController.text,
-      ),
-    );
-    final finishBreakdown = _applyDoubleAdjustmentToBreakdown(
-      baseFinishBreakdown,
-      option.finishRoute.isEmpty ? null : option.finishRoute.last,
-      finishAdjustment,
-    );
-    final setupLabels = option.setupRoute.map((entry) => entry.label).join(' | ');
-    final finishLabels = option.finishRoute.map((entry) => entry.label).join(' | ');
-
-    if (_leavePreference >= 67) {
-      return 'Gedanke: $setupLabels stellt bewusst ${option.remainingScore}, '
-          'weil danach mit $finishLabels ein starkes Restfinish offen bleibt. '
-          'Der Weg nimmt dafuer $setupNarrow schmales Feld in Kauf.';
-    }
-    if (_leavePreference <= 33) {
-      return 'Gedanke: $setupLabels haelt den Stellweg moeglichst einfach und '
-          'ruhig. Es bleiben ${option.remainingScore} Rest, die trotzdem mit '
-          '$finishLabels sauber auscheckbar sind.';
-    }
-    return 'Gedanke: Von $startScore aus balanciert $setupLabels einen einfachen '
-        'Stellweg mit einem starken Leave. ${option.remainingScore} Rest bleiben, '
-        'danach ist $finishLabels offen. Die Finish-Qualitaet profitiert hier von '
-        '${finishBreakdown.doubleQuality >= 100 ? 'einem starken Schlussdoppel' : 'einem brauchbaren Abschlussfeld'}.';
-  }
-
-  List<String> _buildFallbackHints({
-    required List<DartThrowResult> route,
-    required int startScore,
-    required int totalDarts,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-  }) {
-    final hints = <String>[];
-    var remaining = startScore;
-    for (var index = 0; index < route.length; index += 1) {
-      final dartThrow = route[index];
-      final dartsAfterThis = totalDarts - index - 1;
-      final isSingleMissScenario =
-          dartThrow.isTriple || (dartThrow.isDouble && !dartThrow.isBull);
-      if (isSingleMissScenario) {
-        final singleFallbackRemaining = remaining - dartThrow.baseValue;
-        final fallbackDarts = dartsAfterThis;
-        if (singleFallbackRemaining > 1 && fallbackDarts > 0) {
-          final fallbackPlan = _planner.bestContinuationPlan(
-            score: singleFallbackRemaining,
-            dartsLeft: fallbackDarts,
-            checkoutRequirement: checkoutRequirement,
-            playStyle: playStyle,
-          );
-          if (fallbackPlan != null && fallbackPlan.throws.isNotEmpty) {
-            final labels = fallbackPlan.throws.joinLabels(fallbackDarts);
-            final prefix = 'Bei Single statt ${dartThrow.label}: ';
-            final suffix = fallbackPlan.immediateFinish
-                ? labels
-                : '$labels fuer den naechsten Besuch';
-            hints.add('$prefix$suffix');
-          }
-        }
-      }
-      remaining -= dartThrow.scoredPoints;
-    }
-    return hints.take(2).toList();
-  }
-
-  bool _hasImmediateMissCheckout({
-    required List<DartThrowResult> route,
-    required int startScore,
-    required int totalDarts,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-  }) {
-    var remaining = startScore;
-    for (var index = 0; index < route.length; index += 1) {
-      final dartThrow = route[index];
-      final dartsAfterThis = totalDarts - index - 1;
-      final isSingleMissScenario =
-          dartThrow.isTriple || (dartThrow.isDouble && !dartThrow.isBull);
-      if (isSingleMissScenario) {
-        final singleFallbackRemaining = remaining - dartThrow.baseValue;
-        final fallbackDarts = dartsAfterThis;
-        if (singleFallbackRemaining > 1 && fallbackDarts > 0) {
-          final fallbackPlan = _planner.bestContinuationPlan(
-            score: singleFallbackRemaining,
-            dartsLeft: fallbackDarts,
-            checkoutRequirement: checkoutRequirement,
-            playStyle: playStyle,
-          );
-          if (fallbackPlan != null &&
-              fallbackPlan.throws.isNotEmpty &&
-              fallbackPlan.immediateFinish) {
-            return true;
-          }
-        }
-      }
-      remaining -= dartThrow.scoredPoints;
-    }
-    return false;
-  }
-
-  String? _buildRationaleHint({
-    required List<DartThrowResult> route,
-    required int startScore,
-    required int totalDarts,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-  }) {
-    if (route.length < 2 || totalDarts < 2) {
-      return null;
-    }
-
-    final first = route.first;
-    final firstRemaining = startScore - first.scoredPoints;
-    if (firstRemaining <= 1) {
-      return null;
-    }
-
-    final second = route.length > 1 ? route[1] : null;
-    if (second == null) {
-      return null;
-    }
-
-    final afterSecond = firstRemaining - second.scoredPoints;
-    final singleOnSecondRemaining = firstRemaining - second.baseValue;
-
-    final targetFinish =
-        afterSecond == 0 ? second.label : _formatRemaining(afterSecond);
-
-    String? fallbackText;
-    if (second.isTriple && totalDarts >= 3 && singleOnSecondRemaining > 1) {
-      final fallbackPlan = _planner.bestContinuationPlan(
-        score: singleOnSecondRemaining,
-        dartsLeft: totalDarts - 2,
-        checkoutRequirement: checkoutRequirement,
-        playStyle: playStyle,
-      );
-      if (fallbackPlan != null && fallbackPlan.throws.isNotEmpty) {
-        final labels = fallbackPlan.throws.joinLabels(totalDarts - 2);
-        fallbackText = fallbackPlan.immediateFinish
-            ? labels
-            : '$labels fuer den naechsten Besuch';
-      }
-    }
-
-    if (first.isTriple && totalDarts >= 3) {
-      final singleOnFirstRemaining = startScore - first.baseValue;
-      if (singleOnFirstRemaining > 1) {
-        final firstFallbackPlan = _planner.bestContinuationPlan(
-          score: singleOnFirstRemaining,
-          dartsLeft: totalDarts - 1,
-          checkoutRequirement: checkoutRequirement,
-          playStyle: playStyle,
-        );
-        if (firstFallbackPlan != null && firstFallbackPlan.throws.isNotEmpty) {
-          final firstFallbackLabels =
-              firstFallbackPlan.throws.joinLabels(totalDarts - 1);
-          final firstFallbackText = firstFallbackPlan.immediateFinish
-              ? firstFallbackLabels
-              : '$firstFallbackLabels fuer den naechsten Besuch';
-          final firstFallbackLead = firstFallbackPlan.immediateFinish
-              ? 'trotzdem ein guter Weg'
-              : 'ein brauchbarer Weg fuer den naechsten Besuch';
-          if (fallbackText != null) {
-            return 'Gedanke: ${first.label} stellt direkt $targetFinish. '
-                'Wenn der erste Dart nur Single wird, bleibt mit $firstFallbackText '
-                '$firstFallbackLead. '
-                'Darum geht der 2. Dart auf ${second.label}, weil auch ein Single statt ${second.label} '
-                'noch $fallbackText offenlaesst.';
-          }
-          return 'Gedanke: ${first.label} stellt direkt $targetFinish. '
-              'Wenn der erste Dart nur Single wird, bleibt mit $firstFallbackText '
-              '$firstFallbackLead.';
-        }
-      }
-    }
-
-    if (fallbackText != null) {
-      return 'Gedanke: Nach ${first.label} bleiben $firstRemaining. '
-          'Darum geht der 2. Dart auf ${second.label}, weil dann $targetFinish bleibt '
-          'und bei Single statt ${second.label} trotzdem $fallbackText offen ist.';
-    }
-
-    return 'Gedanke: Nach ${first.label} bleiben $firstRemaining. '
-        'Der 2. Dart geht auf ${second.label}, damit anschliessend $targetFinish bleibt.';
-  }
-
-  String _formatRemaining(int remaining) {
-    if (remaining == 50) {
-      return 'Bull';
-    }
-    if (remaining > 1 && remaining <= 40 && remaining.isEven) {
-      return 'D${remaining ~/ 2}';
-    }
-    return '$remaining Rest';
-  }
-
-  List<String> _buildBadges({
-    required List<DartThrowResult> route,
-    required int startScore,
-    required int totalDarts,
-    required CheckoutRequirement checkoutRequirement,
-    required CheckoutPlayStyle playStyle,
-  }) {
-    final badges = <String>[];
-    final narrowFields = route.where(_planner.isNarrowField).length;
-
-    if (route.length == 2) {
-      badges.add('2-Dart-Weg');
-    }
-    if (route.isNotEmpty && !route.last.isBull) {
-      badges.add(
-        route.last.isFinishDouble
-            ? 'starkes Schlussdoppel'
-            : 'klares Schlussfeld',
-      );
-    }
-    if (narrowFields <= 1) {
-      badges.add('wenig schmale Felder');
-    }
-    if (route.every((entry) => !entry.isBull && entry.label != '25')) {
-      badges.add('Bull vermieden');
-    }
-    if (_hasSameSegmentFlow(route)) {
-      badges.add('ruhiger Segmentfluss');
-    }
-    if (_buildFallbackHints(
-      route: route,
-      startScore: startScore,
-      totalDarts: totalDarts,
-      checkoutRequirement: checkoutRequirement,
-      playStyle: playStyle,
-    ).isNotEmpty) {
-      badges.add('Miss-Fallback');
-    }
-    if (_hasImmediateMissCheckout(
-      route: route,
-      startScore: startScore,
-      totalDarts: totalDarts,
-      checkoutRequirement: checkoutRequirement,
-      playStyle: playStyle,
-    )) {
-      badges.add('robuster Miss-Fallback');
-    }
-    return badges.take(4).toList();
-  }
-
-  bool _hasSameSegmentFlow(List<DartThrowResult> route) {
-    for (var index = 1; index < route.length; index += 1) {
-      if (route[index - 1].baseValue == route[index].baseValue) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     final score = int.tryParse(_scoreController.text.trim()) ?? 0;
@@ -739,8 +361,8 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
         bottom: TabBar(
           controller: _tabController,
           tabs: const <Widget>[
-            Tab(text: 'Einzeln'),
-            Tab(text: 'Bestes Finish'),
+            Tab(text: 'Checkout Rechner'),
+            Tab(text: 'Stell Rechner'),
           ],
         ),
       ),
@@ -772,7 +394,19 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                                   ),
                         ),
                         const SizedBox(height: 12),
-                        if (score <= 1)
+                        if (_isCalculating && _tabController.index == 0) ...<Widget>[
+                          LinearProgressIndicator(
+                            minHeight: 6,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _calculationLabel,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: const Color(0xFF556372),
+                                ),
+                          ),
+                        ] else if (score <= 1)
                           const Text('Bitte eine gueltige Restpunktzahl eingeben.')
                         else if (_options.isEmpty)
                           const Text('Kein Finish mit dieser Dartanzahl moeglich.')
@@ -804,12 +438,12 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Bestes Finish',
+                          'Stell Rechner',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Hier siehst du, welches Finish nach dem Stellweg uebrig bleibt. Pro Kategorie wird der beste Stellweg mit 0, 1, 2 oder 3 schmalen Feldern gezeigt.',
+                          'Hier siehst du die besten Stellwege als Top-Liste. Im Stell Rechner zaehlt vor allem, welcher Weg am staerksten ein garantiertes Finish stehen laesst und dabei mit moeglichst wenigen schmalen Feldern auskommt.',
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: const Color(0xFF556372),
@@ -817,7 +451,7 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Stelllogik: ${_leavePreference <= 33 ? 'einfacher Stellweg' : _leavePreference >= 67 ? 'starkes Restfinish' : 'ausgewogen'}',
+                          'Stell-Prioritaet: garantiertes Finish-Leave zuerst, dann wenige schmale Felder und ruhiger Segmentfluss.',
                           style:
                               Theme.of(context).textTheme.labelLarge?.copyWith(
                                     color: const Color(0xFF0E5A52),
@@ -825,59 +459,51 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                                   ),
                         ),
                         const SizedBox(height: 12),
-                        if (_bestFinishBuckets.isEmpty)
-                          const Text('Bitte einen gueltigen Startwert eingeben.')
-                        else
-                          ..._bestFinishBuckets.map(
-                                (bucket) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF7F5F0),
-                                      borderRadius: BorderRadius.circular(16),
+                        if (_isCalculating && _tabController.index == 1) ...<Widget>[
+                          LinearProgressIndicator(
+                            minHeight: 6,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _calculationLabel,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: const Color(0xFF556372),
+                                ),
+                          ),
+                        ] else if (_setupBandOptions.isNotEmpty) ...<Widget>[
+                          Text(
+                            'Finish-Bereiche',
+                            style:
+                                Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: const Color(0xFF17324D),
                                     ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: <Widget>[
-                                        Text(
-                                          _labelForNarrowFieldCount(
-                                            bucket.narrowFieldCount,
-                                          ),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        if (bucket.options.isEmpty)
-                                          const Text('Kein Stellweg')
-                                        else
-                                          Wrap(
-                                            spacing: 10,
-                                            runSpacing: 10,
-                                            children: bucket.options
-                                                .asMap()
-                                                .entries
-                                                .map(
-                                                  (entry) => SizedBox(
-                                                    width: 260,
-                                                    child: _SetupLeaveCard(
-                                                      rank: entry.key + 1,
-                                                      presentation: entry.value,
-                                                    ),
-                                                  ),
-                                                )
-                                                .toList(),
-                                          ),
-                                      ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: _SetupFinishBand.values
+                                .map(
+                                  (band) => SizedBox(
+                                    width: 250,
+                                    child: _SetupBandCard(
+                                      band: band,
+                                      presentation: _setupBandOptions[band],
+                                      resolveFallbackTree:
+                                          _resolveSetupFallbackTree,
                                     ),
                                   ),
-                                ),
-                              ),
+                                )
+                                .toList(),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+                        if (_setupBandOptions.isEmpty)
+                          const Text(
+                            'Bitte einen gueltigen Stellwert eingeben. Erlaubt sind 159, 162, 163, 165, 166, 168, 169 oder Werte ab 171.',
+                          )
                       ],
                     ),
                   ),
@@ -902,10 +528,10 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
           children: <Widget>[
             Text(
               includeSetupFields
-                  ? 'Bestes Finish und Einstellungen'
+                  ? 'Stell Rechner und Einstellungen'
                   : includeRangeFields
                       ? 'Bereich und Einstellungen'
-                      : 'Restscore und Einstellungen',
+                      : 'Checkout Rechner und Einstellungen',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
@@ -926,37 +552,10 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: 'Startwert',
+                  helperText:
+                      'Nur fuer Stellwege: 159, 162, 163, 165, 166, 168, 169 oder Werte ab 171',
                 ),
                 onSubmitted: (_) => _recalculate(),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Einfacher Weg vs. starkes Restfinish',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              Slider(
-                value: _leavePreference,
-                min: 0,
-                max: 100,
-                divisions: 10,
-                label: _leavePreference.round().toString(),
-                onChanged: (value) => setState(() => _leavePreference = value),
-              ),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'einfacher Stellweg',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                  Text(
-                    'starkes Restfinish',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
               ),
               const SizedBox(height: 12),
             ],
@@ -1039,16 +638,251 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
       case CheckoutRequirement.doubleOut:
         return 'Double Out';
       case CheckoutRequirement.masterOut:
-        return 'Master Out';
+        return 'Triple Out';
     }
   }
 
-  String _labelForNarrowFieldCount(int count) => switch (count) {
-        0 => 'Kein schmales Feld',
-        1 => '1x schmales Feld',
-        2 => '2x schmale Felder',
-        _ => '3x schmale Felder',
-      };
+  List<_CheckoutOption> _checkoutOptionsFromBackgroundResult(
+    Map<String, Object?> result,
+  ) {
+    final options = ((result['options'] as List?) ?? const <Object?>[])
+        .whereType<Map>()
+        .map((entry) => _checkoutOptionFromMap(entry.cast<String, Object?>()))
+        .toList(growable: false);
+    final cacheKey = <Object>[
+      int.tryParse(_scoreController.text.trim()) ?? 0,
+      _dartsLeft,
+      _checkoutRequirement,
+      _standardPlayStyle,
+      _preferredDoublesController.text.trim(),
+      _avoidedDoublesController.text.trim(),
+    ].join('|');
+    _checkoutOptionsCache[cacheKey] = options;
+    return options;
+  }
+
+  Map<_SetupFinishBand, _SetupLeavePresentation>
+      _setupBandOptionsFromBackgroundResult(
+    Map<String, Object?> result,
+  ) {
+    final rawBands =
+        (result['bands'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    final mapped = <_SetupFinishBand, _SetupLeavePresentation>{};
+    for (final entry in rawBands.entries) {
+      final band = _setupFinishBandFromName(entry.key);
+      final value = entry.value;
+      if (band == null || value is! Map) {
+        continue;
+      }
+      mapped[band] = _setupPresentationFromMap(value.cast<String, Object?>());
+    }
+    final cacheKey = <Object>[
+      int.tryParse(_setupStartController.text.trim()) ?? 0,
+      _dartsLeft,
+      _checkoutRequirement,
+      _standardPlayStyle,
+      _preferredDoublesController.text.trim(),
+      _avoidedDoublesController.text.trim(),
+    ].join('|');
+    _setupBuildResultCache[cacheKey] = mapped;
+    return mapped;
+  }
+
+  _CheckoutOption _checkoutOptionFromMap(Map<String, Object?> map) {
+    return _CheckoutOption(
+      throws: ((map['throws'] as List?) ?? const <Object?>[])
+          .whereType<Map>()
+          .map((entry) => _throwFromMap(entry.cast<String, Object?>()))
+          .toList(growable: false),
+      score: (map['score'] as num?)?.toInt() ?? 0,
+      breakdown: _routeScoreBreakdownFromMap(
+        (map['breakdown'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{},
+      ),
+      missScenarios: ((map['missScenarios'] as List?) ?? const <Object?>[])
+          .whereType<Map>()
+          .map((entry) => _missScenarioFromMap(entry.cast<String, Object?>()))
+          .toList(growable: false),
+      fallbackHints: ((map['fallbackHints'] as List?) ?? const <Object?>[])
+          .whereType<String>()
+          .toList(growable: false),
+      badges: ((map['badges'] as List?) ?? const <Object?>[])
+          .whereType<String>()
+          .toList(growable: false),
+      rationaleHint: map['rationaleHint'] as String?,
+    );
+  }
+
+  _SetupLeavePresentation _setupPresentationFromMap(Map<String, Object?> map) {
+    final optionMap =
+        (map['option'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{};
+    return _SetupLeavePresentation(
+      option: _setupLeaveOptionFromMap(optionMap),
+      effectiveScore: (map['effectiveScore'] as num?)?.toInt() ?? 0,
+      effectiveBreakdown: _setupScoreBreakdownFromMap(
+        (map['effectiveBreakdown'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{},
+      ),
+      explanation: map['explanation'] as String?,
+      fallbackTree: null,
+      missScenarios: null,
+      startScore: (map['startScore'] as num?)?.toInt() ?? 0,
+      dartsLeft: (map['dartsLeft'] as num?)?.toInt() ?? 0,
+      checkoutRequirement: CheckoutRequirement.values.firstWhere(
+        (entry) => entry.name == map['checkoutRequirement'],
+        orElse: () => CheckoutRequirement.doubleOut,
+      ),
+      playStyle: CheckoutPlayStyle.values.firstWhere(
+        (entry) => entry.name == map['playStyle'],
+        orElse: () => CheckoutPlayStyle.balanced,
+      ),
+      preferredDoubles: ((map['preferredDoubles'] as List?) ?? const <Object?>[])
+          .whereType<num>()
+          .map((entry) => entry.toInt())
+          .toSet(),
+      dislikedDoubles: ((map['dislikedDoubles'] as List?) ?? const <Object?>[])
+          .whereType<num>()
+          .map((entry) => entry.toInt())
+          .toSet(),
+      targetBand: _setupFinishBandFromName(map['targetBand'] as String?),
+    );
+  }
+
+  CheckoutSetupLeaveOption _setupLeaveOptionFromMap(Map<String, Object?> map) {
+    return CheckoutSetupLeaveOption(
+      setupRoute: ((map['setupRoute'] as List?) ?? const <Object?>[])
+          .whereType<Map>()
+          .map((entry) => _throwFromMap(entry.cast<String, Object?>()))
+          .toList(growable: false),
+      remainingScore: (map['remainingScore'] as num?)?.toInt() ?? 0,
+      finishRoute: ((map['finishRoute'] as List?) ?? const <Object?>[])
+          .whereType<Map>()
+          .map((entry) => _throwFromMap(entry.cast<String, Object?>()))
+          .toList(growable: false),
+      score: (map['score'] as num?)?.toInt() ?? 0,
+      breakdown: _setupScoreBreakdownFromMap(
+        (map['breakdown'] as Map?)?.cast<String, Object?>() ??
+            const <String, Object?>{},
+      ),
+    );
+  }
+
+  DartThrowResult _throwFromMap(Map<String, Object?> map) {
+    return DartThrowResult(
+      label: (map['label'] as String?) ?? '',
+      baseValue: (map['baseValue'] as num?)?.toInt() ?? 0,
+      scoredPoints: (map['scoredPoints'] as num?)?.toInt() ?? 0,
+      isDouble: (map['isDouble'] as bool?) ?? false,
+      isTriple: (map['isTriple'] as bool?) ?? false,
+      isBull: (map['isBull'] as bool?) ?? false,
+      isMiss: (map['isMiss'] as bool?) ?? false,
+    );
+  }
+
+  CheckoutRouteScoreBreakdown _routeScoreBreakdownFromMap(
+    Map<String, Object?> map,
+  ) {
+    return CheckoutRouteScoreBreakdown(
+      dartPathScore: (map['dartPathScore'] as num?)?.toInt() ?? 0,
+      comfort: (map['comfort'] as num?)?.toInt() ?? 0,
+      robustness: (map['robustness'] as num?)?.toInt() ?? 0,
+      doubleQuality: (map['doubleQuality'] as num?)?.toInt() ?? 0,
+      narrowFieldPenalty: (map['narrowFieldPenalty'] as num?)?.toInt() ?? 0,
+      bullPenalty: (map['bullPenalty'] as num?)?.toInt() ?? 0,
+      segmentFlow: (map['segmentFlow'] as num?)?.toInt() ?? 0,
+      dartPathDetails: ((map['dartPathDetails'] as List?) ?? const <Object?>[])
+          .whereType<String>()
+          .toList(growable: false),
+      comfortDetails: ((map['comfortDetails'] as List?) ?? const <Object?>[])
+          .whereType<String>()
+          .toList(growable: false),
+      robustnessDetails:
+          ((map['robustnessDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      doubleQualityDetails:
+          ((map['doubleQualityDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      narrowFieldDetails:
+          ((map['narrowFieldDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      bullPenaltyDetails:
+          ((map['bullPenaltyDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      segmentFlowDetails:
+          ((map['segmentFlowDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+    );
+  }
+
+  CheckoutSetupScoreBreakdown _setupScoreBreakdownFromMap(
+    Map<String, Object?> map,
+  ) {
+    return CheckoutSetupScoreBreakdown(
+      setupPathScore: (map['setupPathScore'] as num?)?.toInt() ?? 0,
+      routeGuidance: (map['routeGuidance'] as num?)?.toInt() ?? 0,
+      leaveQuality: (map['leaveQuality'] as num?)?.toInt() ?? 0,
+      missPenalty: (map['missPenalty'] as num?)?.toInt() ?? 0,
+      totalScore: (map['totalScore'] as num?)?.toInt() ?? 0,
+      setupPathDetails:
+          ((map['setupPathDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      routeGuidanceDetails:
+          ((map['routeGuidanceDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      leaveQualityDetails:
+          ((map['leaveQualityDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+      missPenaltyDetails:
+          ((map['missPenaltyDetails'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .toList(growable: false),
+    );
+  }
+
+  _MissScenario _missScenarioFromMap(Map<String, Object?> map) {
+    return _MissScenario(
+      dartIndex: (map['dartIndex'] as num?)?.toInt() ?? 0,
+      targetLabel: (map['targetLabel'] as String?) ?? '',
+      label: (map['label'] as String?) ?? '',
+      outcome: (map['outcome'] as String?) ?? '',
+      state: _missScenarioStateFromName(map['state'] as String?),
+    );
+  }
+
+  _MissScenarioState _missScenarioStateFromName(String? name) {
+    switch (name) {
+      case 'finish':
+        return _MissScenarioState.finish;
+      case 'setup':
+        return _MissScenarioState.setup;
+      case 'bad':
+      default:
+        return _MissScenarioState.bad;
+    }
+  }
+
+  _SetupFinishBand? _setupFinishBandFromName(String? name) {
+    switch (name) {
+      case 'deep':
+        return _SetupFinishBand.deep;
+      case 'medium':
+        return _SetupFinishBand.medium;
+      case 'justFinish':
+        return _SetupFinishBand.justFinish;
+      default:
+        return null;
+    }
+  }
 }
 
 class _CheckoutResultTile extends StatelessWidget {
@@ -1118,6 +952,12 @@ class _CheckoutResultTile extends StatelessWidget {
         value: option.breakdown.doubleQuality,
         reason: _doubleReason(route.last),
         details: option.breakdown.doubleQualityDetails,
+      ),
+      _BreakdownExplanation(
+        label: 'Schmale Felder',
+        value: -option.breakdown.narrowFieldPenalty,
+        reason: _narrowFieldReason(route),
+        details: option.breakdown.narrowFieldDetails,
       ),
       _BreakdownExplanation(
         label: 'Bull-Malus',
@@ -1200,6 +1040,22 @@ class _CheckoutResultTile extends StatelessWidget {
     return 'kein klassisches Schlussdoppel, daher wenig Bonus.';
   }
 
+  String _narrowFieldReason(List<DartThrowResult> route) {
+    final count = route
+        .where(
+          (entry) =>
+              entry.label == '25' ||
+              entry.isTriple ||
+              entry.isDouble ||
+              entry.isBull,
+        )
+        .length;
+    if (count == 0) {
+      return 'keine schmalen Felder im Weg, daher kein Zusatzmalus.';
+    }
+    return '$count schmales Feld${count == 1 ? '' : 'er'} druecken den Gesamtscore.';
+  }
+
   String _bullReason({
     required int outerBullCount,
     required int bullCount,
@@ -1248,11 +1104,10 @@ class _CheckoutResultTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(
-                  labels,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                _RouteHeader(
+                  labels: labels,
+                  score: option.score,
+                  scoreLabel: 'Endscore',
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1301,14 +1156,6 @@ class _CheckoutResultTile extends StatelessWidget {
                       ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  'Endscore: ${option.score}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF0E5A52),
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -1324,6 +1171,10 @@ class _CheckoutResultTile extends StatelessWidget {
                     _ScorePill(
                       label: 'Doppel',
                       value: option.breakdown.doubleQuality,
+                    ),
+                    _ScorePill(
+                      label: 'Schmale Felder',
+                      value: -option.breakdown.narrowFieldPenalty,
                     ),
                     _ScorePill(
                       label: 'Bull-Malus',
@@ -1350,7 +1201,7 @@ class _CheckoutResultTile extends StatelessWidget {
                 ),
                 if (option.missScenarios.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 8),
-                  _MissScenarioPanel(
+                  _TripleSingleFallbackPanel(
                     scenarios: option.missScenarios,
                   ),
                 ],
@@ -1408,47 +1259,81 @@ class _CheckoutOption {
   final String? rationaleHint;
 }
 
-class _BestFinishBucket {
-  const _BestFinishBucket({
-    required this.narrowFieldCount,
-    required this.options,
-  });
-
-  final int narrowFieldCount;
-  final List<_SetupLeavePresentation> options;
-}
-
 class _SetupLeavePresentation {
   const _SetupLeavePresentation({
     required this.option,
+    required this.effectiveScore,
+    required this.effectiveBreakdown,
     required this.explanation,
+    required this.fallbackTree,
     required this.missScenarios,
+    required this.startScore,
+    required this.dartsLeft,
+    required this.checkoutRequirement,
+    required this.playStyle,
+    required this.preferredDoubles,
+    required this.dislikedDoubles,
+    required this.targetBand,
   });
 
   final CheckoutSetupLeaveOption option;
-  final String explanation;
-  final List<_MissScenario> missScenarios;
+  final int effectiveScore;
+  final CheckoutSetupScoreBreakdown effectiveBreakdown;
+  final String? explanation;
+  final _SetupFallbackNode? fallbackTree;
+  final List<_MissScenario>? missScenarios;
+  final int startScore;
+  final int dartsLeft;
+  final CheckoutRequirement checkoutRequirement;
+  final CheckoutPlayStyle playStyle;
+  final Set<int> preferredDoubles;
+  final Set<int> dislikedDoubles;
+  final _SetupFinishBand? targetBand;
 }
+
+class _SetupFallbackNode {
+  const _SetupFallbackNode({
+    required this.route,
+    required this.startScore,
+    required this.branches,
+  });
+
+  final List<DartThrowResult> route;
+  final int startScore;
+  final List<_SetupFallbackBranch> branches;
+}
+
+class _SetupFallbackBranch {
+  const _SetupFallbackBranch({
+    required this.dartIndex,
+    required this.triggerLabel,
+    required this.missLabel,
+    required this.remainingScore,
+    required this.child,
+  });
+
+  final int dartIndex;
+  final String triggerLabel;
+  final String missLabel;
+  final int remainingScore;
+  final _SetupFallbackNode child;
+}
+
+enum _SetupFinishBand { deep, medium, justFinish }
 
 class _MissScenario {
   const _MissScenario({
+    required this.dartIndex,
+    required this.targetLabel,
     required this.label,
     required this.outcome,
     required this.state,
   });
 
+  final int dartIndex;
+  final String targetLabel;
   final String label;
   final String outcome;
-  final _MissScenarioState state;
-}
-
-class _MissContinuation {
-  const _MissContinuation({
-    required this.text,
-    required this.state,
-  });
-
-  final String text;
   final _MissScenarioState state;
 }
 
@@ -1499,131 +1384,6 @@ class _BreakdownExplanation {
   final int value;
   final String reason;
   final List<String> details;
-}
-
-class _BreakdownExplanationCard extends StatelessWidget {
-  const _BreakdownExplanationCard({
-    required this.item,
-  });
-
-  final _BreakdownExplanation item;
-
-  @override
-  Widget build(BuildContext context) {
-    final isPositive = item.value >= 0;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE3E8EE)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  item.label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF17324D),
-                      ),
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isPositive
-                      ? const Color(0xFFE6F3ED)
-                      : const Color(0xFFF6E8E6),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${isPositive ? '+' : ''}${item.value}',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: isPositive
-                            ? const Color(0xFF0E5A52)
-                            : const Color(0xFF8A3A2C),
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-            Text(
-              item.reason,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF556372),
-                    height: 1.35,
-                  ),
-            ),
-            if (item.details.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 8),
-              Theme(
-                data: Theme.of(context).copyWith(
-                  dividerColor: Colors.transparent,
-                ),
-                child: ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: EdgeInsets.zero,
-                  dense: true,
-                  visualDensity: const VisualDensity(
-                    horizontal: -4,
-                    vertical: -4,
-                  ),
-                  title: Text(
-                    'Genaue Rechnung',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: const Color(0xFF0E5A52),
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  children: item.details
-                      .map(
-                        (detail) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              const Padding(
-                                padding: EdgeInsets.only(top: 2),
-                                child: Text(
-                                  '•',
-                                  style: TextStyle(
-                                    color: Color(0xFF556372),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  detail,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                        color: const Color(0xFF556372),
-                                        height: 1.3,
-                                      ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
-  }
 }
 
 class _BreakdownDetailsCard extends StatelessWidget {
@@ -1751,22 +1511,54 @@ class _BreakdownDetailsCard extends StatelessWidget {
   }
 }
 
-class _SetupLeaveCard extends StatelessWidget {
-  const _SetupLeaveCard({
-    required this.rank,
+class _SetupBandCard extends StatefulWidget {
+  const _SetupBandCard({
+    required this.band,
     required this.presentation,
+    required this.resolveFallbackTree,
   });
 
-  final int rank;
-  final _SetupLeavePresentation presentation;
+  final _SetupFinishBand band;
+  final _SetupLeavePresentation? presentation;
+  final _SetupFallbackNode Function(_SetupLeavePresentation presentation)
+      resolveFallbackTree;
+
+  @override
+  State<_SetupBandCard> createState() => _SetupBandCardState();
+}
+
+class _SetupBandCardState extends State<_SetupBandCard> {
+  bool _showFallbackTree = false;
+
+  String get _title {
+    switch (widget.band) {
+      case _SetupFinishBand.deep:
+        return 'Tiefes Finish';
+      case _SetupFinishBand.medium:
+        return 'Mittleres Finish';
+      case _SetupFinishBand.justFinish:
+        return 'Geradeso Finish';
+    }
+  }
+
+  String get _subtitle {
+    switch (widget.band) {
+      case _SetupFinishBand.deep:
+        return 'Rest bis 79';
+      case _SetupFinishBand.medium:
+        return 'Rest 100 bis 130';
+      case _SetupFinishBand.justFinish:
+        return 'Rest 160 bis 170';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final option = presentation.option;
+    final option = widget.presentation?.option;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: rank == 1 ? const Color(0xFFE3F1EC) : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE3E8EE)),
       ),
@@ -1774,45 +1566,111 @@ class _SetupLeaveCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            'Option $rank',
+            _title,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: const Color(0xFF17324D),
                 ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            option.setupRoute.map((entry) => entry.label).join(' | '),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Stellt ${option.remainingScore} Rest',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF556372),
-                ),
-          ),
           const SizedBox(height: 4),
           Text(
-            'Danach: ${option.finishRoute.map((entry) => entry.label).join(' | ')}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF0E5A52),
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            presentation.explanation,
+            _subtitle,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: const Color(0xFF556372),
-                  height: 1.35,
                 ),
           ),
-          if (presentation.missScenarios.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            _MissScenarioPanel(scenarios: presentation.missScenarios),
+          const SizedBox(height: 10),
+          if (widget.presentation == null)
+            Text(
+              'Kein passender Stellweg',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF556372),
+                  ),
+            )
+          else ...<Widget>[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F9FB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: DefaultTextStyle(
+                style: Theme.of(context).textTheme.bodyMedium!.copyWith(
+                      color: const Color(0xFF17324D),
+                      height: 1.45,
+                    ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Stellt ${option!.remainingScore} Rest',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF556372),
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Danach: ${option.finishRoute.map((entry) => entry.label).join(' | ')}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF0E5A52),
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 10),
+                    _SetupFallbackTreeView(
+                      node: widget.presentation!.fallbackTree ??
+                          const _SetupFallbackNode(
+                            route: <DartThrowResult>[],
+                            startScore: 0,
+                            branches: <_SetupFallbackBranch>[],
+                          ),
+                      isRoot: true,
+                      showBranches: false,
+                    ),
+                    if (widget.band == _SetupFinishBand.deep) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          childrenPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(
+                            'Fallback-Wege',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: const Color(0xFF0E5A52),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          onExpansionChanged: (expanded) {
+                            setState(() {
+                              _showFallbackTree = expanded;
+                            });
+                          },
+                          children: _showFallbackTree
+                              ? <Widget>[
+                                  const SizedBox(height: 6),
+                                  _SetupFallbackTreeView(
+                                    node: widget.resolveFallbackTree(
+                                      widget.presentation!,
+                                    ),
+                                    isRoot: true,
+                                  ),
+                                ]
+                              : const <Widget>[],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ],
         ],
       ),
@@ -1820,8 +1678,201 @@ class _SetupLeaveCard extends StatelessWidget {
   }
 }
 
-class _MissScenarioPanel extends StatelessWidget {
-  const _MissScenarioPanel({
+class _SetupFallbackTreeView extends StatelessWidget {
+  const _SetupFallbackTreeView({
+    required this.node,
+    this.isRoot = false,
+    this.showBranches = true,
+  });
+
+  final _SetupFallbackNode node;
+  final bool isRoot;
+  final bool showBranches;
+
+  @override
+  Widget build(BuildContext context) {
+    final routeLabels = node.route.map((entry) => entry.label).join(' | ');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isRoot ? const Color(0xFFE3F1EC) : const Color(0xFFFFFFFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isRoot ? const Color(0xFFB8D6CB) : const Color(0xFFE3E8EE),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (isRoot)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E5A52),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                'Originaler Stellweg',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            )
+          else
+            Text(
+              'Fallback-Weg',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: const Color(0xFF17324D),
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            routeLabels,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: const Color(0xFF17324D),
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+          if (showBranches && node.branches.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            ...node.branches.map(
+              (branch) => Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(left: 12, top: 4),
+                  title: Text(
+                    'Dart ${branch.dartIndex}: ${branch.triggerLabel}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF17324D),
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  subtitle: Text(
+                    '${branch.missLabel} -> ${branch.remainingScore} Rest',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF556372),
+                        ),
+                  ),
+                  children: <Widget>[
+                    _SetupFallbackTreeView(node: branch.child),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteHeader extends StatelessWidget {
+  const _RouteHeader({
+    required this.labels,
+    required this.score,
+    required this.scoreLabel,
+  });
+
+  final String labels;
+  final int score;
+  final String scoreLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 520;
+        final scoreBox = _ScoreRatingBox(
+          label: scoreLabel,
+          score: score,
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                labels,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              scoreBox,
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                labels,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            scoreBox,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ScoreRatingBox extends StatelessWidget {
+  const _ScoreRatingBox({
+    required this.label,
+    required this.score,
+  });
+
+  final String label;
+  final int score;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 92),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F7F4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFB8D6CB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: const Color(0xFF556372),
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '$score',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: const Color(0xFF0E5A52),
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TripleSingleFallbackPanel extends StatelessWidget {
+  const _TripleSingleFallbackPanel({
     required this.scenarios,
   });
 
@@ -1829,74 +1880,144 @@ class _MissScenarioPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tripleSingleScenarios = scenarios
+        .where(
+          (scenario) =>
+              scenario.targetLabel.startsWith('T') &&
+              scenario.label.startsWith('Single statt '),
+        )
+        .toList();
+
+    if (tripleSingleScenarios.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final grouped = <int, List<_MissScenario>>{};
+    final targets = <int, String>{};
+    for (final scenario in tripleSingleScenarios) {
+      grouped.putIfAbsent(scenario.dartIndex, () => <_MissScenario>[]).add(scenario);
+      targets.putIfAbsent(scenario.dartIndex, () => scenario.targetLabel);
+    }
+
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: Text(
-          'Miss-Szenarien',
+          'Single-Fallbacks auf Triple',
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: const Color(0xFF17324D),
               ),
         ),
-        children: scenarios
-            .map(
-              (scenario) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: _backgroundForScenario(scenario.state),
-                    borderRadius: BorderRadius.circular(10),
+        children: grouped.entries.map((entry) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE3E8EE)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Dart ${entry.key}/',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF17324D),
+                        ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
+                  const SizedBox(height: 4),
+                  Text(
+                    '└─ Ziel ${targets[entry.key] ?? ''}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF556372),
+                          fontWeight: FontWeight.w700,
                         ),
-                        decoration: BoxDecoration(
-                          color: _badgeBackgroundForScenario(scenario.state),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          _labelForScenario(scenario.state),
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: _textForScenario(scenario.state),
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      RichText(
-                        text: TextSpan(
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFF556372),
-                                height: 1.35,
+                  ),
+                  const SizedBox(height: 8),
+                  ...entry.value.map((scenario) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            '└─ ',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFF556372),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: _backgroundForScenario(scenario.state),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                          children: <InlineSpan>[
-                            TextSpan(
-                              text: '${scenario.label}: ',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: _textForScenario(scenario.state),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    '${scenario.label}/',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: const Color(0xFF17324D),
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _badgeBackgroundForScenario(scenario.state),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      _labelForScenario(scenario.state),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: _textForScenario(scenario.state),
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    '└─ ${scenario.outcome}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: const Color(0xFF556372),
+                                          height: 1.35,
+                                        ),
+                                  ),
+                                ],
                               ),
                             ),
-                            TextSpan(text: scenario.outcome),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
+                    );
+                  }),
+                ],
               ),
-            )
-            .toList(),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -1943,11 +2064,5 @@ class _MissScenarioPanel extends StatelessWidget {
       case _MissScenarioState.bad:
         return const Color(0xFF8A3A2C);
     }
-  }
-}
-
-extension on List<DartThrowResult> {
-  String joinLabels(int maxThrows) {
-    return take(maxThrows).map((entry) => entry.label).join(' | ');
   }
 }

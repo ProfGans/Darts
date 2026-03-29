@@ -20,6 +20,109 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
   CareerHistoryFilterMode _filterMode = CareerHistoryFilterMode.career;
   int? _selectedSeasonNumber;
 
+  String _formatFirstNine(CareerX01PlayerStats stats) =>
+      stats.firstNineDarts > 0 ? stats.firstNineAverage.toStringAsFixed(1) : '-';
+
+  Future<void> _showNineDarterRecords(
+    CareerPlayerHistorySummary history,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return SafeArea(
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.7,
+            minChildSize: 0.45,
+            maxChildSize: 0.92,
+            builder: (context, controller) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '9-Darter',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${history.playerName} hat ${history.nineDarterRecords.length} perfekte Legs in diesem Filter.',
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: history.nineDarterRecords.isEmpty
+                          ? const Center(
+                              child: Text('Noch keine 9-Darter in diesem Zeitraum.'),
+                            )
+                          : ListView.separated(
+                              controller: controller,
+                              itemCount: history.nineDarterRecords.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final record = history.nineDarterRecords[index];
+                                return Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Expanded(
+                                            child: Text(
+                                              record.tournamentName,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Text('Saison ${record.seasonNumber}'),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: <Widget>[
+                                          _HistoryTag(label: record.roundLabel),
+                                          _HistoryTag(
+                                            label:
+                                                'Gegner ${record.opponentName}',
+                                          ),
+                                          if (record.scoreText.trim().isNotEmpty)
+                                            _HistoryTag(
+                                              label: record.scoreText,
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final repository = CareerRepository.instance;
@@ -130,7 +233,7 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
                         ),
                         _MetricCard(
                           title: 'F9',
-                          value: history.x01Stats.firstNineAverage.toStringAsFixed(1),
+                          value: _formatFirstNine(history.x01Stats),
                           width: metricWidth,
                         ),
                         _MetricCard(
@@ -144,28 +247,44 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
                               '${history.x01Stats.scores100Plus} / ${history.x01Stats.scores140Plus} / ${history.x01Stats.scores180}',
                           width: metricWidth,
                         ),
+                        _MetricCard(
+                          title: '9-Darter',
+                          value: '${history.x01Stats.won9Darters}',
+                          width: metricWidth,
+                          onTap: () => _showNineDarterRecords(history),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
                     _X01StatsCard(stats: history.x01Stats),
                     const SizedBox(height: 16),
                     if (isWide)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Column(
                         children: <Widget>[
-                          Expanded(
-                            flex: 3,
-                            child: _TypeTitlesCard(sortedTypes: sortedTypes),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Expanded(
+                                flex: 3,
+                                child: _TypeTitlesCard(sortedTypes: sortedTypes),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                flex: 5,
+                                child: _MatchHistoryCard(
+                                  entries: history.matchHistoryEntries,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            flex: 5,
-                            child: _HistoryCard(entries: history.entries),
-                          ),
+                          const SizedBox(height: 16),
+                          _HistoryCard(entries: history.entries),
                         ],
                       )
                     else ...<Widget>[
                       _TypeTitlesCard(sortedTypes: sortedTypes),
+                      const SizedBox(height: 16),
+                      _MatchHistoryCard(entries: history.matchHistoryEntries),
                       const SizedBox(height: 16),
                       _HistoryCard(entries: history.entries),
                     ],
@@ -297,7 +416,7 @@ class _X01StatsCard extends StatelessWidget {
       ('3DA', stats.average.toStringAsFixed(1)),
       ('PPD', stats.pointsPerDart.toStringAsFixed(2)),
       ('PPR', stats.pointsPerRound.toStringAsFixed(1)),
-      ('F9', stats.firstNineAverage.toStringAsFixed(1)),
+      ('F9', stats.firstNineDarts > 0 ? stats.firstNineAverage.toStringAsFixed(1) : '-'),
       ('Checkout', '${stats.checkoutQuote.toStringAsFixed(1)}%'),
       ('1D / 2D / 3D',
           '${stats.checkoutQuote1Dart.toStringAsFixed(0)} / ${stats.checkoutQuote2Dart.toStringAsFixed(0)} / ${stats.checkoutQuote3Dart.toStringAsFixed(0)}'),
@@ -312,6 +431,7 @@ class _X01StatsCard extends StatelessWidget {
       ('Against Throw Avg', stats.againstThrowAverage.toStringAsFixed(1)),
       ('Deciding Avg', stats.decidingLegAverage.toStringAsFixed(1)),
       ('Deciding Legs', '${stats.decidingLegsWonQuote.toStringAsFixed(1)}%'),
+      ('9-Darter', '${stats.won9Darters}'),
       ('12 / 15 / 18',
           '${stats.won12DarterQuote.toStringAsFixed(0)} / ${stats.won15DarterQuote.toStringAsFixed(0)} / ${stats.won18DarterQuote.toStringAsFixed(0)}%'),
       ('3rd Dart CO', '${stats.thirdDartCheckoutQuote.toStringAsFixed(1)}%'),
@@ -454,6 +574,98 @@ class _HistoryCard extends StatelessWidget {
   }
 }
 
+class _MatchHistoryCard extends StatelessWidget {
+  const _MatchHistoryCard({
+    required this.entries,
+  });
+
+  final List<CareerPlayerMatchHistoryEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final previewEntries = entries.take(40).toList();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Match-Historie',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            if (previewEntries.isEmpty)
+              const Text('Noch keine Matchdaten gespeichert.')
+            else
+              ...previewEntries.asMap().entries.map((entry) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: entry.key == previewEntries.length - 1 ? 0 : 10,
+                  ),
+                  child: _MatchHistoryEntryCard(historyEntry: entry.value),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MatchHistoryEntryCard extends StatelessWidget {
+  const _MatchHistoryEntryCard({
+    required this.historyEntry,
+  });
+
+  final CareerPlayerMatchHistoryEntry historyEntry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  historyEntry.tournamentName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text('Saison ${historyEntry.seasonNumber}'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${historyEntry.resultLabel} gegen ${historyEntry.opponentName}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              _HistoryTag(label: historyEntry.roundLabel),
+              if (historyEntry.scoreText.trim().isNotEmpty)
+                _HistoryTag(label: historyEntry.scoreText),
+              _HistoryTag(label: 'Avg ${historyEntry.average.toStringAsFixed(1)}'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HistoryEntryCard extends StatelessWidget {
   const _HistoryEntryCard({
     required this.historyEntry,
@@ -525,32 +737,45 @@ class _MetricCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.width,
+    this.onTap,
   });
 
   final String title;
   final String value;
   final double width;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: width,
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                title,
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                value,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-            ],
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  value,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                if (onTap != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Antippen fuer Details',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

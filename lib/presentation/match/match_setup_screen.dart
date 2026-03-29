@@ -94,6 +94,14 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
     while (_customComputerAverageControllers.length > _computerOpponents) {
       _customComputerAverageControllers.removeLast().dispose();
     }
+
+    for (var index = 0; index < _selectedComputerIds.length; index += 1) {
+      final selectedValue = _selectedComputerIds[index];
+      if (selectedValue != null &&
+          selectedValue.startsWith('__custom_computer__')) {
+        _selectedComputerIds[index] = _customComputerValue(index);
+      }
+    }
   }
 
   String _customComputerValue(int index) => '__custom_computer__$index';
@@ -108,6 +116,10 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
         _computerOpponents += 1;
       }
       _syncSelections();
+      if (!isHuman) {
+        final newIndex = _computerOpponents - 1;
+        _selectedComputerIds[newIndex] = _customComputerValue(newIndex);
+      }
     });
   }
 
@@ -262,7 +274,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
         participants.add(
           MatchParticipantConfig(
             id: customId,
-            name: 'Computer ${computerIndex + 1}',
+            name: 'Build Your Opponent ${computerIndex + 1}',
             isHuman: false,
             startingScore:
                 isX01 ? int.tryParse(_scoreControllerFor(customId).text.trim()) : null,
@@ -382,7 +394,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             if (id == _customComputerValue(entry.key)) {
               return (
                 id: 'custom-computer-${entry.key}',
-                name: 'Computer ${entry.key + 1}',
+                name: 'Build Your Opponent ${entry.key + 1}',
               );
             }
             return computerRepository.players
@@ -585,7 +597,9 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                       ),
                                       DropdownMenuItem<String>(
                                         value: customValue,
-                                        child: const Text('Freier Computer (Average waehlen)'),
+                                        child: const Text(
+                                          'Build Your Opponent',
+                                        ),
                                       ),
                                     ],
                                     onChanged: (value) {
@@ -611,8 +625,10 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                   decimal: true,
                                 ),
                                 decoration: const InputDecoration(
-                                  labelText: 'Average',
+                                  labelText: 'Theoretischer Average',
                                   suffixText: 'Avg',
+                                  helperText:
+                                      'Gib den theoretischen 3-Dart-Average ein.',
                                 ),
                               ),
                             ],

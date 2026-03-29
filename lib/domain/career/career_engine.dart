@@ -360,6 +360,10 @@ class CareerEngine {
     Map<String, String> playerResultLabels = const <String, String>{},
     Map<String, CareerX01PlayerStats> playerX01Stats =
         const <String, CareerX01PlayerStats>{},
+    List<CareerNineDarterEvent> nineDarterEvents =
+        const <CareerNineDarterEvent>[],
+    List<CareerMatchHistoryEvent> matchHistoryEvents =
+        const <CareerMatchHistoryEvent>[],
   }) {
     if (career.currentSeason.completedItemIds.contains(item.id)) {
       return career;
@@ -393,6 +397,8 @@ class CareerEngine {
           playerPayouts: playerPayouts,
           playerResultLabels: playerResultLabels,
           playerX01Stats: playerX01Stats,
+          nineDarterEvents: nineDarterEvents,
+          matchHistoryEvents: matchHistoryEvents,
           countsForRankingIds: item.countsForRankingIds,
         ),
       ],

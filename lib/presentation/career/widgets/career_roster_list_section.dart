@@ -50,19 +50,25 @@ class CareerRosterListSection extends StatelessWidget {
             'Noch kein eigener Karriere-Kader angelegt. Solange leer, nutzt die Karriere weiter die komplette Computerdatenbank.',
           )
         else ...<Widget>[
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              Expanded(
-                child: Text(
-                  '${selectedPlayerIds.length} Karriere-Spieler ausgewaehlt',
-                ),
+              Text(
+                '${selectedPlayerIds.length} Karriere-Spieler ausgewaehlt',
               ),
-              TextButton(
+              OutlinedButton.icon(
                 onPressed: onToggleSelectAll,
-                child: Text(
+                icon: Icon(
+                  selectedPlayerIds.length == players.length
+                      ? Icons.deselect
+                      : Icons.select_all,
+                ),
+                label: Text(
                   selectedPlayerIds.length == players.length
                       ? 'Auswahl leeren'
-                      : 'Alle waehlen',
+                      : 'Alle auswaehlen',
                 ),
               ),
             ],

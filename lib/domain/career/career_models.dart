@@ -1461,6 +1461,8 @@ class CareerCompletedTournament {
     this.playerPayouts = const <String, int>{},
     this.playerResultLabels = const <String, String>{},
     this.playerX01Stats = const <String, CareerX01PlayerStats>{},
+    this.nineDarterEvents = const <CareerNineDarterEvent>[],
+    this.matchHistoryEvents = const <CareerMatchHistoryEvent>[],
     required this.countsForRankingIds,
   });
 
@@ -1480,6 +1482,8 @@ class CareerCompletedTournament {
   final Map<String, int> playerPayouts;
   final Map<String, String> playerResultLabels;
   final Map<String, CareerX01PlayerStats> playerX01Stats;
+  final List<CareerNineDarterEvent> nineDarterEvents;
+  final List<CareerMatchHistoryEvent> matchHistoryEvents;
   final List<String> countsForRankingIds;
 
   Map<String, dynamic> toJson() {
@@ -1502,6 +1506,10 @@ class CareerCompletedTournament {
         'playerX01Stats': playerX01Stats.map(
           (key, value) => MapEntry(key, value.toJson()),
         ),
+        'nineDarterEvents':
+            nineDarterEvents.map((entry) => entry.toJson()).toList(),
+        'matchHistoryEvents':
+            matchHistoryEvents.map((entry) => entry.toJson()).toList(),
         'countsForRankingIds': countsForRankingIds,
       };
     }
@@ -1544,12 +1552,132 @@ class CareerCompletedTournament {
                     ),
                   ),
                 ),
+        nineDarterEvents:
+            (json['nineDarterEvents'] as List<dynamic>? ?? const <dynamic>[])
+                .map(
+                  (entry) => CareerNineDarterEvent.fromJson(
+                    (entry as Map).cast<String, dynamic>(),
+                  ),
+                )
+                .toList(),
+        matchHistoryEvents:
+            (json['matchHistoryEvents'] as List<dynamic>? ?? const <dynamic>[])
+                .map(
+                  (entry) => CareerMatchHistoryEvent.fromJson(
+                    (entry as Map).cast<String, dynamic>(),
+                  ),
+                )
+                .toList(),
         countsForRankingIds:
             (json['countsForRankingIds'] as List<dynamic>? ?? const <dynamic>[])
                 .cast<String>(),
       );
     }
   }
+
+class CareerMatchHistoryEvent {
+  const CareerMatchHistoryEvent({
+    required this.playerId,
+    required this.playerName,
+    required this.opponentId,
+    required this.opponentName,
+    required this.seasonNumber,
+    required this.tournamentName,
+    required this.roundLabel,
+    required this.scoreText,
+    required this.resultLabel,
+    required this.average,
+  });
+
+  final String playerId;
+  final String playerName;
+  final String opponentId;
+  final String opponentName;
+  final int seasonNumber;
+  final String tournamentName;
+  final String roundLabel;
+  final String scoreText;
+  final String resultLabel;
+  final double average;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'playerId': playerId,
+      'playerName': playerName,
+      'opponentId': opponentId,
+      'opponentName': opponentName,
+      'seasonNumber': seasonNumber,
+      'tournamentName': tournamentName,
+      'roundLabel': roundLabel,
+      'scoreText': scoreText,
+      'resultLabel': resultLabel,
+      'average': average,
+    };
+  }
+
+  static CareerMatchHistoryEvent fromJson(Map<String, dynamic> json) {
+    return CareerMatchHistoryEvent(
+      playerId: json['playerId'] as String? ?? '',
+      playerName: json['playerName'] as String? ?? '',
+      opponentId: json['opponentId'] as String? ?? '',
+      opponentName: json['opponentName'] as String? ?? 'Unbekannter Gegner',
+      seasonNumber: (json['seasonNumber'] as num?)?.toInt() ?? 0,
+      tournamentName: json['tournamentName'] as String? ?? '',
+      roundLabel: json['roundLabel'] as String? ?? 'Unbekannte Runde',
+      scoreText: json['scoreText'] as String? ?? '',
+      resultLabel: json['resultLabel'] as String? ?? 'Offen',
+      average: (json['average'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class CareerNineDarterEvent {
+  const CareerNineDarterEvent({
+    required this.playerId,
+    required this.playerName,
+    required this.seasonNumber,
+    required this.tournamentName,
+    required this.roundLabel,
+    required this.opponentId,
+    required this.opponentName,
+    required this.scoreText,
+  });
+
+  final String playerId;
+  final String playerName;
+  final int seasonNumber;
+  final String tournamentName;
+  final String roundLabel;
+  final String opponentId;
+  final String opponentName;
+  final String scoreText;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'playerId': playerId,
+      'playerName': playerName,
+      'seasonNumber': seasonNumber,
+      'tournamentName': tournamentName,
+      'roundLabel': roundLabel,
+      'opponentId': opponentId,
+      'opponentName': opponentName,
+      'scoreText': scoreText,
+    };
+  }
+
+  static CareerNineDarterEvent fromJson(Map<String, dynamic> json) {
+    return CareerNineDarterEvent(
+      playerId: json['playerId'] as String,
+      playerName: json['playerName'] as String,
+      seasonNumber: (json['seasonNumber'] as num).toInt(),
+      tournamentName: json['tournamentName'] as String,
+      roundLabel: json['roundLabel'] as String? ?? 'Unbekannte Runde',
+      opponentId: json['opponentId'] as String? ?? '',
+      opponentName: json['opponentName'] as String? ?? 'Unbekannter Gegner',
+      scoreText: json['scoreText'] as String? ?? '',
+    );
+  }
+}
 
 class CareerX01PlayerStats {
   const CareerX01PlayerStats({
@@ -1595,6 +1723,7 @@ class CareerX01PlayerStats {
     this.decidingLegDarts = 0,
     this.decidingLegsPlayed = 0,
     this.decidingLegsWon = 0,
+    this.won9Darters = 0,
     this.won12Darters = 0,
     this.won15Darters = 0,
     this.won18Darters = 0,
@@ -1642,6 +1771,7 @@ class CareerX01PlayerStats {
   final int decidingLegDarts;
   final int decidingLegsPlayed;
   final int decidingLegsWon;
+  final int won9Darters;
   final int won12Darters;
   final int won15Darters;
   final int won18Darters;
@@ -1682,6 +1812,7 @@ class CareerX01PlayerStats {
       ? 0
       : (decidingLegsWon / decidingLegsPlayed) * 100;
   double get score180sPerLeg => legsPlayed <= 0 ? 0 : scores180 / legsPlayed;
+  double get won9DarterQuote => legsWon <= 0 ? 0 : (won9Darters / legsWon) * 100;
   double get won12DarterQuote => legsWon <= 0 ? 0 : (won12Darters / legsWon) * 100;
   double get won15DarterQuote => legsWon <= 0 ? 0 : (won15Darters / legsWon) * 100;
   double get won18DarterQuote => legsWon <= 0 ? 0 : (won18Darters / legsWon) * 100;
@@ -1729,6 +1860,7 @@ class CareerX01PlayerStats {
     int? decidingLegDarts,
     int? decidingLegsPlayed,
     int? decidingLegsWon,
+    int? won9Darters,
     int? won12Darters,
     int? won15Darters,
     int? won18Darters,
@@ -1786,6 +1918,7 @@ class CareerX01PlayerStats {
       decidingLegDarts: decidingLegDarts ?? this.decidingLegDarts,
       decidingLegsPlayed: decidingLegsPlayed ?? this.decidingLegsPlayed,
       decidingLegsWon: decidingLegsWon ?? this.decidingLegsWon,
+      won9Darters: won9Darters ?? this.won9Darters,
       won12Darters: won12Darters ?? this.won12Darters,
       won15Darters: won15Darters ?? this.won15Darters,
       won18Darters: won18Darters ?? this.won18Darters,
@@ -1848,6 +1981,7 @@ class CareerX01PlayerStats {
       decidingLegDarts: decidingLegDarts + other.decidingLegDarts,
       decidingLegsPlayed: decidingLegsPlayed + other.decidingLegsPlayed,
       decidingLegsWon: decidingLegsWon + other.decidingLegsWon,
+      won9Darters: won9Darters + other.won9Darters,
       won12Darters: won12Darters + other.won12Darters,
       won15Darters: won15Darters + other.won15Darters,
       won18Darters: won18Darters + other.won18Darters,
@@ -1898,6 +2032,7 @@ class CareerX01PlayerStats {
       'decidingLegDarts': decidingLegDarts,
       'decidingLegsPlayed': decidingLegsPlayed,
       'decidingLegsWon': decidingLegsWon,
+      'won9Darters': won9Darters,
       'won12Darters': won12Darters,
       'won15Darters': won15Darters,
       'won18Darters': won18Darters,
@@ -1905,12 +2040,22 @@ class CareerX01PlayerStats {
   }
 
   static CareerX01PlayerStats fromJson(Map<String, dynamic> json) {
+    final pointsScored = (json['pointsScored'] as num?)?.toInt() ?? 0;
+    final dartsThrown = (json['dartsThrown'] as num?)?.toInt() ?? 0;
+    final legsPlayed = (json['legsPlayed'] as num?)?.toInt() ?? 0;
+    final normalizedFirstNine = _normalizeFirstNineSample(
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
+      legsPlayed: legsPlayed,
+      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
+      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+    );
     return CareerX01PlayerStats(
-      pointsScored: (json['pointsScored'] as num?)?.toInt() ?? 0,
-      dartsThrown: (json['dartsThrown'] as num?)?.toInt() ?? 0,
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
       visits: (json['visits'] as num?)?.toInt() ?? 0,
       legsWon: (json['legsWon'] as num?)?.toInt() ?? 0,
-      legsPlayed: (json['legsPlayed'] as num?)?.toInt() ?? 0,
+      legsPlayed: legsPlayed,
       legsStarted: (json['legsStarted'] as num?)?.toInt() ?? 0,
       legsWonAsStarter: (json['legsWonAsStarter'] as num?)?.toInt() ?? 0,
       legsWonWithoutStarter:
@@ -1946,8 +2091,8 @@ class CareerX01PlayerStats {
           (json['functionalDoubleAttempts'] as num?)?.toInt() ?? 0,
       functionalDoubleSuccesses:
           (json['functionalDoubleSuccesses'] as num?)?.toInt() ?? 0,
-      firstNinePoints: (json['firstNinePoints'] as num?)?.toDouble() ?? 0,
-      firstNineDarts: (json['firstNineDarts'] as num?)?.toInt() ?? 0,
+      firstNinePoints: normalizedFirstNine.points,
+      firstNineDarts: normalizedFirstNine.darts,
       highestFinish: (json['highestFinish'] as num?)?.toInt() ?? 0,
       bestLegDarts: (json['bestLegDarts'] as num?)?.toInt() ?? 0,
       totalFinishValue: (json['totalFinishValue'] as num?)?.toInt() ?? 0,
@@ -1960,10 +2105,34 @@ class CareerX01PlayerStats {
       decidingLegsPlayed:
           (json['decidingLegsPlayed'] as num?)?.toInt() ?? 0,
       decidingLegsWon: (json['decidingLegsWon'] as num?)?.toInt() ?? 0,
+      won9Darters: (json['won9Darters'] as num?)?.toInt() ?? 0,
       won12Darters: (json['won12Darters'] as num?)?.toInt() ?? 0,
       won15Darters: (json['won15Darters'] as num?)?.toInt() ?? 0,
       won18Darters: (json['won18Darters'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  static ({double points, int darts}) _normalizeFirstNineSample({
+    required int pointsScored,
+    required int dartsThrown,
+    required int legsPlayed,
+    required double firstNinePoints,
+    required int firstNineDarts,
+  }) {
+    final safePoints = firstNinePoints < 0 ? 0.0 : firstNinePoints;
+    final safeDarts = firstNineDarts < 0 ? 0 : firstNineDarts;
+    final maxFirstNineDarts = legsPlayed <= 0
+        ? dartsThrown
+        : ((legsPlayed * 9) < dartsThrown ? (legsPlayed * 9) : dartsThrown);
+    final legacyTotalSample = safeDarts == dartsThrown &&
+        safePoints == pointsScored.toDouble() &&
+        dartsThrown > maxFirstNineDarts;
+    final impossibleSample =
+        safeDarts > maxFirstNineDarts || safePoints > pointsScored;
+    if (legacyTotalSample || impossibleSample) {
+      return (points: 0.0, darts: 0);
+    }
+    return (points: safePoints, darts: safeDarts);
   }
 
   static int _mergeBestLegDarts(int left, int right) {
