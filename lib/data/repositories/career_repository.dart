@@ -262,13 +262,14 @@ class CareerRepository extends ChangeNotifier {
     );
     normalizedPlayers.add(
       CareerDatabasePlayer(
-        databasePlayerId: human.id,
-        name: human.name,
-        average: human.average,
-        skill: resolution.skill,
-        finishingSkill: resolution.finishingSkill,
-        careerTags: <CareerPlayerTag>[
-          ...List<CareerPlayerTag>.from(inheritedTags),
+          databasePlayerId: human.id,
+          name: human.name,
+          average: human.average,
+          skill: resolution.skill,
+          finishingSkill: resolution.finishingSkill,
+          nationality: human.nationality,
+          careerTags: <CareerPlayerTag>[
+            ...List<CareerPlayerTag>.from(inheritedTags),
           ...nationalityTags
               .where(
                 (tag) => !inheritedTags.any(
@@ -424,6 +425,38 @@ class CareerRepository extends ChangeNotifier {
     _invalidateDerivedDataCaches();
     notifyListeners();
     unawaited(_persist());
+  }
+
+  void clearActiveCareer() {
+    _activeCareerId = null;
+    _invalidateDerivedDataCaches();
+    notifyListeners();
+    unawaited(_persist());
+  }
+
+  void updateCareerBasics({
+    required String name,
+    required CareerParticipantMode participantMode,
+    String? playerProfileId,
+    bool replaceWeakestPlayerWithHuman = false,
+  }) {
+    final career = activeCareer;
+    if (career == null) {
+      return;
+    }
+    _replaceCareer(
+      career.copyWith(
+        name: name.trim().isEmpty ? career.name : name.trim(),
+        participantMode: participantMode,
+        playerProfileId: participantMode == CareerParticipantMode.withHuman
+            ? playerProfileId
+            : null,
+        clearPlayerProfileId: participantMode != CareerParticipantMode.withHuman,
+        replaceWeakestPlayerWithHuman:
+            participantMode == CareerParticipantMode.withHuman &&
+                replaceWeakestPlayerWithHuman,
+      ),
+    );
   }
 
   void deleteCareer(String careerId) {
@@ -752,7 +785,8 @@ class CareerRepository extends ChangeNotifier {
   void addCalendarItem({
       String? itemId,
       required String name,
-    TournamentGame game = TournamentGame.x01,
+      int tier = 1,
+      TournamentGame game = TournamentGame.x01,
     TournamentFormat format = TournamentFormat.knockout,
     required int fieldSize,
     MatchMode matchMode = MatchMode.legs,
@@ -797,9 +831,10 @@ class CareerRepository extends ChangeNotifier {
     }
 
     final item = CareerCalendarItem(
-      id: itemId ?? 'calendar-${DateTime.now().microsecondsSinceEpoch}',
-      name: name.trim(),
-      game: game,
+        id: itemId ?? 'calendar-${DateTime.now().microsecondsSinceEpoch}',
+        name: name.trim(),
+        tier: tier,
+        game: game,
       format: format,
       fieldSize: fieldSize,
       matchMode: matchMode,
@@ -844,9 +879,10 @@ class CareerRepository extends ChangeNotifier {
   }
 
   void updateCalendarItem({
-    required String itemId,
-    required String name,
-    TournamentGame game = TournamentGame.x01,
+      required String itemId,
+      required String name,
+      int tier = 1,
+      TournamentGame game = TournamentGame.x01,
     TournamentFormat format = TournamentFormat.knockout,
     required int fieldSize,
     MatchMode matchMode = MatchMode.legs,
@@ -891,9 +927,10 @@ class CareerRepository extends ChangeNotifier {
     }
 
     final item = CareerCalendarItem(
-      id: itemId,
-      name: name.trim(),
-      game: game,
+        id: itemId,
+        name: name.trim(),
+        tier: tier,
+        game: game,
       format: format,
       fieldSize: fieldSize,
       matchMode: matchMode,
@@ -1346,6 +1383,7 @@ class CareerRepository extends ChangeNotifier {
               playerName: stats.participantName,
               opponentId: opponent?.id ?? '',
               opponentName: opponent?.name ?? 'Unbekannter Gegner',
+              opponentTheoAverage: opponent?.average,
               seasonNumber: seasonNumber,
               tournamentName: tournamentName,
               roundLabel: round.title,

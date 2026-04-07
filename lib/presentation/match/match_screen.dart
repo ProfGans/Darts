@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/background/simulation_service.dart';
 import '../../data/models/player_profile.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
@@ -424,6 +425,7 @@ class _MatchScreenState extends State<MatchScreen> {
   bool _showScoreStats = false;
   bool _showVisitLogOverlay = false;
   final Set<String> _expandedParticipantStats = <String>{};
+  final Map<String, String?> _routeSuggestionCache = <String, String?>{};
   String _status = '';
   String _currentInput = '';
   final List<String> _visitLog = <String>[];
@@ -448,6 +450,7 @@ class _MatchScreenState extends State<MatchScreen> {
       matchEngine: _matchEngine,
       botEngine: _botEngine,
     );
+    SimulationService.instance.applyToX01MatchSimulator(_matchSimulator);
     _checkoutPlanner = CheckoutPlanner();
     _participants = widget.session.participants
         .map(
@@ -714,6 +717,17 @@ class _MatchScreenState extends State<MatchScreen> {
     final requiresDoubleIn =
         widget.session.matchConfig.startRequirement == StartRequirement.doubleIn &&
             !participant.hasOpenedLeg;
+    if (!_matchEngine.rules.isAchievableVisitScore(
+      value,
+      requireDoubleInStart: requiresDoubleIn,
+    )) {
+      _showInfo(
+        requiresDoubleIn
+            ? 'Dieser Gesamtwert ist als Double-in-Aufnahme in bis zu 3 Darts nicht moeglich.'
+            : 'Dieser Gesamtwert ist als X01-Aufnahme in bis zu 3 Darts nicht moeglich.',
+      );
+      return;
+    }
     if (value == participant.score && value > 1) {
       final checkoutDetails = await _showManualCheckoutDialog(participant.score);
       if (!mounted || checkoutDetails == null) {
@@ -725,6 +739,7 @@ class _MatchScreenState extends State<MatchScreen> {
         score: participant.score,
         dartsUsed: checkoutDetails.dartsUsed,
         finishType: checkoutDetails.finishType,
+        requireOpeningDouble: requiresDoubleIn,
       )) {
         _showInfo('Diese Checkout-Kombination ist fuer den Restscore nicht moeglich.');
         return;
@@ -758,7 +773,10 @@ class _MatchScreenState extends State<MatchScreen> {
       }
 
       final remaining = participant.score - value;
-      final didBust = remaining < 0 || remaining == 1;
+      final didBust = remaining < 0 ||
+          (remaining == 1 &&
+              widget.session.matchConfig.checkoutRequirement !=
+                  CheckoutRequirement.singleOut);
       final visitResult = VisitResult(
         throws: const <DartThrowResult>[],
         scoredPoints: didBust ? 0 : value,
@@ -788,7 +806,10 @@ class _MatchScreenState extends State<MatchScreen> {
     }
 
     final remaining = participant.score - value;
-    if (remaining < 0 || remaining == 1) {
+    if (remaining < 0 ||
+        (remaining == 1 &&
+            widget.session.matchConfig.checkoutRequirement !=
+                CheckoutRequirement.singleOut)) {
       final visitResult = VisitResult(
         throws: const <DartThrowResult>[],
         scoredPoints: 0,
@@ -1119,6 +1140,7 @@ class _MatchScreenState extends State<MatchScreen> {
               (entry) => MatchParticipantStats(
               participantId: entry.config.id,
               participantName: entry.config.name,
+              isHuman: entry.config.isHuman,
               pointsScored: entry.pointsScored,
               dartsThrown: entry.dartsThrown,
               visits: entry.visits,
@@ -1490,9 +1512,12 @@ class _MatchScreenState extends State<MatchScreen> {
     return showModalBottomSheet<_ManualCheckoutDetails>(
       context: context,
       builder: (context) {
-        var selectedDartsUsed = 3;
-        var selectedDoubleAttempts = 1;
-        _ManualFinishType selectedFinishType = _ManualFinishType.doubleValue;
+        var selectedDartsUsed = _checkoutOpportunityDarts(score) ?? 3;
+        _ManualFinishType selectedFinishType =
+            _preferredManualFinishTypeForScore(score) ??
+                _ManualFinishType.doubleValue;
+        var selectedDoubleAttempts =
+            _minimumDoubleAttemptsForFinishType(selectedFinishType);
         return StatefulBuilder(
           builder: (context, setModalState) {
             final finishTypes = _allowedManualFinishTypes();
@@ -1695,6 +1720,113 @@ class _MatchScreenState extends State<MatchScreen> {
     }
   }
 
+  int _minimumDoubleAttemptsForFinishType(_ManualFinishType finishType) {
+    return switch (finishType) {
+      _ManualFinishType.single => 0,
+      _ManualFinishType.triple => 0,
+      _ManualFinishType.doubleValue || _ManualFinishType.bull => 1,
+    };
+  }
+
+  _ManualFinishType? _preferredManualFinishTypeForScore(int score) {
+    final route = _checkoutPlanner.bestFinishRoute(
+      score: score,
+      dartsLeft: 3,
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+    );
+    if (route == null || route.isEmpty) {
+      return null;
+    }
+
+    final finalThrow = route.last;
+    if (finalThrow.isBull) {
+      return _ManualFinishType.bull;
+    }
+    if (finalThrow.isTriple) {
+      return _ManualFinishType.triple;
+    }
+    if (finalThrow.isDouble) {
+      return _ManualFinishType.doubleValue;
+    }
+    return _ManualFinishType.single;
+  }
+
+  bool _canCheckoutFromScore({
+    required int score,
+    required bool requireOpeningDouble,
+  }) {
+    if (score <= 0) {
+      return false;
+    }
+
+    for (var dartsLeft = 1; dartsLeft <= 3; dartsLeft += 1) {
+      final routes = _checkoutPlanner.allCheckoutRoutes(
+        score: score,
+        dartsLeft: dartsLeft,
+        checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      );
+      if (routes.any((route) {
+        if (route.isEmpty) {
+          return false;
+        }
+        if (requireOpeningDouble &&
+            !route.first.matchesStartRequirement(StartRequirement.doubleIn)) {
+          return false;
+        }
+        return true;
+      })) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool get _isCheckoutHotkeyAvailable {
+    if (!_isHumanTurn || _matchFinished) {
+      return false;
+    }
+
+    return _canCheckoutFromScore(
+      score: _currentParticipant.score,
+      requireOpeningDouble:
+          widget.session.matchConfig.startRequirement == StartRequirement.doubleIn &&
+              !_currentParticipant.hasOpenedLeg,
+    );
+  }
+
+  Future<void> _triggerCheckoutHotkey() async {
+    if (!_isCheckoutHotkeyAvailable) {
+      return;
+    }
+
+    final participant = _currentParticipant;
+    if (participant.score == 1 &&
+        widget.session.matchConfig.checkoutRequirement ==
+            CheckoutRequirement.singleOut) {
+      final visitResult = VisitResult(
+        throws: const <DartThrowResult>[],
+        scoredPoints: 1,
+        didBust: false,
+        remainingScore: 0,
+        openedLeg: true,
+      );
+      _applyVisit(
+        participant: participant,
+        visitResult: visitResult,
+        throws: const <DartThrowResult>[],
+        startScore: participant.score,
+        manualDescription: '1 Checkout in 1 Dart',
+        manualDartsUsed: 1,
+        manualDoubleAttempts: 0,
+        finishingThrow: _matchEngine.rules.createSingle(1),
+      );
+      return;
+    }
+
+    await _submitHumanScoreValue(valueOverride: participant.score);
+  }
+
   DartThrowResult _sampleThrowForFinishType(_ManualFinishType finishType) {
     return switch (finishType) {
       _ManualFinishType.single => _matchEngine.rules.createSingle(1),
@@ -1708,20 +1840,28 @@ class _MatchScreenState extends State<MatchScreen> {
     required int score,
     required int dartsUsed,
     required _ManualFinishType finishType,
+    required bool requireOpeningDouble,
   }) {
-    final route = _checkoutPlanner.bestFinishRouteForFinishType(
+    final routes = _checkoutPlanner.allCheckoutRoutes(
       score: score,
       dartsLeft: dartsUsed,
       checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-      matcherKey: finishType.name,
-      matcher: (lastThrow) => switch (finishType) {
-        _ManualFinishType.single => lastThrow.isFinishSingle,
-        _ManualFinishType.doubleValue => lastThrow.isDouble,
-        _ManualFinishType.triple => lastThrow.isTriple,
-        _ManualFinishType.bull => lastThrow.isBull,
-      },
     );
-    return route != null && route.isNotEmpty;
+    return routes.any((route) {
+      if (route.isEmpty) {
+        return false;
+      }
+      if (requireOpeningDouble &&
+          !route.first.matchesStartRequirement(StartRequirement.doubleIn)) {
+        return false;
+      }
+      return switch (finishType) {
+        _ManualFinishType.single => route.last.isFinishSingle,
+        _ManualFinishType.doubleValue => route.last.isDouble,
+        _ManualFinishType.triple => route.last.isTriple,
+        _ManualFinishType.bull => route.last.isBull,
+      };
+    });
   }
 
   void _recordMilestones({
@@ -2202,11 +2342,18 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 
   String? _participantRouteSuggestion(_ParticipantRuntime participant) {
+    final cacheKey = '${participant.score}|${participant.hasOpenedLeg}|'
+        '${widget.session.matchConfig.checkoutRequirement.name}|'
+        '$_matchFinished|$_isBullOffActive';
+    if (_routeSuggestionCache.containsKey(cacheKey)) {
+      return _routeSuggestionCache[cacheKey];
+    }
+
     if (_matchFinished ||
         _isBullOffActive ||
         !participant.hasOpenedLeg ||
         participant.score <= 1) {
-      return null;
+      return _routeSuggestionCache[cacheKey] = null;
     }
 
     final finishRoute = _bestCheckoutSuggestionRoute(
@@ -2214,8 +2361,9 @@ class _MatchScreenState extends State<MatchScreen> {
       dartsLeft: 3,
     );
     if (finishRoute != null && finishRoute.isNotEmpty) {
-      final routeText = finishRoute.take(3).map((entry) => entry.label).join(' - ');
-      return '$routeText -> Finish';
+      final routeText =
+          finishRoute.take(3).map((entry) => entry.label).join(' - ');
+      return _routeSuggestionCache[cacheKey] = '$routeText -> Finish';
     }
 
     if (participant.score > 230) {
@@ -2226,7 +2374,8 @@ class _MatchScreenState extends State<MatchScreen> {
       if (setupOption != null && setupOption.setupRoute.isNotEmpty) {
         final routeText =
             setupOption.setupRoute.take(3).map((entry) => entry.label).join(' - ');
-        return '$routeText -> Rest ${setupOption.remainingScore}';
+        return _routeSuggestionCache[cacheKey] =
+            '$routeText -> Rest ${setupOption.remainingScore}';
       }
     }
 
@@ -2243,7 +2392,7 @@ class _MatchScreenState extends State<MatchScreen> {
 
     final route = finishRoute ?? continuation?.throws;
     if (route == null || route.isEmpty) {
-      return null;
+      return _routeSuggestionCache[cacheKey] = null;
     }
     final routeText = route.take(3).map((entry) => entry.label).join(' - ');
     final resultingScore = participant.score -
@@ -2254,7 +2403,7 @@ class _MatchScreenState extends State<MatchScreen> {
     final outcomeText = resultingScore <= 0
         ? 'Finish'
         : 'Rest $resultingScore';
-    return '$routeText -> $outcomeText';
+    return _routeSuggestionCache[cacheKey] = '$routeText -> $outcomeText';
   }
 
   Widget _buildPadMetaTile({
@@ -2262,47 +2411,62 @@ class _MatchScreenState extends State<MatchScreen> {
     required String value,
     IconData? icon,
     bool disabled = false,
+    VoidCallback? onPressed,
   }) {
+    final isInteractive = !disabled && onPressed != null;
     final foreground = disabled
         ? const Color(0xFF93A1AE)
-        : const Color(0xFF152C45);
-    return Container(
-      height: double.infinity,
-      decoration: BoxDecoration(
-        color: disabled ? const Color(0xFFE9EEF3) : const Color(0xFFE5EBF1),
+        : isInteractive
+            ? const Color(0xFF0B5E3C)
+            : const Color(0xFF152C45);
+    final background = disabled
+        ? const Color(0xFFE9EEF3)
+        : isInteractive
+            ? const Color(0xFFDDF3E7)
+            : const Color(0xFFE5EBF1);
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: isInteractive ? onPressed : null,
         borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          if (icon != null) ...<Widget>[
-            Icon(icon, size: 16, color: foreground),
-            const SizedBox(height: 4),
-          ],
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
+        child: SizedBox(
+          height: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                if (icon != null) ...<Widget>[
+                  Icon(icon, size: 16, color: foreground),
+                  const SizedBox(height: 4),
+                ],
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
                 ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w700,
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w700,
+                      ),
                 ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3120,6 +3284,7 @@ class _MatchScreenState extends State<MatchScreen> {
     required double spacing,
     required bool compact,
   }) {
+    final checkoutHotkeyAvailable = _isCheckoutHotkeyAvailable;
     return Row(
       children: <Widget>[
         Expanded(
@@ -3164,9 +3329,11 @@ class _MatchScreenState extends State<MatchScreen> {
         ),
         Expanded(
           child: _buildPadMetaTile(
-            title: 'REST',
+            title: checkoutHotkeyAvailable ? 'CHECK' : 'REST',
             value: '${_currentParticipant.score}',
+            icon: checkoutHotkeyAvailable ? Icons.flash_on_rounded : null,
             disabled: !_currentParticipant.config.isHuman,
+            onPressed: checkoutHotkeyAvailable ? _triggerCheckoutHotkey : null,
           ),
         ),
       ],

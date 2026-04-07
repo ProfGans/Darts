@@ -8,7 +8,7 @@ class CareerRankingsEditor extends StatelessWidget {
     super.key,
     required this.rankings,
     required this.rankingNameController,
-    required this.rankingValidSeasons,
+    required this.rankingValidSeasonsController,
     required this.rankingResetAtSeasonEnd,
     required this.editingRankingId,
     required this.onValidSeasonsChanged,
@@ -21,7 +21,7 @@ class CareerRankingsEditor extends StatelessWidget {
 
   final List<CareerRankingDefinition> rankings;
   final TextEditingController rankingNameController;
-  final int rankingValidSeasons;
+  final TextEditingController rankingValidSeasonsController;
   final bool rankingResetAtSeasonEnd;
   final String? editingRankingId;
   final ValueChanged<int> onValidSeasonsChanged;
@@ -47,27 +47,22 @@ class CareerRankingsEditor extends StatelessWidget {
           decoration: const InputDecoration(labelText: 'Name der Rangliste'),
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<int>(
-          key: ValueKey<int>(rankingValidSeasons),
-          initialValue: rankingValidSeasons,
+        TextField(
+          controller: rankingValidSeasonsController,
+          keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Gueltig ueber Saisons',
-          ),
-          items: List<DropdownMenuItem<int>>.generate(
-            5,
-            (index) => DropdownMenuItem<int>(
-              value: index + 1,
-              child: Text('${index + 1}'),
-            ),
+            helperText: 'Frei eingebbar, z. B. 1, 2, 5 oder 10',
           ),
           onChanged: (value) {
-            if (value != null) {
-              onValidSeasonsChanged(value);
+            final parsed = int.tryParse(value.trim());
+            if (parsed != null && parsed > 0) {
+              onValidSeasonsChanged(parsed);
             }
           },
         ),
-        const SizedBox(height: 12),
-        SwitchListTile(
+        const SizedBox(height: 16),
+        SwitchListTile.adaptive(
           contentPadding: EdgeInsets.zero,
           value: rankingResetAtSeasonEnd,
           onChanged: onResetAtSeasonEndChanged,

@@ -1,10 +1,12 @@
 import 'dart:ui';
+import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
 import 'app/app.dart';
 import 'data/debug/app_debug.dart';
 import 'data/app_bootstrap.dart';
+import 'data/background/simulation_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,4 +44,9 @@ Future<void> main() async {
     rethrow;
   }
   runApp(const DartFlutterApp());
+  unawaited(
+    SimulationService.instance.startWarmupIfNeeded().catchError((Object error) {
+      AppDebug.instance.error('Warmup', error.toString());
+    }),
+  );
 }

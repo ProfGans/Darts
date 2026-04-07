@@ -48,6 +48,7 @@ class CareerPlayerMatchHistoryEntry {
     required this.tournamentName,
     required this.roundLabel,
     required this.opponentName,
+    this.opponentTheoAverage,
     required this.resultLabel,
     required this.scoreText,
     required this.average,
@@ -57,6 +58,7 @@ class CareerPlayerMatchHistoryEntry {
   final String tournamentName;
   final String roundLabel;
   final String opponentName;
+  final double? opponentTheoAverage;
   final String resultLabel;
   final String scoreText;
   final double average;
@@ -254,6 +256,7 @@ class CareerStatisticsEngine {
               tournamentName: matchEntry.tournamentName,
               roundLabel: matchEntry.roundLabel,
               opponentName: matchEntry.opponentName,
+              opponentTheoAverage: matchEntry.opponentTheoAverage,
               resultLabel: matchEntry.resultLabel,
               scoreText: matchEntry.scoreText,
               average: matchEntry.average,

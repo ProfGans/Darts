@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/computer_player.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/tournament_repository.dart';
+import '../../domain/tournament/tournament_models.dart';
 import 'tournament_basics_form.dart';
 import 'tournament_bracket_screen.dart';
 import 'tournament_form_models.dart';
@@ -29,6 +30,7 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
     legsValue: 3,
   );
   bool _includeHumanPlayer = true;
+  bool _showValidation = false;
   List<String> _selectedComputerIds = <String>[];
   String? _selectedComputerPresetId;
 
@@ -42,6 +44,9 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
   }
 
   void _startTournament() {
+    setState(() {
+      _showValidation = true;
+    });
     final fieldSize = _formData.parsedFieldSize;
     final startScore = _formData.parsedStartScore;
     if (fieldSize == null || fieldSize < 2 || startScore == null || startScore <= 1) {
@@ -307,13 +312,49 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
       _selectedComputerPresetId = null;
     }
     final selectedPlayers = _selectedPlayers(availablePlayers);
+    final fieldSize = _formData.parsedFieldSize;
+    final startScore = _formData.parsedStartScore;
+    final issues = <String>[
+      if (fieldSize == null || fieldSize < 2)
+        'Feldgroesse muss mindestens 2 sein.',
+      if (startScore == null || startScore <= 1)
+        'Startscore muss groesser als 1 sein.',
+      if (_nameController.text.trim().isEmpty)
+        'Vergib einen Turniernamen.',
+      if ((_tryParseAverage(_minimumAverageController.text) ?? 0) >
+          (_tryParseAverage(_maximumAverageController.text) ?? 180))
+        'Min- und Max-Average passen noch nicht zusammen.',
+    ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Turnier Setup'),
+        title: const Text('Turnier konfigurieren'),
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (_showValidation && issues.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  issues.first,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF8C2F39),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+            FilledButton(
+              onPressed: _startTournament,
+              child: const Text('Turnier starten'),
+            ),
+          ],
+        ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 160),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
@@ -327,6 +368,75 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
                       'Turnier erstellen',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F8FB),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: <Widget>[
+                              _TournamentInfoPill(
+                                label:
+                                    '${fieldSize ?? '-'} Teilnehmer',
+                              ),
+                              _TournamentInfoPill(
+                                label: _formData.format == TournamentFormat.knockout
+                                    ? 'KO'
+                                    : _formData.format == TournamentFormat.league
+                                        ? 'Liga'
+                                        : 'Liga + Playoff',
+                              ),
+                              _TournamentInfoPill(
+                                label: 'Start $startScore',
+                              ),
+                              _TournamentInfoPill(
+                                label: '${selectedPlayers.length} feste CPU',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            issues.isEmpty
+                                ? 'Die Grunddaten sind komplett. Jetzt noch Feld und CPU-Auswahl pruefen und direkt starten.'
+                                : 'Noch offen: ${issues.take(2).join(' ')}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: issues.isEmpty
+                                      ? const Color(0xFF365F4B)
+                                      : const Color(0xFF8C2F39),
+                                  height: 1.35,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_showValidation && issues.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF4F4),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: issues
+                              .map((issue) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Text('- $issue'),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     TournamentBasicsForm(
                       nameController: _nameController,
@@ -359,10 +469,17 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
                     TextField(
                       controller: _computerCountController,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Computergegner',
                         helperText:
                             'Wenn weniger Gegner verfuegbar sind, entstehen automatisch Freilose.',
+                        errorText: _showValidation &&
+                                (int.tryParse(_computerCountController.text.trim()) ==
+                                        null ||
+                                    int.parse(_computerCountController.text.trim()) <
+                                        0)
+                            ? 'Bitte eine gueltige Anzahl eingeben'
+                            : null,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -481,11 +598,6 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
                           );
                         }).toList(),
                       ),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _startTournament,
-                      child: const Text('Turnier starten'),
-                    ),
                   ],
                 ),
               ),
@@ -513,5 +625,28 @@ class _TournamentSetupScreenState extends State<TournamentSetupScreen> {
   double? _tryParseAverage(String input) {
     final normalized = input.trim().replaceAll(',', '.');
     return double.tryParse(normalized);
+  }
+}
+
+class _TournamentInfoPill extends StatelessWidget {
+  const _TournamentInfoPill({
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge,
+      ),
+    );
   }
 }

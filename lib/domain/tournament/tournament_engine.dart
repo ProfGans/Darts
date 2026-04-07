@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import '../../data/background/simulation_snapshot.dart';
 import '../bot/bot_engine.dart';
 import '../x01/x01_match_engine.dart';
 import '../x01/x01_match_simulator.dart';
@@ -14,10 +15,189 @@ class TournamentEngine {
         );
 
   final X01MatchSimulator _simulator;
+  bool _commonSimulationCachesPrepared = false;
 
   void resetPerformanceTotals() {
     _simulator.resetPerformanceTotals();
     _simulator.botEngine.resetPerformanceTotals();
+  }
+
+  bool get commonSimulationCachesPrepared => _commonSimulationCachesPrepared;
+
+  Map<String, Object?> exportDeterministicWarmupTables() {
+    return <String, Object?>{
+      'version': simulationWarmupSnapshotVersion,
+      'schema': simulationWarmupSnapshotSchema,
+      'appVersion': simulationWarmupSnapshotAppVersion,
+      'bot': _simulator.botEngine.exportDeterministicTables(),
+      'x01': _simulator.exportDeterministicTables(),
+    };
+  }
+
+  void importDeterministicWarmupTables(Map<String, Object?> json) {
+    final bot =
+        ((json['bot'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>();
+    final x01 =
+        ((json['x01'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>();
+    _simulator.botEngine.importDeterministicTables(bot);
+    _simulator.importDeterministicTables(x01);
+  }
+
+  Future<void> prepareCommonSimulationCaches({
+    required Iterable<BotProfile> profiles,
+    void Function(String label, double? progress)? onProgress,
+  }) async {
+    if (_commonSimulationCachesPrepared) {
+      return;
+    }
+    final prepProfiles = <BotProfile>[
+      const BotProfile(skill: 700, finishingSkill: 300),
+      const BotProfile(skill: 700, finishingSkill: 700),
+      ...profiles,
+    ];
+    final uniqueProfiles = _selectRepresentativeWarmupProfiles(prepProfiles);
+    final warmupScores = _buildWarmupScores();
+    final totalSteps = warmupScores.length.clamp(1, 1 << 30);
+    onProgress?.call('Simulationsdaten werden vorbereitet', 0);
+    await Future<void>.delayed(Duration.zero);
+    for (var index = 0; index < warmupScores.length; index += 1) {
+      final score = warmupScores[index];
+      for (var dartsLeft = 1; dartsLeft <= 3; dartsLeft += 1) {
+        for (final profile in uniqueProfiles) {
+          _simulator.botEngine.decideAim(
+            profile: profile,
+            score: score,
+            dartsRemaining: dartsLeft,
+          );
+        }
+      }
+      _simulator.botEngine.findPreferredLeaveTarget(score);
+      for (final checkoutRequirement in CheckoutRequirement.values) {
+        _simulator.warmCheckoutOpportunityCache(
+          score: score,
+          checkoutRequirement: checkoutRequirement,
+        );
+      }
+      if ((index + 1) % 6 == 0 || index == warmupScores.length - 1) {
+        onProgress?.call(
+          'Simulationsdaten werden vorbereitet (${index + 1}/$totalSteps)',
+          (index + 1) / totalSteps,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 2));
+      }
+    }
+    _warmReferenceMatches(uniqueProfiles);
+    _simulator.botEngine.compactSimulationCaches();
+    _commonSimulationCachesPrepared = true;
+    onProgress?.call('Simulationsdaten sind bereit', 1);
+  }
+
+  List<BotProfile> _selectRepresentativeWarmupProfiles(
+    Iterable<BotProfile> profiles,
+  ) {
+    final byBucket = <String, BotProfile>{};
+    for (final profile in profiles) {
+      final skillBucket = (profile.skill / 180).floor().clamp(0, 6);
+      final finishingBucket =
+          (profile.finishingSkill / 180).floor().clamp(0, 6);
+      final key =
+          '$skillBucket|$finishingBucket|${profile.radiusCalibrationPercent}|${profile.simulationSpreadPercent}';
+      byBucket.putIfAbsent(key, () => profile);
+      if (byBucket.length >= 3) {
+        break;
+      }
+    }
+    return byBucket.values.toList(growable: false);
+  }
+
+  List<int> _buildWarmupScores() {
+    const scores = <int>[
+      2,
+      4,
+      8,
+      16,
+      20,
+      24,
+      32,
+      36,
+      40,
+      48,
+      50,
+      56,
+      60,
+      61,
+      62,
+      64,
+      66,
+      68,
+      70,
+      72,
+      75,
+      78,
+      80,
+      81,
+      82,
+      85,
+      90,
+      95,
+      97,
+      99,
+      100,
+      101,
+      104,
+      107,
+      110,
+      115,
+      120,
+      121,
+      124,
+      127,
+      130,
+      132,
+      135,
+      138,
+      140,
+      145,
+      150,
+      155,
+      160,
+      164,
+      167,
+      170,
+    ];
+    return scores.toList(growable: false);
+  }
+
+  void _warmReferenceMatches(List<BotProfile> profiles) {
+    if (profiles.isEmpty) {
+      return;
+    }
+    final sampleProfile =
+        profiles.length > 1 ? profiles[profiles.length ~/ 2] : profiles.first;
+    const config = MatchConfig(
+      startScore: 501,
+      mode: MatchMode.legs,
+      checkoutRequirement: CheckoutRequirement.doubleOut,
+      legsToWin: 1,
+    );
+    final player = SimulatedPlayer(
+      name: 'Warmup',
+      profile: sampleProfile,
+    );
+    _simulator.simulateAutoMatch(
+      playerA: player,
+      playerB: player,
+      config: config,
+      detailed: false,
+      random: Random(7000),
+    );
+  }
+
+  void compactSimulationCaches() {
+    _simulator.botEngine.compactSimulationCaches();
+    _simulator.compactSimulationCaches();
   }
 
   TournamentSimulationBatch simulateMatchesBatch({
@@ -273,13 +453,15 @@ class TournamentEngine {
     if (!_allRoundsCompleted(bracket.leagueRounds)) {
       return bracket;
     }
-    return TournamentBracket(
-      definition: bracket.definition,
-      participants: bracket.participants,
-      rounds: <TournamentRound>[
-        ...bracket.rounds,
-        ..._buildPlayoffRounds(bracket),
-      ],
+    return _autoAdvanceByes(
+      TournamentBracket(
+        definition: bracket.definition,
+        participants: bracket.participants,
+        rounds: <TournamentRound>[
+          ...bracket.rounds,
+          ..._buildPlayoffRounds(bracket),
+        ],
+      ),
     );
   }
 
@@ -446,6 +628,9 @@ class TournamentEngine {
     if (roundIndex == 0) {
       return true;
     }
+    if (bracket.rounds[roundIndex].stage != bracket.rounds[roundIndex - 1].stage) {
+      return true;
+    }
 
     return _isBranchResolved(
           bracket: bracket,
@@ -464,6 +649,9 @@ class TournamentEngine {
     required int roundIndex,
     required int matchIndex,
   }) {
+    if (matchIndex < 0 || matchIndex >= bracket.rounds[roundIndex].matches.length) {
+      return true;
+    }
     final match = bracket.rounds[roundIndex].matches[matchIndex];
     if (match.status == TournamentMatchStatus.completed) {
       return true;
@@ -568,13 +756,15 @@ class TournamentEngine {
     if (bracket.definition.format == TournamentFormat.leaguePlayoff) {
       if (updatedBracket.playoffRounds.isEmpty &&
           _allRoundsCompleted(updatedBracket.leagueRounds)) {
-        return TournamentBracket(
-          definition: updatedBracket.definition,
-          participants: updatedBracket.participants,
-          rounds: <TournamentRound>[
-            ...updatedBracket.rounds,
-            ..._buildPlayoffRounds(updatedBracket),
-          ],
+        return _autoAdvanceByes(
+          TournamentBracket(
+            definition: updatedBracket.definition,
+            participants: updatedBracket.participants,
+            rounds: <TournamentRound>[
+              ...updatedBracket.rounds,
+              ..._buildPlayoffRounds(updatedBracket),
+            ],
+          ),
         );
       }
 
@@ -772,6 +962,9 @@ class TournamentEngine {
     if (roundIndex == 0) {
       return true;
     }
+    if (rounds[roundIndex].stage != rounds[roundIndex - 1].stage) {
+      return true;
+    }
 
     return _isBranchResolvedInRounds(
           rounds: rounds,
@@ -790,6 +983,9 @@ class TournamentEngine {
     required int roundIndex,
     required int matchIndex,
   }) {
+    if (matchIndex < 0 || matchIndex >= rounds[roundIndex].matches.length) {
+      return true;
+    }
     final match = rounds[roundIndex].matches[matchIndex];
     if (match.status == TournamentMatchStatus.completed) {
       return true;
@@ -1193,34 +1389,28 @@ class TournamentEngine {
         ),
     ];
 
-    final seedOrder = _buildSeedOrder(seeded.length);
-    final firstRound = <TournamentMatch>[];
+    final bracketSize = _bracketSizeFor(seeded.length);
     final firstPlayoffRoundNumber = bracket.rounds.length + 1;
-    for (var matchIndex = 0; matchIndex < seeded.length ~/ 2; matchIndex += 1) {
-      final slotA = seedOrder[matchIndex * 2] - 1;
-      final slotB = seedOrder[matchIndex * 2 + 1] - 1;
-      firstRound.add(
-        TournamentMatch(
-          id: 'r$firstPlayoffRoundNumber-m${matchIndex + 1}',
-          roundNumber: firstPlayoffRoundNumber,
-          matchNumber: matchIndex + 1,
-          playerA: seeded[slotA],
-          playerB: seeded[slotB],
-          status: TournamentMatchStatus.pending,
-        ),
-      );
-    }
-
     final rounds = <TournamentRound>[
       TournamentRound(
         roundNumber: firstPlayoffRoundNumber,
-        title: _playoffRoundTitle(1, seeded.length),
-        matches: firstRound,
+        title: _playoffRoundTitle(1, bracketSize),
+        matches: List<TournamentMatch>.generate(
+          bracketSize ~/ 2,
+          (index) => TournamentMatch(
+            id: 'r$firstPlayoffRoundNumber-m${index + 1}',
+            roundNumber: firstPlayoffRoundNumber,
+            matchNumber: index + 1,
+            playerA: null,
+            playerB: null,
+            status: TournamentMatchStatus.pending,
+          ),
+        ),
         stage: TournamentRoundStage.playoff,
       ),
     ];
 
-    var matchesInRound = seeded.length ~/ 2;
+    var matchesInRound = bracketSize ~/ 2;
     var roundOffset = 2;
     while (matchesInRound > 1) {
       matchesInRound ~/= 2;
@@ -1228,7 +1418,7 @@ class TournamentEngine {
       rounds.add(
         TournamentRound(
           roundNumber: roundNumber,
-          title: _playoffRoundTitle(roundOffset - 1, seeded.length),
+          title: _playoffRoundTitle(roundOffset - 1, bracketSize),
           stage: TournamentRoundStage.playoff,
           matches: List<TournamentMatch>.generate(
             matchesInRound,
@@ -1246,7 +1436,11 @@ class TournamentEngine {
       roundOffset += 1;
     }
 
-    return rounds;
+    return _assignKnockoutParticipants(
+      rounds: rounds,
+      participants: seeded,
+      bracketSize: bracketSize,
+    );
   }
 
   TournamentBracket _advancePlayoffWinners(TournamentBracket bracket) {

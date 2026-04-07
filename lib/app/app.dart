@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/debug/app_debug.dart';
 import '../data/repositories/settings_repository.dart';
+import 'app_debug_overlay.dart';
 import 'routes.dart';
 
 class DartFlutterApp extends StatelessWidget {
@@ -12,6 +13,7 @@ class DartFlutterApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: SettingsRepository.instance,
       builder: (context, _) {
+        final settings = SettingsRepository.instance.settings;
         final base = ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(
@@ -22,8 +24,16 @@ class DartFlutterApp extends StatelessWidget {
         );
 
         return MaterialApp(
-          title: 'Dart Karriere',
+          title: 'DartCore',
           debugShowCheckedModeBanner: false,
+          builder: (context, child) {
+            return Stack(
+              children: <Widget>[
+                if (child != null) child,
+                if (settings.debugOverlayEnabled) const AppDebugOverlay(),
+              ],
+            );
+          },
           navigatorObservers: <NavigatorObserver>[
             AppDebugNavigatorObserver(),
           ],

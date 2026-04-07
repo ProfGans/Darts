@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../presentation/career/career_detail_screen.dart';
 import '../presentation/career/career_setup_screen.dart';
 import '../presentation/tools/checkout_calculator_screen.dart';
-import '../presentation/main_menu/main_menu_screen.dart';
 import '../presentation/database/computer_database_screen.dart';
 import '../presentation/match/game_mode_selection_screen.dart';
+import '../presentation/main_menu/main_menu_screen.dart';
 import '../presentation/simulator/bot_match_simulator_screen.dart';
 import '../presentation/players/player_profiles_screen.dart';
 import '../presentation/settings/settings_screen.dart';
@@ -22,6 +22,7 @@ class AppRoutes {
   static const settings = '/settings';
   static const tournamentSetup = '/tournament/setup';
   static const tournamentBracket = '/tournament/bracket';
+  static const careerHub = '/career';
   static const careerSetup = '/career/setup';
   static const careerDetail = '/career/detail';
 
@@ -35,6 +36,9 @@ class AppRoutes {
     settings: (_) => const SettingsScreen(),
     tournamentSetup: (_) => const TournamentSetupScreen(),
     tournamentBracket: (_) => const TournamentBracketScreen(),
+    careerHub: (_) => const MainMenuScreen(
+      initialSection: AppShellSection.career,
+    ),
     careerSetup: (_) => const CareerSetupScreen(),
     careerDetail: (_) => const CareerDetailScreen(),
   };

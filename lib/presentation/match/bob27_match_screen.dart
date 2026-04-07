@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/background/simulation_service.dart';
 import '../../data/models/player_profile.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
@@ -107,6 +108,7 @@ class _Bob27MatchScreenState extends State<Bob27MatchScreen> {
   void initState() {
     super.initState();
     _botEngine = BotEngine();
+    SimulationService.instance.applyToBotEngine(_botEngine);
     _participants = widget.session.participants
         .map((participant) => _Bob27ParticipantRuntime(config: participant))
         .toList();

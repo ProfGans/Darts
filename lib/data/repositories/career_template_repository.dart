@@ -45,8 +45,10 @@ class CareerTemplateRepository extends ChangeNotifier {
               !isBuiltInTemplate(template.id) &&
               template.id != 'template-pdc-system' &&
               !template.name.toLowerCase().startsWith('pdc-system') &&
+              template.name.toLowerCase() != 'pdc complete' &&
               template.name.toLowerCase() != 'pdc basic' &&
-              template.name.toLowerCase() != 'basic pdc',
+              template.name.toLowerCase() != 'basic pdc' &&
+              template.name.toLowerCase() != 'basic v2',
         )
         .toList();
     _templates
@@ -135,7 +137,10 @@ class CareerTemplateRepository extends ChangeNotifier {
         final template = CareerTemplate.fromJson(decoded);
         return CareerTemplate(
           id: builtInPdcBasicTemplateId,
-          name: template.name,
+          name: 'PDC Basic',
+          participantMode: template.participantMode,
+          playerProfileId: template.playerProfileId,
+          replaceWeakestPlayerWithHuman: template.replaceWeakestPlayerWithHuman,
           careerTagDefinitions: template.careerTagDefinitions,
           seasonTagRules: template.seasonTagRules,
           rankings: template.rankings,
@@ -145,7 +150,18 @@ class CareerTemplateRepository extends ChangeNotifier {
     } catch (_) {
       // Fall back to the code-defined template if the bundled asset is unavailable.
     }
-    return _buildPdcTemplate();
+    final fallback = _buildPdcTemplate();
+    return CareerTemplate(
+      id: builtInPdcBasicTemplateId,
+      name: 'PDC Basic',
+      participantMode: fallback.participantMode,
+      playerProfileId: fallback.playerProfileId,
+      replaceWeakestPlayerWithHuman: fallback.replaceWeakestPlayerWithHuman,
+      careerTagDefinitions: fallback.careerTagDefinitions,
+      seasonTagRules: fallback.seasonTagRules,
+      rankings: fallback.rankings,
+      calendar: fallback.calendar,
+    );
   }
 
   CareerTemplate _buildPdcTemplate() {
@@ -156,6 +172,7 @@ class CareerTemplateRepository extends ChangeNotifier {
     const europeanTourRankingId = 'pdc-european-tour-order-of-merit';
     const challengeTourRankingId = 'pdc-challenge-tour-order-of-merit';
     const developmentTourRankingId = 'pdc-development-tour-order-of-merit';
+    const womensSeriesRankingId = 'pdc-womens-series-order-of-merit';
     const qSchoolRankingId = 'pdc-q-school-order-of-merit';
     const worldSeriesRankingId = 'pdc-world-series-order-of-merit';
 
@@ -163,6 +180,7 @@ class CareerTemplateRepository extends ChangeNotifier {
     const associateTag = 'Associate Member';
     const nonTourTag = 'Non-Tour';
     const developmentEligibleTag = 'Development Tour Eligible';
+    const womensSeriesEligibleTag = 'Women\'s Series Eligible';
     const nordicBalticTag = 'Nordic/Baltic';
     const eastEuropeTag = 'East Europe';
     const asiaTag = 'Asia';
@@ -228,6 +246,12 @@ class CareerTemplateRepository extends ChangeNotifier {
       const CareerRankingDefinition(
         id: developmentTourRankingId,
         name: 'Development Tour Order of Merit',
+        validSeasons: 1,
+        resetAtSeasonEnd: true,
+      ),
+      const CareerRankingDefinition(
+        id: womensSeriesRankingId,
+        name: 'Women\'s Series Order of Merit',
         validSeasons: 1,
         resetAtSeasonEnd: true,
       ),
@@ -347,6 +371,10 @@ class CareerTemplateRepository extends ChangeNotifier {
       const CareerTagDefinition(
         id: 'pdc-tag-development-eligible',
         name: developmentEligibleTag,
+      ),
+      const CareerTagDefinition(
+        id: 'pdc-tag-womens-series-eligible',
+        name: womensSeriesEligibleTag,
       ),
       const CareerTagDefinition(
         id: 'pdc-tag-nordic-baltic',
@@ -543,6 +571,22 @@ class CareerTemplateRepository extends ChangeNotifier {
         ],
       ),
       ..._buildSeries(
+        idPrefix: 'pdc-womens-series-a',
+        namePrefix: 'Women\'s Series',
+        count: 4,
+        startIndex: 1,
+        fieldSize: 64,
+        prizePool: 10000,
+        countsForRankingIds: const <String>[womensSeriesRankingId],
+        qualificationConditions: const <CareerQualificationCondition>[
+          CareerQualificationCondition(
+            type: CareerQualificationConditionType.careerTagOnly,
+            requiredCareerTags: <String>[womensSeriesEligibleTag],
+            slotCount: 64,
+          ),
+        ],
+      ),
+      ..._buildSeries(
         idPrefix: 'pdc-players-championship-a',
         namePrefix: 'Players Championship',
         count: 8,
@@ -733,6 +777,22 @@ class CareerTemplateRepository extends ChangeNotifier {
           ),
         ],
       ),
+      ..._buildSeries(
+        idPrefix: 'pdc-womens-series-b',
+        namePrefix: 'Women\'s Series',
+        count: 4,
+        startIndex: 5,
+        fieldSize: 64,
+        prizePool: 10000,
+        countsForRankingIds: const <String>[womensSeriesRankingId],
+        qualificationConditions: const <CareerQualificationCondition>[
+          CareerQualificationCondition(
+            type: CareerQualificationConditionType.careerTagOnly,
+            requiredCareerTags: <String>[womensSeriesEligibleTag],
+            slotCount: 64,
+          ),
+        ],
+      ),
       ...europeanTourStops.sublist(4, 8).expand(
         (stop) => _buildEuropeanTourWeekend(
           stop: stop,
@@ -847,6 +907,22 @@ class CareerTemplateRepository extends ChangeNotifier {
           ),
         ],
       ),
+      ..._buildSeries(
+        idPrefix: 'pdc-womens-series-c',
+        namePrefix: 'Women\'s Series',
+        count: 4,
+        startIndex: 9,
+        fieldSize: 64,
+        prizePool: 10000,
+        countsForRankingIds: const <String>[womensSeriesRankingId],
+        qualificationConditions: const <CareerQualificationCondition>[
+          CareerQualificationCondition(
+            type: CareerQualificationConditionType.careerTagOnly,
+            requiredCareerTags: <String>[womensSeriesEligibleTag],
+            slotCount: 64,
+          ),
+        ],
+      ),
       ...europeanTourStops.sublist(8, 12).expand(
         (stop) => _buildEuropeanTourWeekend(
           stop: stop,
@@ -958,6 +1034,22 @@ class CareerTemplateRepository extends ChangeNotifier {
             requiredCareerTags: <String>[nonTourTag, developmentEligibleTag],
             excludedCareerTags: <String>[tourCardTag],
             slotCount: 128,
+          ),
+        ],
+      ),
+      ..._buildSeries(
+        idPrefix: 'pdc-womens-series-d',
+        namePrefix: 'Women\'s Series',
+        count: 4,
+        startIndex: 13,
+        fieldSize: 64,
+        prizePool: 10000,
+        countsForRankingIds: const <String>[womensSeriesRankingId],
+        qualificationConditions: const <CareerQualificationCondition>[
+          CareerQualificationCondition(
+            type: CareerQualificationConditionType.careerTagOnly,
+            requiredCareerTags: <String>[womensSeriesEligibleTag],
+            slotCount: 64,
           ),
         ],
       ),
@@ -1224,6 +1316,14 @@ class CareerTemplateRepository extends ChangeNotifier {
       careerTagDefinitions: tagDefinitions,
       seasonTagRules: const <CareerSeasonTagRule>[
         CareerSeasonTagRule(
+          id: 'pdc-season-tour-card-q-school-top-8',
+          tagName: tourCardTag,
+          rankingId: qSchoolRankingId,
+          fromRank: 1,
+          toRank: 8,
+          action: CareerSeasonTagRuleAction.add,
+        ),
+        CareerSeasonTagRule(
           id: 'pdc-season-associate-q-school-top-32',
           tagName: associateTag,
           rankingId: qSchoolRankingId,
@@ -1254,6 +1354,14 @@ class CareerTemplateRepository extends ChangeNotifier {
           fromRank: 1,
           toRank: 2,
           action: CareerSeasonTagRuleAction.add,
+        ),
+        CareerSeasonTagRule(
+          id: 'pdc-season-remove-tour-card-outside-top-64',
+          tagName: tourCardTag,
+          rankingId: pdcRankingId,
+          fromRank: 65,
+          toRank: 512,
+          action: CareerSeasonTagRuleAction.remove,
         ),
         CareerSeasonTagRule(
           id: 'pdc-season-premier-league-invite-top-8',

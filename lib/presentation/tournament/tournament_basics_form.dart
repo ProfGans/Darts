@@ -75,10 +75,10 @@ class _TournamentBasicsFormState extends State<TournamentBasicsForm> {
           },
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<TournamentFormat>(
-          key: ValueKey<String>('format-${widget.formData.format.name}'),
-          initialValue: widget.formData.format,
-          decoration: const InputDecoration(labelText: 'Turniermodus'),
+          DropdownButtonFormField<TournamentFormat>(
+            key: ValueKey<String>('format-${widget.formData.format.name}'),
+            initialValue: widget.formData.format,
+            decoration: const InputDecoration(labelText: 'Turniermodus'),
           items: const <DropdownMenuItem<TournamentFormat>>[
             DropdownMenuItem(
               value: TournamentFormat.knockout,
@@ -98,11 +98,23 @@ class _TournamentBasicsFormState extends State<TournamentBasicsForm> {
               widget.onChanged(widget.formData.copyWith(format: value));
             }
           },
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          initialValue: widget.formData.fieldSizeInput,
-          keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            initialValue: widget.formData.tierInput,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Tier',
+              helperText: 'Freie Tier-Zahl. 1 ist die hoechste Turnier-Stufe.',
+            ),
+            onChanged: (value) {
+              widget.onChanged(widget.formData.copyWith(tierInput: value));
+            },
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            initialValue: widget.formData.fieldSizeInput,
+            keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             labelText: 'Feldgroesse',
             helperText: 'Beliebige Teilnehmerzahl, Freilose werden automatisch vergeben.',

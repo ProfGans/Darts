@@ -111,6 +111,7 @@ class ComputerPlayer {
     this.isFavorite = false,
     this.isProtected = false,
     this.age,
+    this.birthDate,
     this.nationality,
     this.tags = const <String>[],
     this.matchesPlayed = 0,
@@ -131,6 +132,7 @@ class ComputerPlayer {
   final bool isFavorite;
   final bool isProtected;
   final int? age;
+  final DateTime? birthDate;
   final String? nationality;
   final List<String> tags;
   final int matchesPlayed;
@@ -152,6 +154,8 @@ class ComputerPlayer {
     bool? isProtected,
     int? age,
     bool clearAge = false,
+    DateTime? birthDate,
+    bool clearBirthDate = false,
     String? nationality,
     bool clearNationality = false,
     List<String>? tags,
@@ -173,6 +177,7 @@ class ComputerPlayer {
       isFavorite: isFavorite ?? this.isFavorite,
       isProtected: isProtected ?? this.isProtected,
       age: clearAge ? null : age ?? this.age,
+      birthDate: clearBirthDate ? null : birthDate ?? this.birthDate,
       nationality: clearNationality ? null : nationality ?? this.nationality,
       tags: tags ?? this.tags,
       matchesPlayed: matchesPlayed ?? this.matchesPlayed,
@@ -196,6 +201,7 @@ class ComputerPlayer {
       'isFavorite': isFavorite,
       'isProtected': isProtected,
       'age': age,
+      'birthDate': birthDate?.toIso8601String(),
       'nationality': nationality,
       'tags': tags,
       'matchesPlayed': matchesPlayed,
@@ -240,6 +246,7 @@ class ComputerPlayer {
       isFavorite: json['isFavorite'] as bool? ?? false,
       isProtected: json['isProtected'] as bool? ?? false,
       age: (json['age'] as num?)?.toInt(),
+      birthDate: DateTime.tryParse((json['birthDate'] as String?) ?? ''),
       nationality: rawNationality == null || rawNationality.isEmpty
           ? null
           : rawNationality,
@@ -272,5 +279,20 @@ class ComputerPlayer {
       return ComputerPlayerSource.imported;
     }
     return ComputerPlayerSource.manual;
+  }
+
+  int? get effectiveAge {
+    if (birthDate != null) {
+      final now = DateTime.now();
+      var years = now.year - birthDate!.year;
+      final hadBirthday =
+          now.month > birthDate!.month ||
+          (now.month == birthDate!.month && now.day >= birthDate!.day);
+      if (!hadBirthday) {
+        years -= 1;
+      }
+      return years < 0 ? null : years;
+    }
+    return age;
   }
 }

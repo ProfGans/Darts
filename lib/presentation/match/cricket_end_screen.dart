@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../main_menu/main_menu_screen.dart';
 import 'cricket_result_models.dart';
 
 class CricketEndScreen extends StatelessWidget {
@@ -85,6 +86,20 @@ class CricketEndScreen extends StatelessWidget {
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text(returnButtonLabel ?? 'Zurueck'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute<void>(
+                  builder: (_) => const MainMenuScreen(
+                    initialSection: AppShellSection.play,
+                  ),
+                ),
+                (route) => false,
+              );
+            },
+            child: const Text('Zum Bereich Spielen'),
           ),
         ],
       ),

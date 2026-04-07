@@ -1,0 +1,15 @@
+2026/04/03-17:21:06.706 9348 Reusing MANIFEST C:\Users\johan\AppData\Roaming\Codex\Local Storage\leveldb/MANIFEST-000001
+2026/04/03-17:21:06.711 9348 Recovering log #68
+2026/04/03-17:21:06.711 9348 Reusing old log C:\Users\johan\AppData\Roaming\Codex\Local Storage\leveldb/000068.log 
+2026/04/03-17:22:06.722 c90 Level-0 table #72: started
+2026/04/03-17:22:06.724 c90 Level-0 table #72: 21939 bytes OK
+2026/04/03-17:22:06.725 c90 Delete type=0 #68
+2026/04/03-17:22:06.725 c90 Compacting 4@0 + 1@1 files
+2026/04/03-17:22:06.727 c90 Generated table #73@0: 7 keys, 11234 bytes
+2026/04/03-17:22:06.727 c90 Compacted 4@0 + 1@1 files => 11234 bytes
+2026/04/03-17:22:06.727 c90 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/04/03-17:22:06.727 c90 Delete type=2 #61
+2026/04/03-17:22:06.727 c90 Delete type=2 #64
+2026/04/03-17:22:06.728 c90 Delete type=2 #66
+2026/04/03-17:22:06.728 c90 Delete type=2 #69
+2026/04/03-17:22:06.728 c90 Delete type=2 #72

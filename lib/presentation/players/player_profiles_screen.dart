@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/export/file_export_service.dart';
@@ -29,6 +30,9 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
   String? _editingId;
   String? _selectedNationality;
   PlayerProfileSource _selectedSource = PlayerProfileSource.manual;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   void dispose() {
@@ -518,9 +522,11 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
           final theme = Theme.of(context);
           final players = _repository.players;
           final activePlayer = _repository.activePlayer;
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: <Widget>[
+          return ExcludeSemantics(
+            excluding: _suppressAccessibilityUpdates,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: <Widget>[
               _buildProfileSwitcherCard(
                 theme: theme,
                 players: players,
@@ -571,7 +577,8 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
                 players: players,
                 activePlayer: activePlayer,
               ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -606,6 +613,9 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
   String _selectedEquipmentId = '';
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows;
 
   Future<void> _pickRangeDate({required bool isStart}) async {
     final now = DateTime.now();
@@ -694,9 +704,11 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
       appBar: AppBar(
         title: Text(currentPlayer.preferences.displayName ?? currentPlayer.name),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
+      body: ExcludeSemantics(
+        excluding: _suppressAccessibilityUpdates,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
           _SectionCard(
             title: 'Profil',
             child: Column(
@@ -983,7 +995,8 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
               ],
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1043,6 +1056,9 @@ class _PlayerEquipmentPageState extends State<_PlayerEquipmentPage> {
 
   String? _editingEquipmentId;
 
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -1081,9 +1097,11 @@ class _PlayerEquipmentPageState extends State<_PlayerEquipmentPage> {
       appBar: AppBar(
         title: Text('Equipment - ${player.preferences.displayName ?? player.name}'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
+      body: ExcludeSemantics(
+        excluding: _suppressAccessibilityUpdates,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
           _SectionCard(
             title: _editingEquipmentId == null ? 'Setup anlegen' : 'Setup bearbeiten',
             child: Column(
@@ -1208,7 +1226,8 @@ class _PlayerEquipmentPageState extends State<_PlayerEquipmentPage> {
                         .toList(),
                   ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1233,6 +1252,9 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
   final TextEditingController _averageController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows;
+
   @override
   void dispose() {
     _modeController.dispose();
@@ -1256,9 +1278,11 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
       appBar: AppBar(
         title: Text('Training - ${player.preferences.displayName ?? player.name}'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
+      body: ExcludeSemantics(
+        excluding: _suppressAccessibilityUpdates,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
           _SectionCard(
             title: 'Training eintragen',
             child: Column(
@@ -1348,7 +1372,8 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
                         .toList(),
                   ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

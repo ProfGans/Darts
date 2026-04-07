@@ -151,6 +151,16 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
             }
             return left.key.compareTo(right.key);
           });
+        CareerDatabasePlayer? careerPlayer;
+        final activeCareer = repository.activeCareer;
+        if (activeCareer != null) {
+          for (final player in activeCareer.databasePlayers) {
+            if (player.databasePlayerId == widget.playerId) {
+              careerPlayer = player;
+              break;
+            }
+          }
+        }
 
         return Scaffold(
           appBar: AppBar(
@@ -166,7 +176,10 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                   children: <Widget>[
-                    _PlayerHeaderCard(history: history),
+                    _PlayerHeaderCard(
+                      history: history,
+                      careerTheoAverage: careerPlayer?.average,
+                    ),
                     const SizedBox(height: 16),
                     _FilterCard(
                       filterMode: _filterMode,
@@ -302,9 +315,11 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
 class _PlayerHeaderCard extends StatelessWidget {
   const _PlayerHeaderCard({
     required this.history,
+    required this.careerTheoAverage,
   });
 
   final CareerPlayerHistorySummary history;
+  final double? careerTheoAverage;
 
   @override
   Widget build(BuildContext context) {
@@ -322,6 +337,19 @@ class _PlayerHeaderCard extends StatelessWidget {
             const Text(
               'Karriereprofil mit Turnierhistorie und X01-Statistiken.',
             ),
+            if (careerTheoAverage != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  _HistoryTag(
+                    label:
+                        'Karriere Theo ${careerTheoAverage!.toStringAsFixed(1)}',
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -658,6 +686,11 @@ class _MatchHistoryEntryCard extends StatelessWidget {
               if (historyEntry.scoreText.trim().isNotEmpty)
                 _HistoryTag(label: historyEntry.scoreText),
               _HistoryTag(label: 'Avg ${historyEntry.average.toStringAsFixed(1)}'),
+              if (historyEntry.opponentTheoAverage != null)
+                _HistoryTag(
+                  label:
+                      'Gegner Theo ${historyEntry.opponentTheoAverage!.toStringAsFixed(1)}',
+                ),
             ],
           ),
         ],

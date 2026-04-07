@@ -1,3 +1,4 @@
+import 'background/simulation_service.dart';
 import 'repositories/career_repository.dart';
 import 'repositories/career_template_repository.dart';
 import 'repositories/computer_repository.dart';
@@ -15,5 +16,6 @@ class AppBootstrap {
     await CareerRepository.instance.initialize();
     await CareerTemplateRepository.instance.initialize();
     await TournamentRepository.instance.initialize();
+    await SimulationService.instance.initialize();
   }
 }

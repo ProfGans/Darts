@@ -1,5 +1,5 @@
-name: dart_flutter_app
-description: Flutter-Port der Dart Desktop App
+name: DartCore
+description: Dart Scorer
 publish_to: "none"
 version: 0.1.0+1
 
@@ -20,4 +20,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/data/default_computer_players.json
+    - assets/data/bundled_theoretical_average_cache.json
     - assets/templates/basic_pdc_template.json

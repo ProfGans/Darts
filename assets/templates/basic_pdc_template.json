@@ -1,16 +1,13 @@
 ﻿{
-    "id":  "template-1774098376154649",
-    "name":  "Basic PDC",
-    "participantMode":  "withHuman",
-    "playerProfileId":  "player-johannes",
-    "replaceWeakestPlayerWithHuman":  true,
+    "id":  "template-1774801369694009",
+    "name":  "Basic V2",
     "databasePlayers":  [
                             {
                                 "databasePlayerId":  "db-player-73951",
                                 "name":  "Luke Littler",
-                                "average":  100.03420135910842,
-                                "skill":  752,
-                                "finishingSkill":  759,
+                                "average":  102.48762949638397,
+                                "skill":  755,
+                                "finishingSkill":  754,
                                 "careerTags":  [
 
                                                ]
@@ -18,7 +15,7 @@
                             {
                                 "databasePlayerId":  "db-player-11822",
                                 "name":  "Luke Humphries",
-                                "average":  99.81000444316544,
+                                "average":  100.53201705178739,
                                 "skill":  752,
                                 "finishingSkill":  752,
                                 "careerTags":  [
@@ -26,9 +23,29 @@
                                                ]
                             },
                             {
+                                "databasePlayerId":  "db-player-192",
+                                "name":  "Stephen Bunting",
+                                "average":  99.8139443593053,
+                                "skill":  750,
+                                "finishingSkill":  750,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
                                 "databasePlayerId":  "db-player-181",
                                 "name":  "Gary Anderson",
-                                "average":  99.18393280342653,
+                                "average":  99.8139443593053,
+                                "skill":  750,
+                                "finishingSkill":  750,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-1395",
+                                "name":  "Michael van Gerwen",
+                                "average":  99.8139443593053,
                                 "skill":  750,
                                 "finishingSkill":  750,
                                 "careerTags":  [
@@ -38,99 +55,9 @@
                             {
                                 "databasePlayerId":  "db-player-16492",
                                 "name":  "Gerwyn Price",
-                                "average":  98.79287652965462,
-                                "skill":  750,
-                                "finishingSkill":  747,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-192",
-                                "name":  "Stephen Bunting",
-                                "average":  98.0000224274917,
-                                "skill":  748,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-1395",
-                                "name":  "Michael van Gerwen",
-                                "average":  97.9023293512555,
-                                "skill":  749,
-                                "finishingSkill":  736,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-74975",
-                                "name":  "Josh Rock",
-                                "average":  97.6299301628351,
-                                "skill":  748,
-                                "finishingSkill":  746,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-16076",
-                                "name":  "Chris Dobey",
-                                "average":  97.1925552732858,
-                                "skill":  746,
-                                "finishingSkill":  740,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-1596",
-                                "name":  "Ross Smith",
-                                "average":  97.0716609908188,
-                                "skill":  746,
-                                "finishingSkill":  738,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-18934",
-                                "name":  "Rob Cross",
-                                "average":  96.7650479680401,
-                                "skill":  745,
-                                "finishingSkill":  749,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-6861",
-                                "name":  "Jonny Clayton",
-                                "average":  96.47031747139258,
-                                "skill":  745,
-                                "finishingSkill":  744,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10070",
-                                "name":  "Dirk van Duijvenbode",
-                                "average":  96.32296842568753,
-                                "skill":  745,
+                                "average":  98.68357194539787,
+                                "skill":  747,
                                 "finishingSkill":  745,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-21491",
-                                "name":  "Gian van Veen",
-                                "average":  96.25695298658395,
-                                "skill":  745,
-                                "finishingSkill":  743,
                                 "careerTags":  [
 
                                                ]
@@ -138,9 +65,69 @@
                             {
                                 "databasePlayerId":  "db-player-13326",
                                 "name":  "Nathan Aspinall",
-                                "average":  96.10940822671016,
-                                "skill":  745,
-                                "finishingSkill":  737,
+                                "average":  98.55560728862935,
+                                "skill":  746,
+                                "finishingSkill":  744,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-16076",
+                                "name":  "Chris Dobey",
+                                "average":  98.4604657960423,
+                                "skill":  746,
+                                "finishingSkill":  740,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-18934",
+                                "name":  "Rob Cross",
+                                "average":  97.49689070593863,
+                                "skill":  743,
+                                "finishingSkill":  758,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-1596",
+                                "name":  "Ross Smith",
+                                "average":  97.2259874793824,
+                                "skill":  744,
+                                "finishingSkill":  739,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-74975",
+                                "name":  "Josh Rock",
+                                "average":  97.2259874793824,
+                                "skill":  744,
+                                "finishingSkill":  739,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-27979",
+                                "name":  "Wessel Nijman",
+                                "average":  97.2259874793824,
+                                "skill":  744,
+                                "finishingSkill":  739,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-13202",
+                                "name":  "Danny Noppert",
+                                "average":  97.2259874793824,
+                                "skill":  744,
+                                "finishingSkill":  739,
                                 "careerTags":  [
 
                                                ]
@@ -148,7 +135,7 @@
                             {
                                 "databasePlayerId":  "db-player-10584",
                                 "name":  "Ryan Searle",
-                                "average":  95.7201065116718,
+                                "average":  97.0397507011592,
                                 "skill":  744,
                                 "finishingSkill":  744,
                                 "careerTags":  [
@@ -158,39 +145,19 @@
                             {
                                 "databasePlayerId":  "db-player-4842",
                                 "name":  "Damon Heta",
-                                "average":  95.67987779723019,
+                                "average":  96.96369819208812,
                                 "skill":  744,
+                                "finishingSkill":  743,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-21491",
+                                "name":  "Gian van Veen",
+                                "average":  96.64076366039143,
+                                "skill":  743,
                                 "finishingSkill":  742,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-13202",
-                                "name":  "Danny Noppert",
-                                "average":  95.1729770531044,
-                                "skill":  743,
-                                "finishingSkill":  749,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-27979",
-                                "name":  "Wessel Nijman",
-                                "average":  95.11118682054845,
-                                "skill":  743,
-                                "finishingSkill":  750,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-7462",
-                                "name":  "Jermaine Wattimena",
-                                "average":  94.74541783158207,
-                                "skill":  742,
-                                "finishingSkill":  741,
                                 "careerTags":  [
 
                                                ]
@@ -198,9 +165,9 @@
                             {
                                 "databasePlayerId":  "db-player-11",
                                 "name":  "James Wade",
-                                "average":  94.74541783158207,
-                                "skill":  742,
-                                "finishingSkill":  741,
+                                "average":  96.4332082896563,
+                                "skill":  743,
+                                "finishingSkill":  743,
                                 "careerTags":  [
 
                                                ]
@@ -208,19 +175,39 @@
                             {
                                 "databasePlayerId":  "db-player-5422",
                                 "name":  "Krzysztof Ratajski",
-                                "average":  94.74541783158207,
-                                "skill":  742,
-                                "finishingSkill":  741,
+                                "average":  96.4332082896563,
+                                "skill":  743,
+                                "finishingSkill":  743,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-16749",
-                                "name":  "Martin Schindler",
-                                "average":  94.62087691754193,
-                                "skill":  742,
-                                "finishingSkill":  742,
+                                "databasePlayerId":  "db-player-6861",
+                                "name":  "Jonny Clayton",
+                                "average":  96.4332082896563,
+                                "skill":  743,
+                                "finishingSkill":  743,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-7462",
+                                "name":  "Jermaine Wattimena",
+                                "average":  96.4332082896563,
+                                "skill":  743,
+                                "finishingSkill":  743,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-10070",
+                                "name":  "Dirk van Duijvenbode",
+                                "average":  96.4332082896563,
+                                "skill":  743,
+                                "finishingSkill":  743,
                                 "careerTags":  [
 
                                                ]
@@ -228,19 +215,19 @@
                             {
                                 "databasePlayerId":  "db-player-6025",
                                 "name":  "Michael Smith",
-                                "average":  94.4721747416096,
-                                "skill":  741,
-                                "finishingSkill":  748,
+                                "average":  96.0324519182856,
+                                "skill":  742,
+                                "finishingSkill":  742,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-8798",
-                                "name":  "William O\u0027Connor",
-                                "average":  94.20903832248064,
-                                "skill":  741,
-                                "finishingSkill":  741,
+                                "databasePlayerId":  "db-player-16749",
+                                "name":  "Martin Schindler",
+                                "average":  96.0324519182856,
+                                "skill":  742,
+                                "finishingSkill":  742,
                                 "careerTags":  [
 
                                                ]
@@ -248,7 +235,17 @@
                             {
                                 "databasePlayerId":  "db-player-16530",
                                 "name":  "Mike de Decker",
-                                "average":  94.20903832248064,
+                                "average":  95.83823762317896,
+                                "skill":  741,
+                                "finishingSkill":  741,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-8798",
+                                "name":  "William O\u0027Connor",
+                                "average":  95.83823762317896,
                                 "skill":  741,
                                 "finishingSkill":  741,
                                 "careerTags":  [
@@ -258,19 +255,39 @@
                             {
                                 "databasePlayerId":  "db-player-2479",
                                 "name":  "Daryl Gurney",
-                                "average":  93.9060878628714,
-                                "skill":  741,
-                                "finishingSkill":  740,
+                                "average":  95.29734410601999,
+                                "skill":  742,
+                                "finishingSkill":  731,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-4101",
-                                "name":  "Dave Chisnall",
-                                "average":  93.65299047882017,
+                                "databasePlayerId":  "db-player-25506",
+                                "name":  "Maik Kuivenhoven",
+                                "average":  95.08587521487992,
                                 "skill":  739,
-                                "finishingSkill":  739,
+                                "finishingSkill":  742,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-8348",
+                                "name":  "Darryl Pilgrim",
+                                "average":  95.08587521487992,
+                                "skill":  739,
+                                "finishingSkill":  742,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-2201",
+                                "name":  "Alan Soutar",
+                                "average":  95.08587521487992,
+                                "skill":  739,
+                                "finishingSkill":  742,
                                 "careerTags":  [
 
                                                ]
@@ -278,29 +295,49 @@
                             {
                                 "databasePlayerId":  "db-player-5202",
                                 "name":  "Cameron Menzies",
-                                "average":  93.5465974883079,
-                                "skill":  740,
+                                "average":  95.08587521487992,
+                                "skill":  739,
+                                "finishingSkill":  742,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-1683",
+                                "name":  "Mario Vandenbogaerde",
+                                "average":  95.08587521487992,
+                                "skill":  739,
+                                "finishingSkill":  742,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-4083",
+                                "name":  "Mickey Mansell",
+                                "average":  95.08587521487992,
+                                "skill":  739,
+                                "finishingSkill":  742,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-4101",
+                                "name":  "Dave Chisnall",
+                                "average":  95.04208326283329,
+                                "skill":  739,
+                                "finishingSkill":  739,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-66008",
+                                "name":  "Kevin Doets",
+                                "average":  94.79911079226466,
+                                "skill":  738,
                                 "finishingSkill":  738,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10168",
-                                "name":  "Andrew Gilding",
-                                "average":  93.51094272756222,
-                                "skill":  738,
-                                "finishingSkill":  739,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-25544",
-                                "name":  "Callan Rydz",
-                                "average":  93.51094272756222,
-                                "skill":  738,
-                                "finishingSkill":  739,
                                 "careerTags":  [
 
                                                ]
@@ -308,17 +345,7 @@
                             {
                                 "databasePlayerId":  "db-player-17734",
                                 "name":  "Cristo Reyes",
-                                "average":  93.44182120170058,
-                                "skill":  738,
-                                "finishingSkill":  738,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-3097",
-                                "name":  "Gabriel Clemens",
-                                "average":  93.44182120170058,
+                                "average":  94.79911079226466,
                                 "skill":  738,
                                 "finishingSkill":  738,
                                 "careerTags":  [
@@ -328,7 +355,7 @@
                             {
                                 "databasePlayerId":  "db-player-16151",
                                 "name":  "Ryan Joyce",
-                                "average":  93.44182120170058,
+                                "average":  94.79911079226466,
                                 "skill":  738,
                                 "finishingSkill":  738,
                                 "careerTags":  [
@@ -338,7 +365,37 @@
                             {
                                 "databasePlayerId":  "db-player-16676",
                                 "name":  "Connor Scutt",
-                                "average":  93.44182120170058,
+                                "average":  94.79911079226466,
+                                "skill":  738,
+                                "finishingSkill":  738,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-66017",
+                                "name":  "Niels Zonneveld",
+                                "average":  94.79911079226466,
+                                "skill":  738,
+                                "finishingSkill":  738,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-6487",
+                                "name":  "Joe Cullen",
+                                "average":  94.79911079226466,
+                                "skill":  738,
+                                "finishingSkill":  738,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-3097",
+                                "name":  "Gabriel Clemens",
+                                "average":  94.79911079226466,
                                 "skill":  738,
                                 "finishingSkill":  738,
                                 "careerTags":  [
@@ -348,7 +405,7 @@
                             {
                                 "databasePlayerId":  "db-player-10621",
                                 "name":  "Luke Woodhouse",
-                                "average":  93.11113668923525,
+                                "average":  94.58399948093854,
                                 "skill":  738,
                                 "finishingSkill":  733,
                                 "careerTags":  [
@@ -356,30 +413,10 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-6487",
-                                "name":  "Joe Cullen",
-                                "average":  92.90606918679853,
-                                "skill":  737,
-                                "finishingSkill":  736,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-66008",
-                                "name":  "Kevin Doets",
-                                "average":  92.90606918679853,
-                                "skill":  737,
-                                "finishingSkill":  736,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-66017",
-                                "name":  "Niels Zonneveld",
-                                "average":  92.90606918679853,
-                                "skill":  737,
+                                "databasePlayerId":  "db-player-15759",
+                                "name":  "Wesley Plaisier",
+                                "average":  93.97588209272224,
+                                "skill":  736,
                                 "finishingSkill":  736,
                                 "careerTags":  [
 
@@ -388,19 +425,9 @@
                             {
                                 "databasePlayerId":  "db-player-1734",
                                 "name":  "Ricky Evans",
-                                "average":  92.52840416674196,
-                                "skill":  735,
-                                "finishingSkill":  737,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-2",
-                                "name":  "Raymond van Barneveld",
-                                "average":  92.52840416674196,
-                                "skill":  735,
-                                "finishingSkill":  737,
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
                                 "careerTags":  [
 
                                                ]
@@ -408,39 +435,19 @@
                             {
                                 "databasePlayerId":  "db-player-16776",
                                 "name":  "Ricardo Pietreczko",
-                                "average":  92.52840416674196,
-                                "skill":  735,
-                                "finishingSkill":  737,
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-4885",
-                                "name":  "Karel Sedlacek",
-                                "average":  92.51166833915146,
-                                "skill":  735,
-                                "finishingSkill":  735,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-1933",
-                                "name":  "Mensur Suljovic",
-                                "average":  92.51166833915146,
-                                "skill":  735,
-                                "finishingSkill":  735,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-74395",
-                                "name":  "Scott Williams",
-                                "average":  92.32389185024279,
-                                "skill":  735,
-                                "finishingSkill":  733,
+                                "databasePlayerId":  "db-player-2",
+                                "name":  "Raymond van Barneveld",
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
                                 "careerTags":  [
 
                                                ]
@@ -448,9 +455,19 @@
                             {
                                 "databasePlayerId":  "db-player-11656",
                                 "name":  "Dimitri van den Bergh",
-                                "average":  92.20290090568665,
-                                "skill":  735,
-                                "finishingSkill":  730,
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-10168",
+                                "name":  "Andrew Gilding",
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
                                 "careerTags":  [
 
                                                ]
@@ -458,149 +475,29 @@
                             {
                                 "databasePlayerId":  "db-player-1463",
                                 "name":  "Peter Wright",
-                                "average":  92.20290090568665,
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-25544",
+                                "name":  "Callan Rydz",
+                                "average":  93.97588209272224,
+                                "skill":  736,
+                                "finishingSkill":  736,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-1933",
+                                "name":  "Mensur Suljovic",
+                                "average":  93.13959274834778,
                                 "skill":  735,
-                                "finishingSkill":  730,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-17485",
-                                "name":  "Ritchie Edhouse",
-                                "average":  92.03357221863607,
-                                "skill":  735,
-                                "finishingSkill":  724,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-16652",
-                                "name":  "Richard Veenstra",
-                                "average":  92.03357221863607,
-                                "skill":  735,
-                                "finishingSkill":  724,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-78282",
-                                "name":  "Adam Leek",
-                                "average":  91.79468646774217,
-                                "skill":  735,
-                                "finishingSkill":  721,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10396",
-                                "name":  "Jeffrey de Graaf",
-                                "average":  91.79468646774217,
-                                "skill":  735,
-                                "finishingSkill":  721,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-71914",
-                                "name":  "Justin Hood",
-                                "average":  91.79468646774217,
-                                "skill":  735,
-                                "finishingSkill":  721,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-9017",
-                                "name":  "Madars Razma",
-                                "average":  91.772264811373,
-                                "skill":  735,
-                                "finishingSkill":  719,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10595",
-                                "name":  "James Hurrell",
-                                "average":  91.772264811373,
-                                "skill":  735,
-                                "finishingSkill":  719,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-1607",
-                                "name":  "Brendan Dolan",
-                                "average":  91.772264811373,
-                                "skill":  735,
-                                "finishingSkill":  719,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-1683",
-                                "name":  "Mario Vandenbogaerde",
-                                "average":  91.27704298104484,
-                                "skill":  734,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-4083",
-                                "name":  "Mickey Mansell",
-                                "average":  91.27704298104484,
-                                "skill":  734,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-25506",
-                                "name":  "Maik Kuivenhoven",
-                                "average":  91.27704298104484,
-                                "skill":  734,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-8348",
-                                "name":  "Darryl Pilgrim",
-                                "average":  91.27704298104484,
-                                "skill":  734,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-2201",
-                                "name":  "Alan Soutar",
-                                "average":  91.27704298104484,
-                                "skill":  734,
-                                "finishingSkill":  753,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-2213",
-                                "name":  "Ian White",
-                                "average":  91.05093532645857,
-                                "skill":  734,
-                                "finishingSkill":  751,
+                                "finishingSkill":  735,
                                 "careerTags":  [
 
                                                ]
@@ -608,79 +505,9 @@
                             {
                                 "databasePlayerId":  "db-player-1633",
                                 "name":  "Kim Huybrechts",
-                                "average":  91.05093532645857,
-                                "skill":  734,
-                                "finishingSkill":  751,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-15759",
-                                "name":  "Wesley Plaisier",
-                                "average":  90.88812311612601,
-                                "skill":  734,
-                                "finishingSkill":  746,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-18296",
-                                "name":  "Ryan Meikle",
-                                "average":  90.66016571448718,
-                                "skill":  734,
-                                "finishingSkill":  741,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-17360",
-                                "name":  "Martin Lukeman",
-                                "average":  90.66016571448718,
-                                "skill":  734,
-                                "finishingSkill":  741,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-8797",
-                                "name":  "Christian Kist",
-                                "average":  90.66016571448718,
-                                "skill":  734,
-                                "finishingSkill":  741,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-74029",
-                                "name":  "Niko Springer",
-                                "average":  90.66016571448718,
-                                "skill":  734,
-                                "finishingSkill":  741,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10013",
-                                "name":  "Nick Kenny",
-                                "average":  90.28695711061461,
-                                "skill":  734,
-                                "finishingSkill":  734,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-16502",
-                                "name":  "Robert Owen",
-                                "average":  90.26566948944165,
-                                "skill":  734,
-                                "finishingSkill":  733,
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
                                 "careerTags":  [
 
                                                ]
@@ -688,19 +515,79 @@
                             {
                                 "databasePlayerId":  "db-player-75148",
                                 "name":  "Cam Crabtree",
-                                "average":  90.26566948944165,
-                                "skill":  734,
-                                "finishingSkill":  733,
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-15499",
-                                "name":  "Stephen Burton",
-                                "average":  89.79829862038021,
-                                "skill":  732,
-                                "finishingSkill":  732,
+                                "databasePlayerId":  "db-player-18296",
+                                "name":  "Ryan Meikle",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-4885",
+                                "name":  "Karel Sedlacek",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-8797",
+                                "name":  "Christian Kist",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-74029",
+                                "name":  "Niko Springer",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-17360",
+                                "name":  "Martin Lukeman",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-2213",
+                                "name":  "Ian White",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-16502",
+                                "name":  "Robert Owen",
+                                "average":  93.13959274834778,
+                                "skill":  735,
+                                "finishingSkill":  735,
                                 "careerTags":  [
 
                                                ]
@@ -708,7 +595,17 @@
                             {
                                 "databasePlayerId":  "db-player-168",
                                 "name":  "Mervyn King",
-                                "average":  89.79829862038021,
+                                "average":  92.23228762619391,
+                                "skill":  732,
+                                "finishingSkill":  732,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-15499",
+                                "name":  "Stephen Burton",
+                                "average":  92.23228762619391,
                                 "skill":  732,
                                 "finishingSkill":  732,
                                 "careerTags":  [
@@ -718,7 +615,7 @@
                             {
                                 "databasePlayerId":  "db-player-23137",
                                 "name":  "Lukas Wenig",
-                                "average":  89.79829862038021,
+                                "average":  92.23228762619391,
                                 "skill":  732,
                                 "finishingSkill":  732,
                                 "careerTags":  [
@@ -728,7 +625,7 @@
                             {
                                 "databasePlayerId":  "db-player-77408",
                                 "name":  "Tom Bissell",
-                                "average":  89.79829862038021,
+                                "average":  92.23228762619391,
                                 "skill":  732,
                                 "finishingSkill":  732,
                                 "careerTags":  [
@@ -736,21 +633,11 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-21704",
-                                "name":  "Chris Landman",
-                                "average":  89.66206924606449,
-                                "skill":  732,
-                                "finishingSkill":  725,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-98",
-                                "name":  "Andy Boulton",
-                                "average":  89.41434411932369,
-                                "skill":  731,
-                                "finishingSkill":  735,
+                                "databasePlayerId":  "db-player-10396",
+                                "name":  "Jeffrey de Graaf",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
                                 "careerTags":  [
 
                                                ]
@@ -758,29 +645,19 @@
                             {
                                 "databasePlayerId":  "db-player-76209",
                                 "name":  "Pascal Rupprecht",
-                                "average":  89.41434411932369,
-                                "skill":  731,
-                                "finishingSkill":  735,
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-25478",
-                                "name":  "Keane Barry",
-                                "average":  89.24261835544482,
-                                "skill":  731,
-                                "finishingSkill":  731,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-17723",
-                                "name":  "Beau Greaves",
-                                "average":  89.24188532904894,
-                                "skill":  729,
-                                "finishingSkill":  730,
+                                "databasePlayerId":  "db-player-9017",
+                                "name":  "Madars Razma",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
                                 "careerTags":  [
 
                                                ]
@@ -788,29 +665,99 @@
                             {
                                 "databasePlayerId":  "db-player-10399",
                                 "name":  "Thibault Tricole",
-                                "average":  89.23362269148457,
-                                "skill":  730,
-                                "finishingSkill":  731,
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-4957",
-                                "name":  "Jim Long",
-                                "average":  88.82575281125322,
-                                "skill":  728,
-                                "finishingSkill":  735,
+                                "databasePlayerId":  "db-player-71914",
+                                "name":  "Justin Hood",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-4333",
-                                "name":  "Darius Labanauskas",
-                                "average":  88.73157809663297,
-                                "skill":  730,
-                                "finishingSkill":  719,
+                                "databasePlayerId":  "db-player-1607",
+                                "name":  "Brendan Dolan",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-98",
+                                "name":  "Andy Boulton",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-10595",
+                                "name":  "James Hurrell",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-78282",
+                                "name":  "Adam Leek",
+                                "average":  91.94220308992935,
+                                "skill":  733,
+                                "finishingSkill":  733,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-74395",
+                                "name":  "Scott Williams",
+                                "average":  91.93386473206213,
+                                "skill":  734,
+                                "finishingSkill":  734,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-10013",
+                                "name":  "Nick Kenny",
+                                "average":  91.93386473206213,
+                                "skill":  734,
+                                "finishingSkill":  734,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-17485",
+                                "name":  "Ritchie Edhouse",
+                                "average":  91.84762034828923,
+                                "skill":  734,
+                                "finishingSkill":  723,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-16652",
+                                "name":  "Richard Veenstra",
+                                "average":  91.84762034828923,
+                                "skill":  734,
+                                "finishingSkill":  723,
                                 "careerTags":  [
 
                                                ]
@@ -818,19 +765,9 @@
                             {
                                 "databasePlayerId":  "db-player-76740",
                                 "name":  "Sebastian Bialecki",
-                                "average":  88.73157809663297,
-                                "skill":  730,
-                                "finishingSkill":  719,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-11969",
-                                "name":  "Jeffrey de Zwaan",
-                                "average":  88.73157809663297,
-                                "skill":  730,
-                                "finishingSkill":  719,
+                                "average":  91.81953986934228,
+                                "skill":  731,
+                                "finishingSkill":  731,
                                 "careerTags":  [
 
                                                ]
@@ -838,9 +775,59 @@
                             {
                                 "databasePlayerId":  "db-player-59366",
                                 "name":  "Shane McGuirk",
-                                "average":  88.73157809663297,
-                                "skill":  730,
-                                "finishingSkill":  719,
+                                "average":  91.81953986934228,
+                                "skill":  731,
+                                "finishingSkill":  731,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-11969",
+                                "name":  "Jeffrey de Zwaan",
+                                "average":  91.81953986934228,
+                                "skill":  731,
+                                "finishingSkill":  731,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-4333",
+                                "name":  "Darius Labanauskas",
+                                "average":  91.81953986934228,
+                                "skill":  731,
+                                "finishingSkill":  731,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-25478",
+                                "name":  "Keane Barry",
+                                "average":  91.81953986934228,
+                                "skill":  731,
+                                "finishingSkill":  731,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-21704",
+                                "name":  "Chris Landman",
+                                "average":  91.78150030071335,
+                                "skill":  731,
+                                "finishingSkill":  732,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-17723",
+                                "name":  "Beau Greaves",
+                                "average":  91.78150030071335,
+                                "skill":  731,
+                                "finishingSkill":  732,
                                 "careerTags":  [
 
                                                ]
@@ -848,9 +835,9 @@
                             {
                                 "databasePlayerId":  "db-player-12671",
                                 "name":  "Max Hopp",
-                                "average":  88.54710612910435,
+                                "average":  89.89159277614979,
                                 "skill":  728,
-                                "finishingSkill":  727,
+                                "finishingSkill":  728,
                                 "careerTags":  [
 
                                                ]
@@ -858,8 +845,78 @@
                             {
                                 "databasePlayerId":  "db-player-18014",
                                 "name":  "Thomas Sykes",
-                                "average":  88.50977024678166,
+                                "average":  89.89159277614979,
                                 "skill":  728,
+                                "finishingSkill":  728,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-4957",
+                                "name":  "Jim Long",
+                                "average":  89.87430677617432,
+                                "skill":  727,
+                                "finishingSkill":  732,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-75206",
+                                "name":  "Owen Bates",
+                                "average":  89.47181254542583,
+                                "skill":  729,
+                                "finishingSkill":  707,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-10365",
+                                "name":  "Jimmy van Schie",
+                                "average":  89.47181254542583,
+                                "skill":  729,
+                                "finishingSkill":  707,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-15284",
+                                "name":  "Kai Gotthardt",
+                                "average":  89.47181254542583,
+                                "skill":  729,
+                                "finishingSkill":  707,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-13204",
+                                "name":  "Alexander Merkx",
+                                "average":  89.34488485876241,
+                                "skill":  726,
+                                "finishingSkill":  726,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-18325",
+                                "name":  "Bradley Brooks",
+                                "average":  89.32766383593102,
+                                "skill":  725,
+                                "finishingSkill":  728,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-18403",
+                                "name":  "Stefan Bellmont",
+                                "average":  89.32766383593102,
+                                "skill":  725,
                                 "finishingSkill":  728,
                                 "careerTags":  [
 
@@ -868,79 +925,9 @@
                             {
                                 "databasePlayerId":  "db-player-16051",
                                 "name":  "Cor Dekker",
-                                "average":  88.43821067188169,
-                                "skill":  727,
-                                "finishingSkill":  728,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-10365",
-                                "name":  "Jimmy van Schie",
-                                "average":  88.25164095633129,
-                                "skill":  728,
-                                "finishingSkill":  723,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-15284",
-                                "name":  "Kai Gotthardt",
-                                "average":  88.25164095633129,
-                                "skill":  728,
-                                "finishingSkill":  723,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-75206",
-                                "name":  "Owen Bates",
-                                "average":  88.17482214235372,
-                                "skill":  728,
-                                "finishingSkill":  720,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-13204",
-                                "name":  "Alexander Merkx",
-                                "average":  87.60128446863457,
+                                "average":  89.26726283046237,
                                 "skill":  726,
-                                "finishingSkill":  726,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-74218",
-                                "name":  "Charlie Manby",
-                                "average":  87.42958202361079,
-                                "skill":  726,
-                                "finishingSkill":  720,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-15112",
-                                "name":  "David Sharp",
-                                "average":  87.42958202361079,
-                                "skill":  726,
-                                "finishingSkill":  720,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-18403",
-                                "name":  "Stefan Bellmont",
-                                "average":  87.19690280333957,
-                                "skill":  725,
-                                "finishingSkill":  728,
+                                "finishingSkill":  724,
                                 "careerTags":  [
 
                                                ]
@@ -948,7 +935,7 @@
                             {
                                 "databasePlayerId":  "db-player-11579",
                                 "name":  "Thomas Lovely",
-                                "average":  87.03055290897254,
+                                "average":  89.18114099300395,
                                 "skill":  725,
                                 "finishingSkill":  725,
                                 "careerTags":  [
@@ -956,81 +943,21 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-18325",
-                                "name":  "Bradley Brooks",
-                                "average":  87.02556990955483,
+                                "databasePlayerId":  "db-player-16370",
+                                "name":  "Rusty-Jake Rodriguez",
+                                "average":  87.41818908752549,
                                 "skill":  723,
-                                "finishingSkill":  729,
+                                "finishingSkill":  728,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-74010",
-                                "name":  "Jurjen van der Velde",
-                                "average":  86.81239860728881,
+                                "databasePlayerId":  "db-player-18456",
+                                "name":  "Stephen Rosney",
+                                "average":  87.41818908752549,
                                 "skill":  723,
-                                "finishingSkill":  722,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-55198",
-                                "name":  "Benjamin Pratnemer",
-                                "average":  86.77343391730713,
-                                "skill":  723,
-                                "finishingSkill":  723,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-13782",
-                                "name":  "Rhys Griffin",
-                                "average":  86.77343391730713,
-                                "skill":  723,
-                                "finishingSkill":  723,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-22988",
-                                "name":  "Greg Ritchie",
-                                "average":  86.60503163941955,
-                                "skill":  722,
-                                "finishingSkill":  733,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-45760",
-                                "name":  "Dennie Olde Kalter",
-                                "average":  86.52010306524917,
-                                "skill":  723,
-                                "finishingSkill":  718,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-15093",
-                                "name":  "Adam Lipscombe",
-                                "average":  86.50589907525936,
-                                "skill":  723,
-                                "finishingSkill":  716,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-67269",
-                                "name":  "Dominik Gruellich",
-                                "average":  86.47703921715912,
-                                "skill":  722,
-                                "finishingSkill":  732,
+                                "finishingSkill":  728,
                                 "careerTags":  [
 
                                                ]
@@ -1038,17 +965,7 @@
                             {
                                 "databasePlayerId":  "db-player-16665",
                                 "name":  "Carl Sneyd",
-                                "average":  86.26064298674596,
-                                "skill":  722,
-                                "finishingSkill":  722,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-11716",
-                                "name":  "Jeffrey Sparidaans",
-                                "average":  86.26064298674596,
+                                "average":  87.39805533127583,
                                 "skill":  722,
                                 "finishingSkill":  722,
                                 "careerTags":  [
@@ -1058,7 +975,27 @@
                             {
                                 "databasePlayerId":  "db-player-45851",
                                 "name":  "Stefaan Henderyck",
-                                "average":  86.26064298674596,
+                                "average":  87.39805533127583,
+                                "skill":  722,
+                                "finishingSkill":  722,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-74032",
+                                "name":  "Adam Gawlas",
+                                "average":  87.39805533127583,
+                                "skill":  722,
+                                "finishingSkill":  722,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-11716",
+                                "name":  "Jeffrey Sparidaans",
+                                "average":  87.39805533127583,
                                 "skill":  722,
                                 "finishingSkill":  722,
                                 "careerTags":  [
@@ -1068,7 +1005,7 @@
                             {
                                 "databasePlayerId":  "db-player-74981",
                                 "name":  "Adam Warner",
-                                "average":  86.26064298674596,
+                                "average":  87.39805533127583,
                                 "skill":  722,
                                 "finishingSkill":  722,
                                 "careerTags":  [
@@ -1076,41 +1013,31 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-16370",
-                                "name":  "Rusty-Jake Rodriguez",
-                                "average":  86.15553118890558,
-                                "skill":  722,
-                                "finishingSkill":  723,
+                                "databasePlayerId":  "db-player-15112",
+                                "name":  "David Sharp",
+                                "average":  87.33109134951536,
+                                "skill":  723,
+                                "finishingSkill":  726,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-18456",
-                                "name":  "Stephen Rosney",
-                                "average":  86.15553118890558,
-                                "skill":  722,
-                                "finishingSkill":  723,
+                                "databasePlayerId":  "db-player-74218",
+                                "name":  "Charlie Manby",
+                                "average":  87.33109134951536,
+                                "skill":  723,
+                                "finishingSkill":  726,
                                 "careerTags":  [
 
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-74032",
-                                "name":  "Adam Gawlas",
-                                "average":  85.85299462423521,
-                                "skill":  720,
-                                "finishingSkill":  721,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-22971",
-                                "name":  "Adam Paxton",
-                                "average":  85.65442887489844,
-                                "skill":  721,
-                                "finishingSkill":  720,
+                                "databasePlayerId":  "db-player-67269",
+                                "name":  "Dominik Gruellich",
+                                "average":  87.33109134951536,
+                                "skill":  723,
+                                "finishingSkill":  726,
                                 "careerTags":  [
 
                                                ]
@@ -1118,7 +1045,7 @@
                             {
                                 "databasePlayerId":  "db-player-17146",
                                 "name":  "Sietse Lap",
-                                "average":  85.6469763418525,
+                                "average":  87.06157373225466,
                                 "skill":  720,
                                 "finishingSkill":  720,
                                 "careerTags":  [
@@ -1128,7 +1055,7 @@
                             {
                                 "databasePlayerId":  "db-player-76814",
                                 "name":  "Viktor Tingstrom",
-                                "average":  85.6469763418525,
+                                "average":  87.06157373225466,
                                 "skill":  720,
                                 "finishingSkill":  720,
                                 "careerTags":  [
@@ -1136,11 +1063,81 @@
                                                ]
                             },
                             {
+                                "databasePlayerId":  "db-player-55198",
+                                "name":  "Benjamin Pratnemer",
+                                "average":  86.8954420077076,
+                                "skill":  723,
+                                "finishingSkill":  723,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-22988",
+                                "name":  "Greg Ritchie",
+                                "average":  86.8954420077076,
+                                "skill":  723,
+                                "finishingSkill":  723,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-13782",
+                                "name":  "Rhys Griffin",
+                                "average":  86.8954420077076,
+                                "skill":  723,
+                                "finishingSkill":  723,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-74010",
+                                "name":  "Jurjen van der Velde",
+                                "average":  86.86763787971084,
+                                "skill":  723,
+                                "finishingSkill":  722,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-22971",
+                                "name":  "Adam Paxton",
+                                "average":  86.86763787971084,
+                                "skill":  723,
+                                "finishingSkill":  722,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-17944",
+                                "name":  "Tytus Kanik",
+                                "average":  86.46437791341039,
+                                "skill":  716,
+                                "finishingSkill":  732,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-45760",
+                                "name":  "Dennie Olde Kalter",
+                                "average":  86.39053634118511,
+                                "skill":  723,
+                                "finishingSkill":  718,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
                                 "databasePlayerId":  "db-player-76979",
                                 "name":  "Leon Weber",
-                                "average":  85.30089076369846,
-                                "skill":  720,
-                                "finishingSkill":  711,
+                                "average":  86.09529648891773,
+                                "skill":  717,
+                                "finishingSkill":  723,
                                 "careerTags":  [
 
                                                ]
@@ -1148,7 +1145,7 @@
                             {
                                 "databasePlayerId":  "db-player-2691",
                                 "name":  "Oskar Lukasiak",
-                                "average":  84.93590470621497,
+                                "average":  86.08754075775616,
                                 "skill":  718,
                                 "finishingSkill":  718,
                                 "careerTags":  [
@@ -1158,7 +1155,7 @@
                             {
                                 "databasePlayerId":  "db-player-75785",
                                 "name":  "Maximilian Czerwinski",
-                                "average":  84.43315650623217,
+                                "average":  86.00005747418908,
                                 "skill":  717,
                                 "finishingSkill":  717,
                                 "careerTags":  [
@@ -1168,7 +1165,7 @@
                             {
                                 "databasePlayerId":  "db-player-66148",
                                 "name":  "Marvin van Velzen",
-                                "average":  84.43315650623217,
+                                "average":  86.00005747418908,
                                 "skill":  717,
                                 "finishingSkill":  717,
                                 "careerTags":  [
@@ -1176,51 +1173,11 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "db-player-17944",
-                                "name":  "Tytus Kanik",
-                                "average":  84.33979437719532,
-                                "skill":  717,
-                                "finishingSkill":  712,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-13396",
-                                "name":  "Samuel Price",
-                                "average":  83.57770780912206,
-                                "skill":  714,
-                                "finishingSkill":  715,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-78163",
-                                "name":  "Filip Bereza",
-                                "average":  83.20960069629584,
-                                "skill":  712,
-                                "finishingSkill":  712,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-9487",
-                                "name":  "Arno Merk",
-                                "average":  83.20960069629584,
-                                "skill":  712,
-                                "finishingSkill":  712,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-64791",
-                                "name":  "Niall Culleton",
-                                "average":  83.20960069629584,
-                                "skill":  712,
-                                "finishingSkill":  712,
+                                "databasePlayerId":  "db-player-15093",
+                                "name":  "Adam Lipscombe",
+                                "average":  85.70466506792718,
+                                "skill":  723,
+                                "finishingSkill":  716,
                                 "careerTags":  [
 
                                                ]
@@ -1228,9 +1185,49 @@
                             {
                                 "databasePlayerId":  "db-player-8954",
                                 "name":  "Pero Ljubic",
-                                "average":  83.07920080501303,
-                                "skill":  712,
-                                "finishingSkill":  714,
+                                "average":  85.54019546532902,
+                                "skill":  714,
+                                "finishingSkill":  731,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-13396",
+                                "name":  "Samuel Price",
+                                "average":  84.56141164244058,
+                                "skill":  714,
+                                "finishingSkill":  715,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-9487",
+                                "name":  "Arno Merk",
+                                "average":  84.55662594032711,
+                                "skill":  715,
+                                "finishingSkill":  716,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-78163",
+                                "name":  "Filip Bereza",
+                                "average":  84.55662594032711,
+                                "skill":  715,
+                                "finishingSkill":  716,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-64791",
+                                "name":  "Niall Culleton",
+                                "average":  84.55662594032711,
+                                "skill":  715,
+                                "finishingSkill":  716,
                                 "careerTags":  [
 
                                                ]
@@ -1238,19 +1235,9 @@
                             {
                                 "databasePlayerId":  "db-player-18182",
                                 "name":  "Matthias Ehlers",
-                                "average":  82.42302699415166,
-                                "skill":  709,
-                                "finishingSkill":  707,
-                                "careerTags":  [
-
-                                               ]
-                            },
-                            {
-                                "databasePlayerId":  "db-player-76488",
-                                "name":  "Tyler Thorpe",
-                                "average":  81.65746642553128,
-                                "skill":  703,
-                                "finishingSkill":  703,
+                                "average":  80.28237419195075,
+                                "skill":  708,
+                                "finishingSkill":  708,
                                 "careerTags":  [
 
                                                ]
@@ -1258,9 +1245,9 @@
                             {
                                 "databasePlayerId":  "db-player-75126",
                                 "name":  "Tavis Dudeney",
-                                "average":  81.63532113276662,
-                                "skill":  703,
-                                "finishingSkill":  701,
+                                "average":  79.86142365860964,
+                                "skill":  704,
+                                "finishingSkill":  704,
                                 "careerTags":  [
 
                                                ]
@@ -1268,7 +1255,7 @@
                             {
                                 "databasePlayerId":  "db-player-77021",
                                 "name":  "Yorick Hofkens",
-                                "average":  80.36987529866559,
+                                "average":  79.2710163769974,
                                 "skill":  699,
                                 "finishingSkill":  702,
                                 "careerTags":  [
@@ -1276,11 +1263,21 @@
                                                ]
                             },
                             {
-                                "databasePlayerId":  "player-johannes",
-                                "name":  "Johannes",
-                                "average":  50.875,
-                                "skill":  577,
-                                "finishingSkill":  577,
+                                "databasePlayerId":  "db-player-76488",
+                                "name":  "Tyler Thorpe",
+                                "average":  78.53303809589164,
+                                "skill":  703,
+                                "finishingSkill":  705,
+                                "careerTags":  [
+
+                                               ]
+                            },
+                            {
+                                "databasePlayerId":  "db-player-76449",
+                                "name":  "Marvin Kraft",
+                                "average":  77.94507307512538,
+                                "skill":  700,
+                                "finishingSkill":  700,
                                 "careerTags":  [
 
                                                ]
@@ -1297,31 +1294,64 @@
                          "id":  "ranking-1774094673068993",
                          "name":  "Order of Merit",
                          "validSeasons":  2,
-                         "resetAtSeasonEnd":  false
+                         "metric":  "money",
+                         "resetAtSeasonEnd":  false,
+                         "countedCategories":  [
+
+                                               ],
+                         "bestOfCount":  null,
+                         "discardWorstCount":  0,
+                         "seasonBonus":  0,
+                         "playoffBonus":  0
                      },
                      {
                          "id":  "ranking-1774094681690120",
                          "name":  "Pro Tour order of Merit",
                          "validSeasons":  1,
-                         "resetAtSeasonEnd":  false
+                         "metric":  "money",
+                         "resetAtSeasonEnd":  false,
+                         "countedCategories":  [
+
+                                               ],
+                         "bestOfCount":  null,
+                         "discardWorstCount":  0,
+                         "seasonBonus":  0,
+                         "playoffBonus":  0
                      },
                      {
                          "id":  "ranking-1774094698802276",
                          "name":  "Players Championship order of Merit",
                          "validSeasons":  1,
-                         "resetAtSeasonEnd":  true
+                         "metric":  "money",
+                         "resetAtSeasonEnd":  true,
+                         "countedCategories":  [
+
+                                               ],
+                         "bestOfCount":  null,
+                         "discardWorstCount":  0,
+                         "seasonBonus":  0,
+                         "playoffBonus":  0
                      },
                      {
                          "id":  "ranking-1774094708221212",
                          "name":  "European Tour order of Merit",
                          "validSeasons":  1,
-                         "resetAtSeasonEnd":  true
+                         "metric":  "money",
+                         "resetAtSeasonEnd":  true,
+                         "countedCategories":  [
+
+                                               ],
+                         "bestOfCount":  null,
+                         "discardWorstCount":  0,
+                         "seasonBonus":  0,
+                         "playoffBonus":  0
                      }
                  ],
     "calendar":  [
                      {
                          "id":  "calendar-1774094849803611-0",
                          "name":  "Players Championship 1",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1397,11 +1427,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-1",
                          "name":  "Players Championship 2",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1477,11 +1513,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-2",
                          "name":  "Players Championship 3",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1557,11 +1599,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-3",
                          "name":  "Players Championship 4",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1637,11 +1685,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-0",
                          "name":  "European Tour 1",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -1800,11 +1854,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-4",
                          "name":  "Players Championship 5",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1880,11 +1940,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-5",
                          "name":  "Players Championship 6",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -1960,11 +2026,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096625332520-0",
                          "name":  "World Masters",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  32,
@@ -2090,11 +2162,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-6",
                          "name":  "Players Championship 7",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2170,11 +2248,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-7",
                          "name":  "Players Championship 8",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2250,11 +2334,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-1",
                          "name":  "European Tour 2",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -2413,11 +2503,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-8",
                          "name":  "Players Championship 9",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2493,11 +2589,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096759734581-0",
                          "name":  "UK Open",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2598,11 +2700,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-9",
                          "name":  "Players Championship 10",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2678,11 +2786,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-2",
                          "name":  "European Tour 3",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -2841,11 +2955,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-10",
                          "name":  "Players Championship 11",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -2921,11 +3041,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-11",
                          "name":  "Players Championship 12",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3001,11 +3127,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-3",
                          "name":  "European Tour 4",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -3164,11 +3296,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-12",
                          "name":  "Players Championship 13",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3244,11 +3382,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-13",
                          "name":  "Players Championship 14",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3324,11 +3468,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-4",
                          "name":  "European Tour 5",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -3487,11 +3637,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-14",
                          "name":  "Players Championship 15",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3567,11 +3723,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-15",
                          "name":  "Players Championship 16",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3647,11 +3809,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-5",
                          "name":  "European Tour 6",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -3810,11 +3978,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-16",
                          "name":  "Players Championship 17",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -3890,11 +4064,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774097750937572-0",
                          "name":  "World Matchplay",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  32,
@@ -4020,11 +4200,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-17",
                          "name":  "Players Championship 18",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -4100,11 +4286,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-6",
                          "name":  "European Tour 7",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -4263,11 +4455,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-18",
                          "name":  "Players Championship 19",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -4343,11 +4541,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-19",
                          "name":  "Players Championship 20",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -4423,11 +4627,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-7",
                          "name":  "European Tour 8",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -4586,11 +4796,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-20",
                          "name":  "Players Championship 21",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -4666,11 +4882,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-8",
                          "name":  "European Tour 9",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -4829,11 +5051,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-21",
                          "name":  "Players Championship 22",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -4909,11 +5137,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-9",
                          "name":  "European Tour 10",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -5072,11 +5306,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-22",
                          "name":  "Players Championship 23",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -5152,11 +5392,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774097912666831-0",
                          "name":  "World Dart Grand Prix",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  32,
@@ -5282,11 +5528,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-23",
                          "name":  "Players Championship 24",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -5362,11 +5614,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-10",
                          "name":  "European Tour 11",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -5525,11 +5783,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-24",
                          "name":  "Players Championship 25",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -5605,11 +5869,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-25",
                          "name":  "Players Championship 26",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -5685,11 +5955,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-11",
                          "name":  "European Tour 12",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -5848,11 +6124,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-26",
                          "name":  "Players Championship 27",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -5928,11 +6210,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-27",
                          "name":  "Players Championship 28",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -6008,11 +6296,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-12",
                          "name":  "European Tour 13",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -6171,11 +6465,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-28",
                          "name":  "Players Championship 29",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -6251,11 +6551,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774098125278003-0",
                          "name":  "Grand Slam of Darts",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  16,
@@ -6437,11 +6743,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-29",
                          "name":  "Players Championship 30",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -6517,11 +6829,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-13",
                          "name":  "European Tour 14",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -6680,11 +6998,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-30",
                          "name":  "Players Championship 31",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -6760,11 +7084,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-31",
                          "name":  "Players Championship 32",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -6840,11 +7170,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774096302727872-14",
                          "name":  "European Tour 15",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  48,
@@ -7003,11 +7339,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-32",
                          "name":  "Players Championship 33",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -7083,11 +7425,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774098000792838-0",
                          "name":  "European Darts Championship",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  32,
@@ -7184,11 +7532,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774094849803611-33",
                          "name":  "Players Championship 34",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  128,
@@ -7264,11 +7618,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774098207290922-0",
                          "name":  "Players Championship Finals",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  64,
@@ -7367,11 +7727,17 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      },
                      {
                          "id":  "calendar-1774098302323689-0",
                          "name":  "Weltmeisterschaft",
+                         "categoryName":  "Standard",
                          "game":  "x01",
                          "format":  "knockout",
                          "fieldSize":  64,
@@ -7499,7 +7865,12 @@
                          "tagGate":  null,
                          "tournamentTagRules":  [
 
-                                                ]
+                                                ],
+                         "seriesGroupId":  null,
+                         "seriesIndex":  null,
+                         "seriesLength":  null,
+                         "seriesStage":  null,
+                         "leagueSeriesQualificationMode":  "fixedAtStart"
                      }
                  ]
 }

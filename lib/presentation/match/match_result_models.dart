@@ -188,6 +188,7 @@ class MatchParticipantStats {
   const MatchParticipantStats({
     required this.participantId,
     required this.participantName,
+    required this.isHuman,
     required this.pointsScored,
     required this.dartsThrown,
     required this.visits,
@@ -238,6 +239,7 @@ class MatchParticipantStats {
 
   final String participantId;
   final String participantName;
+  final bool isHuman;
   final int pointsScored;
   final int dartsThrown;
   final int visits;
@@ -331,6 +333,7 @@ class MatchParticipantStats {
     return <String, dynamic>{
       'participantId': participantId,
       'participantName': participantName,
+      'isHuman': isHuman,
       'pointsScored': pointsScored,
       'dartsThrown': dartsThrown,
       'visits': visits,
@@ -384,6 +387,8 @@ class MatchParticipantStats {
     return MatchParticipantStats(
       participantId: json['participantId'] as String,
       participantName: json['participantName'] as String,
+      isHuman: json['isHuman'] as bool? ??
+          ((json['participantId'] as String?) != 'legacy-bot'),
       pointsScored: (json['pointsScored'] as num?)?.toInt() ?? 0,
       dartsThrown: (json['dartsThrown'] as num?)?.toInt() ?? 0,
       visits: (json['visits'] as num?)?.toInt() ?? 0,
@@ -455,17 +460,44 @@ class MatchResultSummary {
   final List<MatchParticipantStats> participants;
   final List<MatchLegEntry> legs;
 
+  MatchParticipantStats get primaryParticipant =>
+      participants.isNotEmpty ? participants.first : throw StateError('No participants');
+
+  MatchParticipantStats? get secondaryParticipant =>
+      participants.length > 1 ? participants[1] : null;
+
+  MatchParticipantStats? _firstHumanParticipant() {
+    for (final participant in participants) {
+      if (participant.isHuman) {
+        return participant;
+      }
+    }
+    return null;
+  }
+
+  MatchParticipantStats? _firstBotParticipant() {
+    for (final participant in participants) {
+      if (!participant.isHuman) {
+        return participant;
+      }
+    }
+    return null;
+  }
+
   String get playerName =>
-      participants.isNotEmpty ? participants.first.participantName : 'Spieler';
+      (_firstHumanParticipant() ?? secondaryParticipant ?? primaryParticipant)
+          .participantName;
 
   String get botName => participants.length > 1
-      ? participants[1].participantName
-      : (participants.isNotEmpty ? participants.first.participantName : 'Bot');
+      ? (_firstBotParticipant() ?? secondaryParticipant ?? primaryParticipant)
+          .participantName
+      : primaryParticipant.participantName;
 
-  MatchParticipantStats get playerStats => participants.first;
+  MatchParticipantStats get playerStats =>
+      _firstHumanParticipant() ?? secondaryParticipant ?? primaryParticipant;
 
   MatchParticipantStats get botStats =>
-      participants.length > 1 ? participants[1] : participants.first;
+      _firstBotParticipant() ?? secondaryParticipant ?? primaryParticipant;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -517,6 +549,7 @@ class MatchResultSummary {
           <String, dynamic>{
             'participantId': 'legacy-player',
             'participantName': playerName,
+            'isHuman': true,
             ...((json['playerStats'] as Map?)?.cast<String, dynamic>() ??
                 <String, dynamic>{}),
           },
@@ -525,6 +558,7 @@ class MatchResultSummary {
           <String, dynamic>{
             'participantId': 'legacy-bot',
             'participantName': botName,
+            'isHuman': false,
             ...((json['botStats'] as Map?)?.cast<String, dynamic>() ??
                 <String, dynamic>{}),
           },

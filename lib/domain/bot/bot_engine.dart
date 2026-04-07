@@ -119,6 +119,7 @@ class BotEngine {
     X01Rules? rules,
     BoardGeometry? boardGeometry,
     CheckoutPlanner? checkoutPlanner,
+    this.recordPerformanceLogs = true,
   })  : rules = rules ?? const X01Rules(),
         boardGeometry = boardGeometry ?? const BoardGeometry(),
         checkoutPlanner =
@@ -127,6 +128,7 @@ class BotEngine {
   final X01Rules rules;
   final BoardGeometry boardGeometry;
   final CheckoutPlanner checkoutPlanner;
+  final bool recordPerformanceLogs;
 
   final Map<String, List<DartThrowResult>?> _preferredCheckoutCache =
       <String, List<DartThrowResult>?>{};
@@ -149,8 +151,121 @@ class BotEngine {
   final List<DartThrowResult> _allThrows = const X01Rules().buildAllThrows();
   final _BotPerfTotals _perfTotals = _BotPerfTotals();
 
+  Map<String, Object?> exportDeterministicTables() {
+    return <String, Object?>{
+      'version': 1,
+      'preferredLeaveTargets': <String, Object?>{
+        for (final entry in _preferredLeaveTargetCache.entries)
+          entry.key.toString(): _serializeThrowLabel(entry.value),
+      },
+      'preferredCheckouts': <String, Object?>{
+        for (final entry in _preferredCheckoutCache.entries)
+          entry.key: _serializeRoute(entry.value),
+      },
+      'preferredSetupRoutes': <String, Object?>{
+        for (final entry in _preferredSetupRouteCache.entries)
+          entry.key: _serializeRoute(entry.value),
+      },
+      'preferredSetupTargets': <String, Object?>{
+        for (final entry in _preferredSetupTargetCache.entries)
+          entry.key: _serializeThrowLabel(entry.value),
+      },
+      'inVisitSetupTargets': <String, Object?>{
+        for (final entry in _inVisitSetupTargetCache.entries)
+          entry.key: _serializeThrowLabel(entry.value),
+      },
+    };
+  }
+
+  void importDeterministicTables(Map<String, Object?> json) {
+    final leaveTargets =
+        ((json['preferredLeaveTargets'] as Map?) ?? const <Object?, Object?>{})
+            .cast<Object?, Object?>();
+    for (final entry in leaveTargets.entries) {
+      final score = int.tryParse(entry.key.toString());
+      if (score == null) {
+        continue;
+      }
+      _preferredLeaveTargetCache[score] = _deserializeThrowLabel(entry.value);
+    }
+
+    void importRouteMap(
+      Map<String, List<DartThrowResult>?> target,
+      Object? raw,
+    ) {
+      final routeMap =
+          ((raw as Map?) ?? const <Object?, Object?>{}).cast<Object?, Object?>();
+      for (final entry in routeMap.entries) {
+        target[entry.key.toString()] = _deserializeRoute(entry.value);
+      }
+    }
+
+    importRouteMap(_preferredCheckoutCache, json['preferredCheckouts']);
+    importRouteMap(_preferredSetupRouteCache, json['preferredSetupRoutes']);
+
+    void importThrowMap(
+      Map<String, DartThrowResult?> target,
+      Object? raw,
+    ) {
+      final throwMap =
+          ((raw as Map?) ?? const <Object?, Object?>{}).cast<Object?, Object?>();
+      for (final entry in throwMap.entries) {
+        target[entry.key.toString()] = _deserializeThrowLabel(entry.value);
+      }
+    }
+
+    importThrowMap(_preferredSetupTargetCache, json['preferredSetupTargets']);
+    importThrowMap(_inVisitSetupTargetCache, json['inVisitSetupTargets']);
+  }
+
+  void compactSimulationCaches() {
+    _throwModelCache.clear();
+    _checkoutRoutesCache.clear();
+    checkoutPlanner.clearCaches();
+  }
+
   void resetPerformanceTotals() {
     _perfTotals.reset();
+  }
+
+  Object? _serializeThrowLabel(DartThrowResult? entry) => entry?.label;
+
+  List<Object?>? _serializeRoute(List<DartThrowResult>? route) {
+    if (route == null) {
+      return null;
+    }
+    return route.map((entry) => entry.label).toList(growable: false);
+  }
+
+  DartThrowResult? _deserializeThrowLabel(Object? value) {
+    final label = value?.toString();
+    if (label == null || label.isEmpty) {
+      return null;
+    }
+    for (final entry in _allThrows) {
+      if (entry.label == label) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  List<DartThrowResult>? _deserializeRoute(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is! List) {
+      return null;
+    }
+    final route = <DartThrowResult>[];
+    for (final label in value) {
+      final entry = _deserializeThrowLabel(label);
+      if (entry == null) {
+        return null;
+      }
+      route.add(entry);
+    }
+    return route;
   }
 
   BotAimDecision decideAim({
@@ -180,15 +295,6 @@ class BotEngine {
       final decision = BotAimDecision(
         target: rules.createDouble(score ~/ 2),
         reason: 'Direct double finish',
-      );
-      _aimDecisionCache[cacheKey] = decision;
-      return decision;
-    }
-
-    if (score <= 20) {
-      final decision = BotAimDecision(
-        target: rules.createSingle((score - 1).clamp(0, 20)),
-        reason: 'Avoid bogey finish',
       );
       _aimDecisionCache[cacheKey] = decision;
       return decision;
@@ -242,6 +348,15 @@ class BotEngine {
         target: preferredCheckout.first,
         reason: 'Preferred checkout',
         route: preferredCheckout,
+      );
+      _aimDecisionCache[cacheKey] = decision;
+      return decision;
+    }
+
+    if (score <= 20) {
+      final decision = BotAimDecision(
+        target: rules.createSingle((score - 1).clamp(0, 20)),
+        reason: 'Avoid bogey finish',
       );
       _aimDecisionCache[cacheKey] = decision;
       return decision;
@@ -494,6 +609,9 @@ class BotEngine {
     required int projectMicroseconds,
     required int classifyMicroseconds,
   }) {
+    if (!recordPerformanceLogs) {
+      return;
+    }
     _perfTotals.record(
       totalMicrosecondsValue: totalMicroseconds,
       decideAimMicrosecondsValue: decideAimMicroseconds,

@@ -5,6 +5,13 @@ import 'x01_models.dart';
 class X01Rules {
   const X01Rules({Random? random}) : _random = random;
 
+  static final Set<int> _legalVisitScores = _computeLegalVisitScores(
+    requireDoubleInStart: false,
+  );
+  static final Set<int> _legalDoubleInVisitScores = _computeLegalVisitScores(
+    requireDoubleInStart: true,
+  );
+
   static const List<int> wheel = <int>[
     20,
     1,
@@ -189,13 +196,32 @@ class X01Rules {
     return currentScore - scoredPoints;
   }
 
+  bool isAchievableVisitScore(
+    int score, {
+    bool requireDoubleInStart = false,
+  }) {
+    if (score < 0 || score > 180) {
+      return false;
+    }
+    return (requireDoubleInStart
+            ? _legalDoubleInVisitScores
+            : _legalVisitScores)
+        .contains(score);
+  }
+
   CheckoutPlan? findCheckout({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
     List<DartThrowResult>? allThrows,
   }) {
     final throws = allThrows ?? buildAllThrows();
-    final plan = _findCheckout(score, dartsLeft, throws);
+    final plan = _findCheckout(
+      score,
+      dartsLeft,
+      throws,
+      checkoutRequirement,
+    );
     if (plan == null) {
       return null;
     }
@@ -206,6 +232,7 @@ class X01Rules {
     required int remainingScore,
     required int remainingPoints,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
     List<DartThrowResult>? allThrows,
   }) {
     final throws = allThrows ?? buildAllThrows();
@@ -214,6 +241,7 @@ class X01Rules {
       remainingPoints,
       dartsLeft,
       throws,
+      checkoutRequirement,
     );
     if (plan == null) {
       return null;
@@ -223,6 +251,7 @@ class X01Rules {
 
   DartThrowResult findSetupThrow(
     int score, {
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
     List<DartThrowResult>? allThrows,
   }) {
     final preferred = <DartThrowResult>[
@@ -239,7 +268,13 @@ class X01Rules {
     for (final candidate in preferred) {
       final rest = score - candidate.scoredPoints;
       if (rest > 1 &&
-          findCheckout(score: rest, dartsLeft: 2, allThrows: throws) != null) {
+          findCheckout(
+                score: rest,
+                dartsLeft: 2,
+                checkoutRequirement: checkoutRequirement,
+                allThrows: throws,
+              ) !=
+              null) {
         return candidate;
       }
     }
@@ -250,12 +285,17 @@ class X01Rules {
   DartThrowResult chooseComputerThrow(
     int score, {
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
     List<DartThrowResult>? allThrows,
     bool simulateMiss = true,
   }) {
     final throws = allThrows ?? buildAllThrows();
-    final finish =
-        findCheckout(score: score, dartsLeft: dartsLeft, allThrows: throws);
+    final finish = findCheckout(
+      score: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      allThrows: throws,
+    );
     if (finish != null && finish.throws.isNotEmpty) {
       return simulateMiss
           ? maybeMiss(finish.throws.first)
@@ -266,7 +306,11 @@ class X01Rules {
     if (score > 170) {
       target = createTriple(20);
     } else if (score >= 62 && score <= 170) {
-      target = findSetupThrow(score, allThrows: throws);
+      target = findSetupThrow(
+        score,
+        checkoutRequirement: checkoutRequirement,
+        allThrows: throws,
+      );
     } else if (score == 50) {
       target = createBull();
     } else if (score <= 40 && score.isEven) {
@@ -284,6 +328,7 @@ class X01Rules {
     int score,
     int dartsLeft,
     List<DartThrowResult> allThrows,
+    CheckoutRequirement checkoutRequirement,
   ) {
     if (dartsLeft <= 0) {
       return score == 0 ? <DartThrowResult>[] : null;
@@ -291,18 +336,23 @@ class X01Rules {
 
     for (final dartThrow in allThrows) {
       final rest = score - dartThrow.scoredPoints;
-      if (rest < 0 || rest == 1) {
+      if (rest < 0 || _isUnfinishableRemaining(rest, checkoutRequirement)) {
         continue;
       }
 
       if (rest == 0) {
-        if (dartThrow.isFinishDouble) {
+        if (dartThrow.matchesCheckoutRequirement(checkoutRequirement)) {
           return <DartThrowResult>[dartThrow];
         }
         continue;
       }
 
-      final tail = _findCheckout(rest, dartsLeft - 1, allThrows);
+      final tail = _findCheckout(
+        rest,
+        dartsLeft - 1,
+        allThrows,
+        checkoutRequirement,
+      );
       if (tail != null) {
         return <DartThrowResult>[dartThrow, ...tail];
       }
@@ -316,6 +366,7 @@ class X01Rules {
     int remainingPoints,
     int dartsLeft,
     List<DartThrowResult> allThrows,
+    CheckoutRequirement checkoutRequirement,
   ) {
     if (remainingScore < 0 || remainingPoints < 0) {
       return null;
@@ -331,12 +382,14 @@ class X01Rules {
       final nextScore = remainingScore - dartThrow.scoredPoints;
       final nextPoints = remainingPoints - dartThrow.scoredPoints;
 
-      if (nextScore < 0 || nextPoints < 0 || nextScore == 1) {
+      if (nextScore < 0 ||
+          nextPoints < 0 ||
+          _isUnfinishableRemaining(nextScore, checkoutRequirement)) {
         continue;
       }
 
       if (nextScore == 0 && nextPoints == 0) {
-        if (dartThrow.isFinishDouble) {
+        if (dartThrow.matchesCheckoutRequirement(checkoutRequirement)) {
           return <DartThrowResult>[dartThrow];
         }
         continue;
@@ -347,6 +400,7 @@ class X01Rules {
         nextPoints,
         dartsLeft - 1,
         allThrows,
+        checkoutRequirement,
       );
       if (tail != null) {
         return <DartThrowResult>[dartThrow, ...tail];
@@ -354,5 +408,64 @@ class X01Rules {
     }
 
     return null;
+  }
+
+  static Set<int> _computeLegalVisitScores({
+    required bool requireDoubleInStart,
+  }) {
+    final rules = const X01Rules();
+    final throws = <DartThrowResult>[
+      rules.createMiss(),
+      ...rules.buildAllThrows(),
+    ];
+    final scores = <int>{0};
+    final startRequirement = requireDoubleInStart
+        ? StartRequirement.doubleIn
+        : StartRequirement.straightIn;
+
+    for (final first in throws) {
+      for (final second in throws) {
+        for (final third in throws) {
+          scores.add(
+            _simulateVisitScore(
+              throws: <DartThrowResult>[first, second, third],
+              startRequirement: startRequirement,
+            ),
+          );
+        }
+      }
+    }
+
+    return scores;
+  }
+
+  bool _isUnfinishableRemaining(
+    int score,
+    CheckoutRequirement checkoutRequirement,
+  ) {
+    if (score != 1) {
+      return false;
+    }
+    return checkoutRequirement != CheckoutRequirement.singleOut;
+  }
+
+  static int _simulateVisitScore({
+    required List<DartThrowResult> throws,
+    required StartRequirement startRequirement,
+  }) {
+    var openedLeg = startRequirement == StartRequirement.straightIn;
+    var runningScore = 0;
+
+    for (final dart in throws) {
+      if (!openedLeg) {
+        if (!dart.matchesStartRequirement(startRequirement)) {
+          continue;
+        }
+        openedLeg = true;
+      }
+      runningScore += dart.scoredPoints;
+    }
+
+    return runningScore;
   }
 }

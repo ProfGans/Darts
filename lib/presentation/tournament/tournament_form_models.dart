@@ -8,6 +8,7 @@ class TournamentFormData {
   const TournamentFormData({
     this.game = TournamentGame.x01,
     this.format = TournamentFormat.knockout,
+    this.tierInput = '1',
     this.fieldSizeInput = '16',
     this.matchMode = MatchMode.legs,
     this.legsValue = 6,
@@ -24,6 +25,7 @@ class TournamentFormData {
 
   final TournamentGame game;
   final TournamentFormat format;
+  final String tierInput;
   final String fieldSizeInput;
   final MatchMode matchMode;
   final int legsValue;
@@ -40,6 +42,7 @@ class TournamentFormData {
   int get effectiveLegsToWin => matchMode == MatchMode.legs ? legsValue : 3;
   int get effectiveSetsToWin => matchMode == MatchMode.legs ? 1 : setsToWin;
   int get effectiveLegsPerSet => matchMode == MatchMode.legs ? 1 : legsValue;
+  int? get parsedTier => int.tryParse(tierInput.trim());
   int? get parsedFieldSize => int.tryParse(fieldSizeInput.trim());
   int? get parsedStartScore => int.tryParse(startScoreInput.trim());
   int get roundCount {
@@ -78,6 +81,7 @@ class TournamentFormData {
   TournamentFormData copyWith({
     TournamentGame? game,
     TournamentFormat? format,
+    String? tierInput,
     String? fieldSizeInput,
     MatchMode? matchMode,
     int? legsValue,
@@ -94,6 +98,7 @@ class TournamentFormData {
     return TournamentFormData(
       game: game ?? this.game,
       format: format ?? this.format,
+      tierInput: tierInput ?? this.tierInput,
       fieldSizeInput: fieldSizeInput ?? this.fieldSizeInput,
       matchMode: matchMode ?? this.matchMode,
       legsValue: legsValue ?? this.legsValue,
@@ -114,6 +119,7 @@ class TournamentFormData {
     return TournamentFormData(
       game: item.game,
       format: item.format,
+      tierInput: '${item.tier}',
       fieldSizeInput: '${item.fieldSize}',
       matchMode: item.matchMode,
       legsValue:

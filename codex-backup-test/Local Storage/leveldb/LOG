@@ -1,0 +1,6 @@
+2026/04/03-17:26:07.899 5f64 Reusing MANIFEST C:\Users\johan\AppData\Roaming\Codex\Local Storage\leveldb/MANIFEST-000001
+2026/04/03-17:26:07.907 5f64 Recovering log #71
+2026/04/03-17:26:07.907 5f64 Reusing old log C:\Users\johan\AppData\Roaming\Codex\Local Storage\leveldb/000071.log 
+2026/04/03-17:27:07.916 1788 Level-0 table #76: started
+2026/04/03-17:27:07.918 1788 Level-0 table #76: 21714 bytes OK
+2026/04/03-17:27:07.919 1788 Delete type=0 #71

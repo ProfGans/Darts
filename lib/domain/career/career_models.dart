@@ -110,6 +110,8 @@ class CareerQualificationCondition {
     this.type = CareerQualificationConditionType.rankingRange,
     this.requiredCareerTags = const <String>[],
     this.excludedCareerTags = const <String>[],
+    this.requiredNationalities = const <String>[],
+    this.excludedNationalities = const <String>[],
   });
 
   final String? rankingId;
@@ -120,6 +122,8 @@ class CareerQualificationCondition {
   final CareerQualificationConditionType type;
   final List<String> requiredCareerTags;
   final List<String> excludedCareerTags;
+  final List<String> requiredNationalities;
+  final List<String> excludedNationalities;
 
   CareerQualificationCondition copyWith({
     String? rankingId,
@@ -130,6 +134,8 @@ class CareerQualificationCondition {
     CareerQualificationConditionType? type,
     List<String>? requiredCareerTags,
     List<String>? excludedCareerTags,
+    List<String>? requiredNationalities,
+    List<String>? excludedNationalities,
     bool clearRankingId = false,
     bool clearSlotCount = false,
   }) {
@@ -142,6 +148,10 @@ class CareerQualificationCondition {
       type: type ?? this.type,
       requiredCareerTags: requiredCareerTags ?? this.requiredCareerTags,
       excludedCareerTags: excludedCareerTags ?? this.excludedCareerTags,
+      requiredNationalities:
+          requiredNationalities ?? this.requiredNationalities,
+      excludedNationalities:
+          excludedNationalities ?? this.excludedNationalities,
     );
   }
 
@@ -152,10 +162,12 @@ class CareerQualificationCondition {
       'toRank': toRank,
       'entryRound': entryRound,
       'slotCount': slotCount,
-      'type': type.name,
-      'requiredCareerTags': requiredCareerTags,
-      'excludedCareerTags': excludedCareerTags,
-    };
+        'type': type.name,
+        'requiredCareerTags': requiredCareerTags,
+        'excludedCareerTags': excludedCareerTags,
+        'requiredNationalities': requiredNationalities,
+        'excludedNationalities': excludedNationalities,
+      };
   }
 
   static CareerQualificationCondition fromJson(Map<String, dynamic> json) {
@@ -169,17 +181,27 @@ class CareerQualificationCondition {
         json['type'] as String? ??
             CareerQualificationConditionType.rankingRange.name,
       ),
-      requiredCareerTags:
-          (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-      excludedCareerTags:
-          (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-    );
+        requiredCareerTags:
+            (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedCareerTags:
+            (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        requiredNationalities:
+            (json['requiredNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedNationalities:
+            (json['excludedNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+      );
   }
 }
 
@@ -200,6 +222,8 @@ class CareerTournamentSlotRule {
     this.rankingId,
     this.requiredCareerTags = const <String>[],
     this.excludedCareerTags = const <String>[],
+    this.requiredNationalities = const <String>[],
+    this.excludedNationalities = const <String>[],
     this.fromRank = 1,
     this.toRank = 1,
     this.slotCount = 1,
@@ -211,6 +235,8 @@ class CareerTournamentSlotRule {
   final String? rankingId;
   final List<String> requiredCareerTags;
   final List<String> excludedCareerTags;
+  final List<String> requiredNationalities;
+  final List<String> excludedNationalities;
   final int fromRank;
   final int toRank;
   final int slotCount;
@@ -223,6 +249,8 @@ class CareerTournamentSlotRule {
     bool clearRankingId = false,
     List<String>? requiredCareerTags,
     List<String>? excludedCareerTags,
+    List<String>? requiredNationalities,
+    List<String>? excludedNationalities,
     int? fromRank,
     int? toRank,
     int? slotCount,
@@ -234,6 +262,10 @@ class CareerTournamentSlotRule {
       rankingId: clearRankingId ? null : (rankingId ?? this.rankingId),
       requiredCareerTags: requiredCareerTags ?? this.requiredCareerTags,
       excludedCareerTags: excludedCareerTags ?? this.excludedCareerTags,
+      requiredNationalities:
+          requiredNationalities ?? this.requiredNationalities,
+      excludedNationalities:
+          excludedNationalities ?? this.excludedNationalities,
       fromRank: fromRank ?? this.fromRank,
       toRank: toRank ?? this.toRank,
       slotCount: slotCount ?? this.slotCount,
@@ -245,10 +277,12 @@ class CareerTournamentSlotRule {
     return <String, dynamic>{
       'id': id,
       'sourceType': sourceType.name,
-      'rankingId': rankingId,
-      'requiredCareerTags': requiredCareerTags,
-      'excludedCareerTags': excludedCareerTags,
-      'fromRank': fromRank,
+        'rankingId': rankingId,
+        'requiredCareerTags': requiredCareerTags,
+        'excludedCareerTags': excludedCareerTags,
+        'requiredNationalities': requiredNationalities,
+        'excludedNationalities': excludedNationalities,
+        'fromRank': fromRank,
       'toRank': toRank,
       'slotCount': slotCount,
       'entryRound': entryRound,
@@ -262,18 +296,28 @@ class CareerTournamentSlotRule {
         json['sourceType'] as String? ??
             CareerTournamentSlotSourceType.rankingRange.name,
       ),
-      rankingId: json['rankingId'] as String?,
-      requiredCareerTags:
-          (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-      excludedCareerTags:
-          (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-      fromRank: (json['fromRank'] as num?)?.toInt() ?? 1,
+        rankingId: json['rankingId'] as String?,
+        requiredCareerTags:
+            (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedCareerTags:
+            (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        requiredNationalities:
+            (json['requiredNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedNationalities:
+            (json['excludedNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        fromRank: (json['fromRank'] as num?)?.toInt() ?? 1,
       toRank: (json['toRank'] as num?)?.toInt() ?? 1,
       slotCount: (json['slotCount'] as num?)?.toInt() ?? 1,
       entryRound: (json['entryRound'] as num?)?.toInt() ?? 1,
@@ -290,10 +334,12 @@ class CareerTournamentSlotRule {
           condition.type == CareerQualificationConditionType.careerTagOnly
               ? CareerTournamentSlotSourceType.careerTag
               : CareerTournamentSlotSourceType.rankingRange,
-      rankingId: condition.rankingId,
-      requiredCareerTags: condition.requiredCareerTags,
-      excludedCareerTags: condition.excludedCareerTags,
-      fromRank: condition.fromRank,
+        rankingId: condition.rankingId,
+        requiredCareerTags: condition.requiredCareerTags,
+        excludedCareerTags: condition.excludedCareerTags,
+        requiredNationalities: condition.requiredNationalities,
+        excludedNationalities: condition.excludedNationalities,
+        fromRank: condition.fromRank,
       toRank: condition.toRank,
       slotCount: condition.slotCount ??
           (condition.type == CareerQualificationConditionType.rankingRange
@@ -309,6 +355,82 @@ enum CareerTournamentFillSourceType {
   average,
 }
 
+class CareerGeneratedAgeDistribution {
+  const CareerGeneratedAgeDistribution({
+    required this.minAge,
+    required this.maxAge,
+    required this.percent,
+  });
+
+  final int minAge;
+  final int maxAge;
+  final int percent;
+
+  CareerGeneratedAgeDistribution copyWith({
+    int? minAge,
+    int? maxAge,
+    int? percent,
+  }) {
+    return CareerGeneratedAgeDistribution(
+      minAge: minAge ?? this.minAge,
+      maxAge: maxAge ?? this.maxAge,
+      percent: percent ?? this.percent,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'minAge': minAge,
+      'maxAge': maxAge,
+      'percent': percent,
+    };
+  }
+
+  static CareerGeneratedAgeDistribution fromJson(Map<String, dynamic> json) {
+    return CareerGeneratedAgeDistribution(
+      minAge: (json['minAge'] as num?)?.toInt() ?? 18,
+      maxAge: (json['maxAge'] as num?)?.toInt() ?? 30,
+      percent: (json['percent'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class CareerGeneratedNationalityDistribution {
+  const CareerGeneratedNationalityDistribution({
+    required this.nationality,
+    required this.percent,
+  });
+
+  final String nationality;
+  final int percent;
+
+  CareerGeneratedNationalityDistribution copyWith({
+    String? nationality,
+    int? percent,
+  }) {
+    return CareerGeneratedNationalityDistribution(
+      nationality: nationality ?? this.nationality,
+      percent: percent ?? this.percent,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'nationality': nationality,
+      'percent': percent,
+    };
+  }
+
+  static CareerGeneratedNationalityDistribution fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return CareerGeneratedNationalityDistribution(
+      nationality: (json['nationality'] as String? ?? '').trim(),
+      percent: (json['percent'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class CareerTournamentFillRule {
   const CareerTournamentFillRule({
     required this.id,
@@ -316,7 +438,14 @@ class CareerTournamentFillRule {
     this.rankingId,
     this.requiredCareerTags = const <String>[],
     this.excludedCareerTags = const <String>[],
+    this.requiredNationalities = const <String>[],
+    this.excludedNationalities = const <String>[],
     this.maxCount = 0,
+    this.autoGeneratePlayers = false,
+    this.generatedAgeDistributions =
+        const <CareerGeneratedAgeDistribution>[],
+    this.generatedNationalityDistributions =
+        const <CareerGeneratedNationalityDistribution>[],
   });
 
   final String id;
@@ -324,7 +453,13 @@ class CareerTournamentFillRule {
   final String? rankingId;
   final List<String> requiredCareerTags;
   final List<String> excludedCareerTags;
+  final List<String> requiredNationalities;
+  final List<String> excludedNationalities;
   final int maxCount;
+  final bool autoGeneratePlayers;
+  final List<CareerGeneratedAgeDistribution> generatedAgeDistributions;
+  final List<CareerGeneratedNationalityDistribution>
+      generatedNationalityDistributions;
 
   CareerTournamentFillRule copyWith({
     String? id,
@@ -333,7 +468,13 @@ class CareerTournamentFillRule {
     bool clearRankingId = false,
     List<String>? requiredCareerTags,
     List<String>? excludedCareerTags,
+    List<String>? requiredNationalities,
+    List<String>? excludedNationalities,
     int? maxCount,
+    bool? autoGeneratePlayers,
+    List<CareerGeneratedAgeDistribution>? generatedAgeDistributions,
+    List<CareerGeneratedNationalityDistribution>?
+        generatedNationalityDistributions,
   }) {
     return CareerTournamentFillRule(
       id: id ?? this.id,
@@ -341,7 +482,17 @@ class CareerTournamentFillRule {
       rankingId: clearRankingId ? null : (rankingId ?? this.rankingId),
       requiredCareerTags: requiredCareerTags ?? this.requiredCareerTags,
       excludedCareerTags: excludedCareerTags ?? this.excludedCareerTags,
+      requiredNationalities:
+          requiredNationalities ?? this.requiredNationalities,
+      excludedNationalities:
+          excludedNationalities ?? this.excludedNationalities,
       maxCount: maxCount ?? this.maxCount,
+      autoGeneratePlayers: autoGeneratePlayers ?? this.autoGeneratePlayers,
+      generatedAgeDistributions:
+          generatedAgeDistributions ?? this.generatedAgeDistributions,
+      generatedNationalityDistributions:
+          generatedNationalityDistributions ??
+          this.generatedNationalityDistributions,
     );
   }
 
@@ -349,10 +500,18 @@ class CareerTournamentFillRule {
     return <String, dynamic>{
       'id': id,
       'sourceType': sourceType.name,
-      'rankingId': rankingId,
-      'requiredCareerTags': requiredCareerTags,
-      'excludedCareerTags': excludedCareerTags,
-      'maxCount': maxCount,
+        'rankingId': rankingId,
+        'requiredCareerTags': requiredCareerTags,
+        'excludedCareerTags': excludedCareerTags,
+        'requiredNationalities': requiredNationalities,
+        'excludedNationalities': excludedNationalities,
+        'maxCount': maxCount,
+        'autoGeneratePlayers': autoGeneratePlayers,
+        'generatedAgeDistributions':
+            generatedAgeDistributions.map((entry) => entry.toJson()).toList(),
+        'generatedNationalityDistributions': generatedNationalityDistributions
+            .map((entry) => entry.toJson())
+            .toList(),
     };
   }
 
@@ -363,19 +522,48 @@ class CareerTournamentFillRule {
         json['sourceType'] as String? ??
             CareerTournamentFillSourceType.average.name,
       ),
-      rankingId: json['rankingId'] as String?,
-      requiredCareerTags:
-          (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-      excludedCareerTags:
-          (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
-              .map((entry) => entry.toString().trim())
-              .where((entry) => entry.isNotEmpty)
-              .toList(),
-      maxCount: (json['maxCount'] as num?)?.toInt() ?? 0,
-    );
+        rankingId: json['rankingId'] as String?,
+        requiredCareerTags:
+            (json['requiredCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedCareerTags:
+            (json['excludedCareerTags'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        requiredNationalities:
+            (json['requiredNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        excludedNationalities:
+            (json['excludedNationalities'] as List<dynamic>? ?? const <dynamic>[])
+                .map((entry) => entry.toString().trim())
+                .where((entry) => entry.isNotEmpty)
+                .toList(),
+        maxCount: (json['maxCount'] as num?)?.toInt() ?? 0,
+        autoGeneratePlayers: json['autoGeneratePlayers'] as bool? ?? false,
+        generatedAgeDistributions:
+            (json['generatedAgeDistributions'] as List<dynamic>? ??
+                    const <dynamic>[])
+                .map(
+                  (entry) => CareerGeneratedAgeDistribution.fromJson(
+                    (entry as Map).cast<String, dynamic>(),
+                  ),
+                )
+                .toList(),
+        generatedNationalityDistributions:
+            (json['generatedNationalityDistributions'] as List<dynamic>? ??
+                    const <dynamic>[])
+                .map(
+                  (entry) => CareerGeneratedNationalityDistribution.fromJson(
+                    (entry as Map).cast<String, dynamic>(),
+                  ),
+                )
+                .toList(),
+      );
   }
 }
 
@@ -728,6 +916,7 @@ class CareerDatabasePlayer {
     required this.average,
     required this.skill,
     required this.finishingSkill,
+    this.nationality,
     this.careerTags = const <CareerPlayerTag>[],
   });
 
@@ -736,6 +925,7 @@ class CareerDatabasePlayer {
   final double average;
   final int skill;
   final int finishingSkill;
+  final String? nationality;
   final List<CareerPlayerTag> careerTags;
 
   List<String> get activeTagNames {
@@ -745,44 +935,50 @@ class CareerDatabasePlayer {
   CareerDatabasePlayer copyWith({
     String? databasePlayerId,
     String? name,
-    double? average,
-    int? skill,
-    int? finishingSkill,
-    List<CareerPlayerTag>? careerTags,
-  }) {
+      double? average,
+      int? skill,
+      int? finishingSkill,
+      String? nationality,
+      List<CareerPlayerTag>? careerTags,
+    }) {
     return CareerDatabasePlayer(
       databasePlayerId: databasePlayerId ?? this.databasePlayerId,
       name: name ?? this.name,
-      average: average ?? this.average,
-      skill: skill ?? this.skill,
-      finishingSkill: finishingSkill ?? this.finishingSkill,
-      careerTags: careerTags ?? this.careerTags,
-    );
+        average: average ?? this.average,
+        skill: skill ?? this.skill,
+        finishingSkill: finishingSkill ?? this.finishingSkill,
+        nationality: nationality ?? this.nationality,
+        careerTags: careerTags ?? this.careerTags,
+      );
   }
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'databasePlayerId': databasePlayerId,
       'name': name,
-      'average': average,
-      'skill': skill,
-      'finishingSkill': finishingSkill,
-      'careerTags': careerTags.map((entry) => entry.toJson()).toList(),
-    };
+        'average': average,
+        'skill': skill,
+        'finishingSkill': finishingSkill,
+        'nationality': nationality,
+        'careerTags': careerTags.map((entry) => entry.toJson()).toList(),
+      };
   }
 
-  static CareerDatabasePlayer fromJson(Map<String, dynamic> json) {
-    return CareerDatabasePlayer(
-      databasePlayerId: json['databasePlayerId'] as String,
-      name: json['name'] as String,
-      average: (json['average'] as num?)?.toDouble() ?? 0,
-      skill: (json['skill'] as num?)?.toInt() ?? 700,
-      finishingSkill: (json['finishingSkill'] as num?)?.toInt() ?? 700,
-      careerTags: (json['careerTags'] as List<dynamic>? ?? const <dynamic>[])
-          .map(CareerPlayerTag.fromJson)
-          .where((entry) => entry.tagName.trim().isNotEmpty)
-          .toList(),
-    );
+    static CareerDatabasePlayer fromJson(Map<String, dynamic> json) {
+      final rawNationality = (json['nationality'] as String?)?.trim();
+      return CareerDatabasePlayer(
+        databasePlayerId: json['databasePlayerId'] as String,
+        name: json['name'] as String,
+        average: (json['average'] as num?)?.toDouble() ?? 0,
+        skill: (json['skill'] as num?)?.toInt() ?? 700,
+        finishingSkill: (json['finishingSkill'] as num?)?.toInt() ?? 700,
+        nationality:
+            rawNationality == null || rawNationality.isEmpty ? null : rawNationality,
+        careerTags: (json['careerTags'] as List<dynamic>? ?? const <dynamic>[])
+            .map(CareerPlayerTag.fromJson)
+            .where((entry) => entry.tagName.trim().isNotEmpty)
+            .toList(),
+      );
   }
 }
 
@@ -997,6 +1193,7 @@ class CareerCalendarItem {
     required this.id,
     required this.name,
     this.categoryName = 'Standard',
+    this.tier = 1,
     this.game = TournamentGame.x01,
     this.format = TournamentFormat.knockout,
     required this.fieldSize,
@@ -1038,6 +1235,7 @@ class CareerCalendarItem {
   final String id;
   final String name;
   final String categoryName;
+  final int tier;
   final TournamentGame game;
   final TournamentFormat format;
   final int fieldSize;
@@ -1130,6 +1328,7 @@ class CareerCalendarItem {
     String? id,
     String? name,
     String? categoryName,
+    int? tier,
     TournamentGame? game,
     TournamentFormat? format,
     int? fieldSize,
@@ -1177,6 +1376,7 @@ class CareerCalendarItem {
       id: id ?? this.id,
       name: name ?? this.name,
       categoryName: categoryName ?? this.categoryName,
+      tier: tier ?? this.tier,
       game: game ?? this.game,
       format: format ?? this.format,
       fieldSize: fieldSize ?? this.fieldSize,
@@ -1229,10 +1429,11 @@ class CareerCalendarItem {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
-      'id': id,
-      'name': name,
-      'categoryName': categoryName,
-      'game': game.name,
+        'id': id,
+        'name': name,
+        'categoryName': categoryName,
+        'tier': tier,
+        'game': game.name,
       'format': format.name,
       'fieldSize': fieldSize,
       'matchMode': matchMode.name,
@@ -1275,10 +1476,11 @@ class CareerCalendarItem {
 
   static CareerCalendarItem fromJson(Map<String, dynamic> json) {
     return CareerCalendarItem(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      categoryName: json['categoryName'] as String? ?? 'Standard',
-      game: TournamentGame.values.byName(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        categoryName: json['categoryName'] as String? ?? 'Standard',
+        tier: (json['tier'] as num?)?.toInt() ?? 1,
+        game: TournamentGame.values.byName(
         json['game'] as String? ?? TournamentGame.x01.name,
       ),
       format: TournamentFormat.values.byName(
@@ -1450,6 +1652,7 @@ class CareerCompletedTournament {
     required this.calendarIndex,
     required this.name,
     this.categoryName = 'Standard',
+    this.tier = 1,
     required this.fieldSize,
     required this.winnerId,
     required this.winnerName,
@@ -1471,6 +1674,7 @@ class CareerCompletedTournament {
   final int calendarIndex;
   final String name;
   final String categoryName;
+  final int tier;
   final int fieldSize;
   final String winnerId;
   final String winnerName;
@@ -1490,10 +1694,11 @@ class CareerCompletedTournament {
     return <String, dynamic>{
       'seasonNumber': seasonNumber,
       'calendarItemId': calendarItemId,
-      'calendarIndex': calendarIndex,
-      'name': name,
-      'categoryName': categoryName,
-      'fieldSize': fieldSize,
+        'calendarIndex': calendarIndex,
+        'name': name,
+        'categoryName': categoryName,
+        'tier': tier,
+        'fieldSize': fieldSize,
       'winnerId': winnerId,
       'winnerName': winnerName,
       'runnerUpId': runnerUpId,
@@ -1518,10 +1723,11 @@ class CareerCompletedTournament {
     return CareerCompletedTournament(
       seasonNumber: (json['seasonNumber'] as num).toInt(),
       calendarItemId: json['calendarItemId'] as String,
-      calendarIndex: (json['calendarIndex'] as num?)?.toInt() ?? -1,
-      name: json['name'] as String,
-      categoryName: json['categoryName'] as String? ?? 'Standard',
-      fieldSize: (json['fieldSize'] as num).toInt(),
+        calendarIndex: (json['calendarIndex'] as num?)?.toInt() ?? -1,
+        name: json['name'] as String,
+        categoryName: json['categoryName'] as String? ?? 'Standard',
+        tier: (json['tier'] as num?)?.toInt() ?? 1,
+        fieldSize: (json['fieldSize'] as num).toInt(),
       winnerId: json['winnerId'] as String,
       winnerName: json['winnerName'] as String,
       runnerUpId: json['runnerUpId'] as String?,
@@ -1581,6 +1787,7 @@ class CareerMatchHistoryEvent {
     required this.playerName,
     required this.opponentId,
     required this.opponentName,
+    this.opponentTheoAverage,
     required this.seasonNumber,
     required this.tournamentName,
     required this.roundLabel,
@@ -1593,6 +1800,7 @@ class CareerMatchHistoryEvent {
   final String playerName;
   final String opponentId;
   final String opponentName;
+  final double? opponentTheoAverage;
   final int seasonNumber;
   final String tournamentName;
   final String roundLabel;
@@ -1606,6 +1814,7 @@ class CareerMatchHistoryEvent {
       'playerName': playerName,
       'opponentId': opponentId,
       'opponentName': opponentName,
+      'opponentTheoAverage': opponentTheoAverage,
       'seasonNumber': seasonNumber,
       'tournamentName': tournamentName,
       'roundLabel': roundLabel,
@@ -1621,6 +1830,7 @@ class CareerMatchHistoryEvent {
       playerName: json['playerName'] as String? ?? '',
       opponentId: json['opponentId'] as String? ?? '',
       opponentName: json['opponentName'] as String? ?? 'Unbekannter Gegner',
+      opponentTheoAverage: (json['opponentTheoAverage'] as num?)?.toDouble(),
       seasonNumber: (json['seasonNumber'] as num?)?.toInt() ?? 0,
       tournamentName: json['tournamentName'] as String? ?? '',
       roundLabel: json['roundLabel'] as String? ?? 'Unbekannte Runde',

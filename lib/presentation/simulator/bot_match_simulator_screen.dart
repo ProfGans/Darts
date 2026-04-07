@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/background/background_task_runner.dart';
+import '../../data/background/simulation_service.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../domain/x01/x01_models.dart';
 import '../../domain/x01/x01_match_simulator.dart';
@@ -66,7 +66,7 @@ class _BotMatchSimulatorScreenState extends State<BotMatchSimulatorScreen> {
       );
 
       await Future<void>.delayed(Duration.zero);
-      final resultMap = await BackgroundTaskRunner.instance.runJob<Map<String, Object?>>(
+      final handle = SimulationService.instance.startJob<Map<String, Object?>>(
         taskType: 'simulate_bot_match',
         initialLabel: 'Bot-Match wird simuliert',
         payload: <String, Object?>{
@@ -79,15 +79,23 @@ class _BotMatchSimulatorScreenState extends State<BotMatchSimulatorScreen> {
           'radiusCalibrationPercent': playerAProfile.radiusCalibrationPercent,
           'simulationSpreadPercent': playerAProfile.simulationSpreadPercent,
         },
-        onUpdate: (snapshot) {
-          if (!mounted) {
-            return;
-          }
-          setState(() {
-            _statusLabel = snapshot.label;
-          });
-        },
       );
+      void updateStatus() {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _statusLabel = handle.label;
+        });
+      }
+
+      handle.addListener(updateStatus);
+      late final Map<String, Object?> resultMap;
+      try {
+        resultMap = await handle.result;
+      } finally {
+        handle.removeListener(updateStatus);
+      }
       final result = _matchResultFromMap(resultMap);
 
       if (!mounted) {

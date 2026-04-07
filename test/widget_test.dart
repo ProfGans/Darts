@@ -6,8 +6,8 @@ void main() {
   testWidgets('main menu renders', (WidgetTester tester) async {
     await tester.pumpWidget(const DartFlutterApp());
 
-    expect(find.text('Flutter-Port Startgeruest'), findsOneWidget);
-    expect(find.text('Match Setup oeffnen'), findsOneWidget);
-    expect(find.text('Bot Match Simulator oeffnen'), findsOneWidget);
+    expect(find.text('DartCore'), findsOneWidget);
+    expect(find.text('Match Setup'), findsOneWidget);
+    expect(find.text('Turniere'), findsOneWidget);
   });
 }

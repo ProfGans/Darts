@@ -715,6 +715,7 @@ class TournamentBracket {
       for (final participant in participants)
         participant.id: TournamentStandingBuilder(participant),
     };
+    final headToHead = <String, Map<String, TournamentHeadToHeadRecord>>{};
 
     for (final round in leagueRounds) {
       for (final match in round.matches) {
@@ -729,14 +730,35 @@ class TournamentBracket {
         if (builderA == null || builderB == null) {
           continue;
         }
+        final score = TournamentMatchScoreSummary.fromMatch(
+          match: match,
+          definition: definition,
+        );
         builderA.played += 1;
         builderB.played += 1;
+        builderA.legsFor += score.legsA;
+        builderA.legsAgainst += score.legsB;
+        builderB.legsFor += score.legsB;
+        builderB.legsAgainst += score.legsA;
+        builderA.setsFor += score.setsA;
+        builderA.setsAgainst += score.setsB;
+        builderB.setsFor += score.setsB;
+        builderB.setsAgainst += score.setsA;
 
         if (result.isDraw) {
           builderA.draws += 1;
           builderB.draws += 1;
           builderA.points += definition.pointsForDraw;
           builderB.points += definition.pointsForDraw;
+          _updateHeadToHead(
+            headToHead: headToHead,
+            playerAId: playerA.id,
+            playerBId: playerB.id,
+            pointsA: definition.pointsForDraw,
+            pointsB: definition.pointsForDraw,
+            wonA: false,
+            wonB: false,
+          );
           continue;
         }
 
@@ -744,10 +766,28 @@ class TournamentBracket {
           builderA.wins += 1;
           builderB.losses += 1;
           builderA.points += definition.pointsForWin;
+          _updateHeadToHead(
+            headToHead: headToHead,
+            playerAId: playerA.id,
+            playerBId: playerB.id,
+            pointsA: definition.pointsForWin,
+            pointsB: 0,
+            wonA: true,
+            wonB: false,
+          );
         } else if (result.winnerId == playerB.id) {
           builderB.wins += 1;
           builderA.losses += 1;
           builderB.points += definition.pointsForWin;
+          _updateHeadToHead(
+            headToHead: headToHead,
+            playerAId: playerA.id,
+            playerBId: playerB.id,
+            pointsA: 0,
+            pointsB: definition.pointsForWin,
+            wonA: false,
+            wonB: true,
+          );
         }
       }
     }
@@ -757,6 +797,32 @@ class TournamentBracket {
       final pointsCompare = right.points.compareTo(left.points);
       if (pointsCompare != 0) {
         return pointsCompare;
+      }
+      final headToHeadCompare = _compareHeadToHead(
+        left: left,
+        right: right,
+        headToHead: headToHead,
+      );
+      if (headToHeadCompare != 0) {
+        return headToHeadCompare;
+      }
+      if (definition.matchMode == MatchMode.sets) {
+        final setDiffCompare = right.setDifference.compareTo(left.setDifference);
+        if (setDiffCompare != 0) {
+          return setDiffCompare;
+        }
+        final setsForCompare = right.setsFor.compareTo(left.setsFor);
+        if (setsForCompare != 0) {
+          return setsForCompare;
+        }
+      }
+      final legDiffCompare = right.legDifference.compareTo(left.legDifference);
+      if (legDiffCompare != 0) {
+        return legDiffCompare;
+      }
+      final legsForCompare = right.legsFor.compareTo(left.legsFor);
+      if (legsForCompare != 0) {
+        return legsForCompare;
       }
       final winsCompare = right.wins.compareTo(left.wins);
       if (winsCompare != 0) {
@@ -843,6 +909,10 @@ class TournamentStanding {
     required this.draws,
     required this.losses,
     required this.points,
+    this.legsFor = 0,
+    this.legsAgainst = 0,
+    this.setsFor = 0,
+    this.setsAgainst = 0,
   });
 
   final TournamentParticipant participant;
@@ -851,6 +921,13 @@ class TournamentStanding {
   final int draws;
   final int losses;
   final int points;
+  final int legsFor;
+  final int legsAgainst;
+  final int setsFor;
+  final int setsAgainst;
+
+  int get legDifference => legsFor - legsAgainst;
+  int get setDifference => setsFor - setsAgainst;
 }
 
 class TournamentStandingBuilder {
@@ -862,6 +939,10 @@ class TournamentStandingBuilder {
   int draws = 0;
   int losses = 0;
   int points = 0;
+  int legsFor = 0;
+  int legsAgainst = 0;
+  int setsFor = 0;
+  int setsAgainst = 0;
 
   TournamentStanding build() {
     return TournamentStanding(
@@ -871,6 +952,172 @@ class TournamentStandingBuilder {
       draws: draws,
       losses: losses,
       points: points,
+      legsFor: legsFor,
+      legsAgainst: legsAgainst,
+      setsFor: setsFor,
+      setsAgainst: setsAgainst,
     );
   }
+}
+
+class TournamentHeadToHeadRecord {
+  const TournamentHeadToHeadRecord({
+    this.points = 0,
+    this.wins = 0,
+  });
+
+  final int points;
+  final int wins;
+
+  TournamentHeadToHeadRecord add({
+    required int points,
+    required bool win,
+  }) {
+    return TournamentHeadToHeadRecord(
+      points: this.points + points,
+      wins: wins + (win ? 1 : 0),
+    );
+  }
+}
+
+class TournamentMatchScoreSummary {
+  const TournamentMatchScoreSummary({
+    this.legsA = 0,
+    this.legsB = 0,
+    this.setsA = 0,
+    this.setsB = 0,
+  });
+
+  final int legsA;
+  final int legsB;
+  final int setsA;
+  final int setsB;
+
+  static TournamentMatchScoreSummary fromMatch({
+    required TournamentMatch match,
+    required TournamentDefinition definition,
+  }) {
+    final result = match.result;
+    if (result == null) {
+      return const TournamentMatchScoreSummary();
+    }
+    final stats = result.participantStats;
+    if (stats.length >= 2 &&
+        match.playerA != null &&
+        match.playerB != null) {
+      TournamentPlayerMatchStats? statsA;
+      TournamentPlayerMatchStats? statsB;
+      for (final entry in stats) {
+        if (entry.participantId == match.playerA!.id) {
+          statsA = entry;
+        } else if (entry.participantId == match.playerB!.id) {
+          statsB = entry;
+        }
+      }
+      if (statsA != null && statsB != null) {
+        return TournamentMatchScoreSummary(
+          legsA: statsA.legsWon,
+          legsB: statsB.legsWon,
+        );
+      }
+    }
+
+    final parsed = _parseScoreText(result.scoreText);
+    if (parsed != null) {
+      return parsed.$3 == MatchMode.sets
+          ? TournamentMatchScoreSummary(
+              setsA: parsed.$1,
+              setsB: parsed.$2,
+            )
+          : TournamentMatchScoreSummary(
+              legsA: parsed.$1,
+              legsB: parsed.$2,
+            );
+    }
+
+    if (result.isDraw) {
+      return const TournamentMatchScoreSummary();
+    }
+    if (result.winnerId == null ||
+        match.playerA == null ||
+        match.playerB == null) {
+      return const TournamentMatchScoreSummary();
+    }
+
+    if (definition.matchMode == MatchMode.sets) {
+      final winnerSets = definition.distanceForRound(match.roundNumber);
+      return result.winnerId == match.playerA!.id
+          ? TournamentMatchScoreSummary(setsA: winnerSets)
+          : TournamentMatchScoreSummary(setsB: winnerSets);
+    }
+    final winnerLegs = definition.distanceForRound(match.roundNumber);
+    return result.winnerId == match.playerA!.id
+        ? TournamentMatchScoreSummary(legsA: winnerLegs)
+        : TournamentMatchScoreSummary(legsB: winnerLegs);
+  }
+
+  static (int, int, MatchMode)? _parseScoreText(String scoreText) {
+    final normalized = scoreText.trim();
+    final parts = normalized.split('|').first.trim().split(' ');
+    if (parts.length < 2) {
+      return null;
+    }
+    final score = parts.first.split(':');
+    if (score.length != 2) {
+      return null;
+    }
+    final left = int.tryParse(score[0]);
+    final right = int.tryParse(score[1]);
+    if (left == null || right == null) {
+      return null;
+    }
+    final modeLabel = parts[1].toLowerCase();
+    if (modeLabel.startsWith('set')) {
+      return (left, right, MatchMode.sets);
+    }
+    if (modeLabel.startsWith('leg')) {
+      return (left, right, MatchMode.legs);
+    }
+    return null;
+  }
+}
+
+void _updateHeadToHead({
+  required Map<String, Map<String, TournamentHeadToHeadRecord>> headToHead,
+  required String playerAId,
+  required String playerBId,
+  required int pointsA,
+  required int pointsB,
+  required bool wonA,
+  required bool wonB,
+}) {
+  final recordsA = headToHead.putIfAbsent(
+    playerAId,
+    () => <String, TournamentHeadToHeadRecord>{},
+  );
+  final recordsB = headToHead.putIfAbsent(
+    playerBId,
+    () => <String, TournamentHeadToHeadRecord>{},
+  );
+  recordsA[playerBId] = (recordsA[playerBId] ?? const TournamentHeadToHeadRecord())
+      .add(points: pointsA, win: wonA);
+  recordsB[playerAId] = (recordsB[playerAId] ?? const TournamentHeadToHeadRecord())
+      .add(points: pointsB, win: wonB);
+}
+
+int _compareHeadToHead({
+  required TournamentStanding left,
+  required TournamentStanding right,
+  required Map<String, Map<String, TournamentHeadToHeadRecord>> headToHead,
+}) {
+  final leftRecord = headToHead[left.participant.id]?[right.participant.id];
+  final rightRecord = headToHead[right.participant.id]?[left.participant.id];
+  if (leftRecord == null || rightRecord == null) {
+    return 0;
+  }
+  final pointsCompare = rightRecord.points.compareTo(leftRecord.points);
+  if (pointsCompare != 0) {
+    return pointsCompare;
+  }
+  return rightRecord.wins.compareTo(leftRecord.wins);
 }

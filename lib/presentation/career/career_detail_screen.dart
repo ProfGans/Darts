@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -31,6 +33,10 @@ Future<bool> _runCareerTournamentSimulation({
     'Karriere',
     'Turnier-Simulation "${item.name}"',
   );
+  AppDebug.instance.info(
+    'Trace',
+    'Karriere-Simulation gestartet | Karriere=${career.name} | Turnier=${item.name} | ausSaison=$calledFromSeason',
+  );
   try {
     final tournamentRepository = TournamentRepository.instance;
     final buildStopwatch = Stopwatch()..start();
@@ -49,6 +55,7 @@ Future<bool> _runCareerTournamentSimulation({
     await tournamentRepository.simulateCurrentTournamentUntilComplete(
       includeHumanMatches: true,
       emitProgressUpdates: !calledFromSeason,
+      preferResponsiveUi: true,
     );
     simulationStopwatch.stop();
     AppDebug.instance.info(
@@ -101,6 +108,8 @@ class CareerDetailScreen extends StatefulWidget {
 class _CareerDetailScreenState extends State<CareerDetailScreen> {
   bool _isSimulatingTournament = false;
   String? _simulationStatus;
+  String? _scheduledPrewarmKey;
+  bool _showSimulationOverlay = true;
 
   bool get _suppressAccessibilityUpdates =>
       defaultTargetPlatform == TargetPlatform.windows &&
@@ -131,6 +140,24 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
         }
 
         final nextItem = repository.nextOpenCalendarItem();
+        if (nextItem != null) {
+          final prewarmKey =
+              '${career.id}|${career.currentSeason.seasonNumber}|${nextItem.id}';
+          if (_scheduledPrewarmKey != prewarmKey) {
+            _scheduledPrewarmKey = prewarmKey;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) {
+                return;
+              }
+              unawaited(
+                tournamentRepository.prewarmCareerSimulation(
+                  career: career,
+                  item: nextItem,
+                ),
+              );
+            });
+          }
+        }
         final remainingCount = repository.remainingTournamentsInCurrentSeason();
         final canFinishSeason = repository.canFinishCurrentSeason();
         final humanStatus = _MyCareerStatusData.fromCareer(
@@ -158,9 +185,11 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
           body: ExcludeSemantics(
             excluding: _suppressAccessibilityUpdates,
             child: SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              child: Stack(
                 children: <Widget>[
+                  ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                    children: <Widget>[
                 const _ScreenLevelLabel(label: 'Jetzt wichtig'),
                 _CareerFocusDashboard(
                   career: career,
@@ -270,6 +299,33 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
                             ),
                 ),
                 ],
+                  ),
+                  if (_isSimulatingTournament ||
+                      tournamentRepository.simulationInProgress)
+                    _showSimulationOverlay
+                        ? _SimulationProgressOverlay(
+                            title:
+                                _simulationStatus ?? 'Karriere-Simulation laeuft',
+                            label:
+                                tournamentRepository.simulationProgressLabel,
+                            progress: tournamentRepository.simulationProgress,
+                            onHide: () {
+                              setState(() {
+                                _showSimulationOverlay = false;
+                              });
+                            },
+                          )
+                        : _SimulationProgressHandle(
+                            label:
+                                tournamentRepository.simulationProgressLabel,
+                            progress: tournamentRepository.simulationProgress,
+                            onOpen: () {
+                              setState(() {
+                                _showSimulationOverlay = true;
+                              });
+                            },
+                          ),
+                ],
               ),
             ),
           ),
@@ -346,9 +402,16 @@ class _CareerDetailScreenState extends State<CareerDetailScreen> {
     if (_isSimulatingTournament) {
       return false;
     }
+      AppDebug.instance.info(
+        'Trace',
+        'Button: Schnell simulieren | Karriere=${career.name} | Turnier=${item.name}',
+      );
       setState(() {
         _isSimulatingTournament = true;
         _simulationStatus = 'Baue ${item.name} auf...';
+        if (!_isSimulatingTournament) {
+          _showSimulationOverlay = true;
+        }
       });
       try {
         await Future<void>.delayed(const Duration(milliseconds: 16));
@@ -384,6 +447,7 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
   bool _isSimulatingTournament = false;
   bool _isSimulatingSeason = false;
   String? _simulationStatus;
+  bool _showSimulationOverlay = true;
 
   bool get _suppressAccessibilityUpdates =>
       defaultTargetPlatform == TargetPlatform.windows &&
@@ -421,9 +485,11 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
           body: ExcludeSemantics(
             excluding: _suppressAccessibilityUpdates,
             child: SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              child: Stack(
                 children: <Widget>[
+                  ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: <Widget>[
                 _SectionCard(
                   title: 'Saisonaktionen',
                   child: Column(
@@ -518,6 +584,36 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
                         ),
                 ),
                 ],
+                  ),
+                  if (_isSimulatingTournament ||
+                      _isSimulatingSeason ||
+                      tournamentRepository.simulationInProgress)
+                    _showSimulationOverlay
+                        ? _SimulationProgressOverlay(
+                            title: _simulationStatus ??
+                                (_isSimulatingSeason
+                                    ? 'Komplette Saison wird simuliert'
+                                    : 'Turnier-Simulation laeuft'),
+                            label:
+                                tournamentRepository.simulationProgressLabel,
+                            progress: tournamentRepository.simulationProgress,
+                            onHide: () {
+                              setState(() {
+                                _showSimulationOverlay = false;
+                              });
+                            },
+                          )
+                        : _SimulationProgressHandle(
+                            label:
+                                tournamentRepository.simulationProgressLabel,
+                            progress: tournamentRepository.simulationProgress,
+                            onOpen: () {
+                              setState(() {
+                                _showSimulationOverlay = true;
+                              });
+                            },
+                          ),
+                ],
               ),
             ),
           ),
@@ -561,11 +657,21 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       return false;
     }
 
+      AppDebug.instance.info(
+        'Trace',
+        calledFromSeason
+            ? 'Saisonlauf: naechstes Turnier | Karriere=${career.name} | Turnier=${item.name}'
+            : 'Button: Turnier simulieren | Karriere=${career.name} | Turnier=${item.name}',
+      );
+
       setState(() {
         _isSimulatingTournament = true;
         _simulationStatus = calledFromSeason
             ? 'Baue ${item.name} auf...'
             : 'Baue ${item.name} auf...';
+        if (!_isSimulatingSeason && !_isSimulatingTournament) {
+          _showSimulationOverlay = true;
+        }
       });
       try {
         return await _runCareerTournamentSimulation(
@@ -598,6 +704,7 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
     setState(() {
       _isSimulatingSeason = true;
       _simulationStatus = 'Saison-Simulation gestartet...';
+      _showSimulationOverlay = true;
     });
     final action = AppDebug.instance.startAction(
       'Karriere',
@@ -625,7 +732,7 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
         if (!progressed) {
           break;
         }
-        await Future<void>.delayed(const Duration(milliseconds: 1));
+        await Future<void>.delayed(const Duration(milliseconds: 12));
       }
       action.complete();
     } catch (error) {
@@ -1413,6 +1520,7 @@ String _calendarItemMeta(CareerCalendarItem item) {
           : 'Spieltag ${item.seriesIndex}/${item.seriesLength ?? item.seriesIndex}'
       : null;
   final parts = <String>[
+    'Tier ${item.tier}',
     if (seriesLabel != null) seriesLabel,
     '${item.fieldSize} Spieler',
     _matchSummary(item),
@@ -2336,15 +2444,22 @@ class _ProgressBar extends StatelessWidget {
 
 class _SimulationProgressCard extends StatelessWidget {
   const _SimulationProgressCard({
+    this.title,
     required this.label,
     required this.progress,
   });
 
+  final String? title;
   final String? label;
   final double? progress;
 
   @override
   Widget build(BuildContext context) {
+    final details = _SimulationVisualState.from(
+      title: title,
+      label: label,
+      progress: progress,
+    );
     final hasDeterminateProgress = progress != null;
     final percentLabel = hasDeterminateProgress
         ? '${((progress! * 100).clamp(0, 100)).round()} %'
@@ -2362,6 +2477,41 @@ class _SimulationProgressCard extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(details.icon, size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      details.phaseTitle,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              if (percentLabel != null)
+                Text(
+                  percentLabel,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+            ],
+          ),
+          if (details.headline != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              details.headline!,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ],
+          Row(
+            children: <Widget>[
               const SizedBox(
                 width: 18,
                 height: 18,
@@ -2370,21 +2520,21 @@ class _SimulationProgressCard extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  label == null || label!.trim().isEmpty
-                      ? 'Simulation laeuft...'
-                      : label!,
+                  details.body,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
-              if (percentLabel != null) ...<Widget>[
-                const SizedBox(width: 10),
-                Text(
-                  percentLabel,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ],
             ],
           ),
+          if (details.helper != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              details.helper!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF5D7285),
+                  ),
+            ),
+          ],
           const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
@@ -2397,6 +2547,233 @@ class _SimulationProgressCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SimulationProgressOverlay extends StatelessWidget {
+  const _SimulationProgressOverlay({
+    required this.title,
+    required this.label,
+    required this.progress,
+    required this.onHide,
+  });
+
+  final String title;
+  final String? label;
+  final double? progress;
+  final VoidCallback onHide;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: ColoredBox(
+          color: Colors.black.withOpacity(0.18),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  elevation: 8,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Text(
+                              'Simulation laeuft',
+                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: const Color(0xFF5D7285),
+                                  ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: onHide,
+                              tooltip: 'Anzeige ausblenden',
+                              icon: const Icon(Icons.visibility_off_outlined),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        _SimulationProgressCard(
+                          title: title,
+                          label: label,
+                          progress: progress,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Die Berechnung laeuft im Hintergrund weiter. Je nach erstem Turnier und Warmup kann dieser Schritt etwas dauern.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFF5D7285),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationProgressHandle extends StatelessWidget {
+  const _SimulationProgressHandle({
+    required this.label,
+    required this.progress,
+    required this.onOpen,
+  });
+
+  final String? label;
+  final double? progress;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final percentLabel = progress == null
+        ? null
+        : '${((progress! * 100).clamp(0, 100)).round()} %';
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: SafeArea(
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          elevation: 6,
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onOpen,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(Icons.sync_rounded, size: 18),
+                  const SizedBox(width: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    child: Text(
+                      label == null || label!.trim().isEmpty
+                          ? 'Simulation laeuft'
+                          : label!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                  if (percentLabel != null) ...<Widget>[
+                    const SizedBox(width: 10),
+                    Text(
+                      percentLabel,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimulationVisualState {
+  const _SimulationVisualState({
+    required this.phaseTitle,
+    required this.icon,
+    required this.body,
+    this.headline,
+    this.helper,
+  });
+
+  final String phaseTitle;
+  final IconData icon;
+  final String body;
+  final String? headline;
+  final String? helper;
+
+  static _SimulationVisualState from({
+    required String? title,
+    required String? label,
+    required double? progress,
+  }) {
+    final normalizedTitle = _cleanSimulationText(title);
+    final normalizedLabel = _cleanSimulationText(label);
+    final source = normalizedLabel.isNotEmpty ? normalizedLabel : normalizedTitle;
+
+    if (source.contains('vorbereitet') || source.contains('vorwaerm')) {
+      return _SimulationVisualState(
+        phaseTitle: 'Vorbereitung',
+        icon: Icons.auto_awesome_rounded,
+        headline: normalizedTitle.isEmpty ? null : normalizedTitle,
+        body: normalizedLabel.isEmpty ? 'Simulationsdaten werden vorbereitet.' : normalizedLabel,
+        helper: 'Lookup-Tabellen und der Simulationspfad werden fuer den ersten Lauf warm gemacht.',
+      );
+    }
+    if (source.contains('baue ') ||
+        source.contains('aufbau') ||
+        source.contains('turnier wird vorbereitet')) {
+      return _SimulationVisualState(
+        phaseTitle: 'Turnieraufbau',
+        icon: Icons.construction_rounded,
+        headline: normalizedTitle.isEmpty ? null : normalizedTitle,
+        body: normalizedLabel.isEmpty ? 'Teilnehmer, Feld und Struktur werden aufgebaut.' : normalizedLabel,
+        helper: 'Hier werden Qualifikation, Feldgroesse, Setzliste und Bracket vorbereitet.',
+      );
+    }
+    if (source.contains('simuliert') || source.contains('simulation')) {
+      return _SimulationVisualState(
+        phaseTitle: 'Matchsimulation',
+        icon: Icons.sports_score_rounded,
+        headline: normalizedTitle.isEmpty ? null : normalizedTitle,
+        body: normalizedLabel.isEmpty ? 'Die Matches werden gerade simuliert.' : normalizedLabel,
+        helper: progress == null
+            ? 'Der Fortschritt wird fortlaufend aktualisiert, sobald neue Matchbloecke abgeschlossen sind.'
+            : 'Die App verarbeitet Matchbloecke und aktualisiert danach den Fortschritt.',
+      );
+    }
+    if (source.contains('uebernommen') ||
+        source.contains('commit') ||
+        source.contains('abgeschlossen')) {
+      return _SimulationVisualState(
+        phaseTitle: 'Uebernahme',
+        icon: Icons.save_rounded,
+        headline: normalizedTitle.isEmpty ? null : normalizedTitle,
+        body: normalizedLabel.isEmpty ? 'Das Ergebnis wird in die Karriere uebernommen.' : normalizedLabel,
+        helper: 'Stats, Historie und Saisonfortschritt werden jetzt gespeichert.',
+      );
+    }
+    return _SimulationVisualState(
+      phaseTitle: 'Simulation',
+      icon: Icons.sync_rounded,
+      headline: normalizedTitle.isEmpty ? null : normalizedTitle,
+      body: normalizedLabel.isEmpty ? 'Die Berechnung laeuft...' : normalizedLabel,
+      helper: 'Die App arbeitet weiter. Der Fortschritt springt nach abgeschlossenen Schritten sichtbar weiter.',
+    );
+  }
+}
+
+String _cleanSimulationText(String? value) {
+  if (value == null) {
+    return '';
+  }
+  return value.trim();
 }
 
 class _InfoPill extends StatelessWidget {

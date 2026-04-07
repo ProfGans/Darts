@@ -386,6 +386,7 @@ class CareerEngine {
           calendarItemId: item.id,
           calendarIndex: calendarIndex,
           name: item.name,
+          tier: item.tier,
           fieldSize: item.fieldSize,
           winnerId: winnerId,
           winnerName: winnerName,

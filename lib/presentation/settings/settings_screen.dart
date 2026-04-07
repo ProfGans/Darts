@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/computer_repository.dart';
@@ -23,33 +26,82 @@ Future<void> _runBlockingRefresh(
           final label = repository.theoreticalRefreshLabel.isNotEmpty
               ? repository.theoreticalRefreshLabel
               : message;
+          final hasDeterminateProgress = progress > 0 && progress <= 1;
+          final percentText =
+              '${(progress.clamp(0, 1) * 100).toStringAsFixed(0)}%';
           return AlertDialog(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
+            title: const Text('Theo-Berechnung laeuft'),
+            content: ExcludeSemantics(
+              excluding: defaultTargetPlatform == TargetPlatform.windows,
+              child: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(),
+                    Row(
+                      children: <Widget>[
+                        SizedBox(
+                          width: 42,
+                          height: 42,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 4,
+                            value: hasDeterminateProgress ? progress : null,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                hasDeterminateProgress
+                                    ? '$percentText abgeschlossen'
+                                    : 'Berechnung wird vorbereitet...',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Bitte die App waehrend der Berechnung offen lassen.',
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Hinweis: Die erste Berechnung mit neuen Einstellungen kann deutlich laenger dauern.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
+                    const SizedBox(height: 20),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 12,
+                        value: hasDeterminateProgress ? progress : null,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: Text(label),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      hasDeterminateProgress
+                          ? 'Fortschritt wird laufend aktualisiert.'
+                          : 'Der Fortschritt springt an, sobald die ersten Referenz-Matches abgeschlossen sind.',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                LinearProgressIndicator(
-                  value: progress > 0 && progress < 1 ? progress : null,
-                ),
-                if (progress > 0) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Text('${(progress * 100).toStringAsFixed(0)}%'),
-                ],
-              ],
+              ),
             ),
           );
         },
@@ -75,8 +127,18 @@ Future<void> _runBlockingRefresh(
   }
 }
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _scheduledTheoPrewarm = false;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows;
 
   static const List<String> _x01QuickScoreLabels = <String>[
     'Links oben',
@@ -90,19 +152,34 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repository = SettingsRepository.instance;
+    final computerRepository = ComputerRepository.instance;
 
     return AnimatedBuilder(
-      animation: repository,
+      animation: Listenable.merge(<Listenable>[repository, computerRepository]),
       builder: (context, _) {
         final settings = repository.settings;
+        if (!_scheduledTheoPrewarm &&
+            !computerRepository.isRefreshingTheoreticalAverages) {
+          _scheduledTheoPrewarm = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) {
+              return;
+            }
+            unawaited(
+              computerRepository.prewarmTheoreticalRefresh(),
+            );
+          });
+        }
         return Scaffold(
           appBar: AppBar(
             title: const Text('Einstellungen'),
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(24),
-            child: ListView(
-              children: <Widget>[
+          body: ExcludeSemantics(
+            excluding: _suppressAccessibilityUpdates,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: ListView(
+                children: <Widget>[
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -329,7 +406,8 @@ class SettingsScreen extends StatelessWidget {
                   },
                   child: const Text('Auf Standard zuruecksetzen'),
                 ),
-              ],
+                ],
+              ),
             ),
           ),
         );

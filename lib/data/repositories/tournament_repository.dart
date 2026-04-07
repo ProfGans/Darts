@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../background/background_task_runner.dart';
+import '../background/simulation_service.dart';
 import '../debug/app_debug.dart';
 import '../../domain/career/career_models.dart';
 import '../../domain/rankings/ranking_engine.dart';
@@ -11,6 +12,7 @@ import '../../domain/tournament/tournament_engine.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
 import '../models/computer_player.dart';
+import '../models/generated_name_catalog.dart';
 import '../storage/app_storage.dart';
 import 'career_repository.dart';
 import 'computer_repository.dart';
@@ -35,6 +37,8 @@ class TournamentRepository extends ChangeNotifier {
   bool _simulationInProgress = false;
   String _simulationProgressLabel = '';
   double? _simulationProgress;
+  String? _prewarmedCareerSimulationKey;
+  Future<void>? _prewarmCareerSimulationFuture;
 
   TournamentBracket? get currentBracket => _currentBracket;
   CareerTournamentContext? get careerContext => _careerContext;
@@ -507,6 +511,7 @@ class TournamentRepository extends ChangeNotifier {
       return;
     }
 
+    final match = _matchById(bracket, matchId);
     final roundNumber = _roundNumberForMatch(bracket, matchId);
     _currentBracket = _engine.applyResult(
       bracket: bracket,
@@ -514,7 +519,18 @@ class TournamentRepository extends ChangeNotifier {
       result: TournamentMatchResult(
         winnerId: winner.id,
         winnerName: winner.name,
-        scoreText: 'Manuell entschieden',
+        scoreText: _manualScoreTextForMatch(
+          bracket: bracket,
+          match: match,
+          winnerId: winner.id,
+          isDraw: false,
+        ),
+        participantStats: _manualParticipantStatsForMatch(
+          bracket: bracket,
+          match: match,
+          winnerId: winner.id,
+          isDraw: false,
+        ),
       ),
     );
     _simulateRemainingCpuMatchesForRound(roundNumber);
@@ -572,13 +588,25 @@ class TournamentRepository extends ChangeNotifier {
     if (bracket == null) {
       return;
     }
+    final match = _matchById(bracket, matchId);
     final roundNumber = _roundNumberForMatch(bracket, matchId);
     _currentBracket = _engine.applyResult(
       bracket: bracket,
       matchId: matchId,
-      result: const TournamentMatchResult(
-        scoreText: 'Unentschieden',
+      result: TournamentMatchResult(
+        scoreText: _manualScoreTextForMatch(
+          bracket: bracket,
+          match: match,
+          winnerId: null,
+          isDraw: true,
+        ),
         isDraw: true,
+        participantStats: _manualParticipantStatsForMatch(
+          bracket: bracket,
+          match: match,
+          winnerId: null,
+          isDraw: true,
+        ),
       ),
     );
     _simulateRemainingCpuMatchesForRound(roundNumber);
@@ -641,6 +669,7 @@ class TournamentRepository extends ChangeNotifier {
   Future<void> simulateCurrentTournamentUntilComplete({
     bool includeHumanMatches = false,
     bool emitProgressUpdates = true,
+    bool preferResponsiveUi = true,
   }) async {
     final bracket = _currentBracket;
     if (bracket == null || bracket.isCompleted) {
@@ -651,38 +680,57 @@ class TournamentRepository extends ChangeNotifier {
       'Turnier',
       'Simulation "${bracket.definition.name}"',
     );
+    AppDebug.instance.info(
+      'Trace',
+      'Turnier-Simulation Einstieg | Turnier=${bracket.definition.name} | responsive=$preferResponsiveUi | human=$includeHumanMatches',
+    );
     final totalMatches = _countTotalMatches(bracket);
     _setSimulationProgress(
       inProgress: true,
       label: 'Turnier wird vorbereitet: ${bracket.definition.name}',
       progress: totalMatches == 0 ? null : 0,
     );
+    const usePersistentWorker = false;
+    AppDebug.instance.info(
+      'Trace',
+      'Turnier-Simulation Modus | Turnier=${bracket.definition.name} | worker=$usePersistentWorker | cachePrepared=${_engine.commonSimulationCachesPrepared}',
+    );
+    final prewarmStopwatch = Stopwatch()..start();
+    await SimulationService.instance.prewarmProfiles(
+      _serializedProfilesForBracket(bracket),
+      onHandle: (handle) {
+        void updateSimulationProgress() {
+          _setSimulationProgress(
+            inProgress: handle.inProgress,
+            label: handle.label,
+            progress: handle.progress,
+          );
+        }
+
+        handle.addListener(updateSimulationProgress);
+        handle.result.whenComplete(() {
+          handle.removeListener(updateSimulationProgress);
+        });
+      },
+    );
+    prewarmStopwatch.stop();
+    AppDebug.instance.info(
+      'Trace',
+      'Turnier-Simulation Vorwaermung fertig | Turnier=${bracket.definition.name} | Dauer=${prewarmStopwatch.elapsedMilliseconds} ms',
+    );
     _logProcessMemory('vor Simulation "${bracket.definition.name}"');
     await Future<void>.delayed(Duration.zero);
-    final simulationResult =
-        _shouldPreferLowMemorySimulation(bracket: bracket)
-            ? await _simulateTournamentLowMemory(
-                bracket: bracket,
-                includeHumanMatches: includeHumanMatches,
-                emitProgressUpdates: emitProgressUpdates,
-                totalMatches: totalMatches,
-              )
-            : await BackgroundTaskRunner.instance.runJob<Map<String, Object?>>(
-                taskType: 'simulate_tournament',
-                initialLabel: 'Turnier wird simuliert: ${bracket.definition.name}',
-                payload: <String, Object?>{
-                  'bracket': bracket.toJson(),
-                  'profilesById': _serializedProfilesForBracket(bracket),
-                  'includeHumanMatches': includeHumanMatches,
-                },
-                onUpdate: (snapshot) {
-                  _setSimulationProgress(
-                    inProgress: snapshot.inProgress,
-                    label: snapshot.label,
-                    progress: snapshot.progress,
-                  );
-                },
-              );
+    final simulationResult = await _simulateTournamentLowMemory(
+      bracket: bracket,
+      includeHumanMatches: includeHumanMatches,
+      emitProgressUpdates: emitProgressUpdates,
+      totalMatches: totalMatches,
+      preferResponsiveUi: preferResponsiveUi,
+    );
+    AppDebug.instance.info(
+      'Trace',
+      'Turnier-Simulation Kern fertig | Turnier=${bracket.definition.name} | simMatches=${(simulationResult['simulatedMatches'] as num?)?.toInt() ?? 0} | completed=${simulationResult['completed']} | stoppedForHuman=${simulationResult['stoppedForHumanMatch']}',
+    );
 
     final simulatedBracket = TournamentBracket.fromJson(
       (simulationResult['bracket'] as Map).cast<String, dynamic>(),
@@ -712,6 +760,11 @@ class TournamentRepository extends ChangeNotifier {
       notifyListeners();
     }
     await _persist();
+    _engine.compactSimulationCaches();
+    AppDebug.instance.info(
+      'Trace',
+      'Turnier-Simulation Persist/Cleanup fertig | Turnier=${simulatedBracket.definition.name}',
+    );
     _setSimulationProgress(
       inProgress: true,
       label: 'Turniersimulation abgeschlossen: ${simulatedBracket.definition.name}',
@@ -719,23 +772,18 @@ class TournamentRepository extends ChangeNotifier {
     );
   }
 
-  bool _shouldPreferLowMemorySimulation({
-    required TournamentBracket bracket,
-  }) {
-    return true;
-  }
-
   Future<Map<String, Object?>> _simulateTournamentLowMemory({
     required TournamentBracket bracket,
     required bool includeHumanMatches,
     required bool emitProgressUpdates,
     required int totalMatches,
+    required bool preferResponsiveUi,
   }) async {
     _engine.resetPerformanceTotals();
     var workingBracket = bracket;
     final profileProvider = _profileProviderForBracket(bracket);
     var simulatedMatches = 0;
-    var batchSize = 1;
+    var batchSize = preferResponsiveUi ? 1 : 2;
     var stoppedForHumanMatch = false;
 
     while (!workingBracket.isCompleted) {
@@ -765,22 +813,47 @@ class TournamentRepository extends ChangeNotifier {
             ? null
             : (completedMatches / totalMatches).clamp(0.0, 1.0).toDouble(),
       );
+      _currentBracket = workingBracket;
       if (emitProgressUpdates) {
-        _currentBracket = workingBracket;
         notifyListeners();
       }
-      await Future<void>.delayed(Duration.zero);
+      await _persist();
       final batchDurationMs = batchStopwatch.elapsedMilliseconds;
-      if (batchDurationMs >= 80) {
-        batchSize = 1;
-      } else if (batchDurationMs >= 40) {
-        batchSize = 2;
-      } else if (batchDurationMs >= 20) {
-        batchSize = 4;
-      } else if (batchDurationMs >= 10) {
-        batchSize = 6;
+      if (preferResponsiveUi) {
+        if (batchDurationMs >= 120) {
+          batchSize = 1;
+        } else if (batchDurationMs >= 40) {
+          batchSize = 1;
+        } else if (batchDurationMs >= 20) {
+          batchSize = 1;
+        } else if (batchDurationMs >= 10) {
+          batchSize = 2;
+        } else {
+          batchSize = 2;
+        }
+        final cooldownMs = batchDurationMs >= 120
+            ? 20
+            : batchDurationMs >= 60
+                ? 16
+                : batchDurationMs >= 30
+                    ? 12
+                    : batchDurationMs >= 12
+                        ? 8
+                        : 4;
+        await Future<void>.delayed(Duration(milliseconds: cooldownMs));
       } else {
-        batchSize = 8;
+        await Future<void>.delayed(Duration.zero);
+        if (batchDurationMs >= 80) {
+          batchSize = 1;
+        } else if (batchDurationMs >= 40) {
+          batchSize = 2;
+        } else if (batchDurationMs >= 20) {
+          batchSize = 4;
+        } else if (batchDurationMs >= 10) {
+          batchSize = 6;
+        } else {
+          batchSize = 8;
+        }
       }
     }
 
@@ -863,12 +936,13 @@ class TournamentRepository extends ChangeNotifier {
         TournamentArchiveEntry(
           id: 'archive-${DateTime.now().microsecondsSinceEpoch}',
           name: context.calendarItem.name,
-          bracket: _lightweightArchiveBracket(bracket),
+          bracket: bracket,
           careerId: context.careerId,
           seasonNumber: context.seasonNumber,
           calendarItemId: context.calendarItem.id,
         ),
       );
+      _currentBracket = null;
       _careerContext = null;
       if (!silent) {
         notifyListeners();
@@ -904,12 +978,13 @@ class TournamentRepository extends ChangeNotifier {
       TournamentArchiveEntry(
         id: 'archive-${DateTime.now().microsecondsSinceEpoch}',
         name: bracket.definition.name,
-        bracket: _lightweightArchiveBracket(bracket),
+        bracket: bracket,
         careerId: context.careerId,
         seasonNumber: context.seasonNumber,
         calendarItemId: context.calendarItem.id,
       ),
     );
+    _currentBracket = null;
     _careerContext = null;
     if (!silent) {
       notifyListeners();
@@ -949,6 +1024,61 @@ class TournamentRepository extends ChangeNotifier {
     );
   }
 
+  Future<void> prewarmCareerSimulation({
+    required CareerDefinition career,
+    required CareerCalendarItem item,
+  }) async {
+    final key =
+        '${career.id}|${career.currentSeason.seasonNumber}|${item.id}';
+    if (_prewarmedCareerSimulationKey == key &&
+        _prewarmCareerSimulationFuture != null) {
+      AppDebug.instance.info(
+        'Trace',
+        'Karriere-Prewarm Hit | Karriere=${career.name} | Turnier=${item.name}',
+      );
+      await _prewarmCareerSimulationFuture;
+      return;
+    }
+    final profilesById = _serializedProfilesForCareerItem(career, item);
+    if (profilesById.isEmpty) {
+      AppDebug.instance.info(
+        'Trace',
+        'Karriere-Prewarm uebersprungen | Karriere=${career.name} | Turnier=${item.name} | Grund=keine Profile',
+      );
+      return;
+    }
+    AppDebug.instance.info(
+      'Trace',
+      'Karriere-Prewarm Start | Karriere=${career.name} | Turnier=${item.name} | Profile=${profilesById.length}',
+    );
+    final prewarmStopwatch = Stopwatch()..start();
+    _prewarmedCareerSimulationKey = key;
+    _prewarmCareerSimulationFuture = SimulationService.instance
+        .prewarmProfiles(
+          profilesById,
+        )
+        .then((_) {
+          prewarmStopwatch.stop();
+          AppDebug.instance.info(
+            'Trace',
+            'Karriere-Prewarm Ende | Karriere=${career.name} | Turnier=${item.name} | Dauer=${prewarmStopwatch.elapsedMilliseconds} ms',
+          );
+        })
+        .catchError((Object error) {
+          prewarmStopwatch.stop();
+          AppDebug.instance.error(
+            'Trace',
+            'Karriere-Prewarm Fehler | Karriere=${career.name} | Turnier=${item.name} | Fehler=$error',
+          );
+        })
+        .whenComplete(() {
+          if (_prewarmedCareerSimulationKey == key) {
+            _prewarmCareerSimulationFuture = null;
+          }
+        });
+    await _prewarmCareerSimulationFuture;
+  }
+
   int _countTotalMatches(TournamentBracket bracket) {
     var count = 0;
     for (final round in bracket.rounds) {
@@ -981,6 +1111,23 @@ class TournamentRepository extends ChangeNotifier {
     return List<TournamentParticipant>.unmodifiable(
       _buildCareerParticipants(career: career, item: item),
     );
+  }
+
+  Map<String, Object?> _serializedProfilesForCareerItem(
+    CareerDefinition career,
+    CareerCalendarItem item,
+  ) {
+    final currentContext = _careerContext;
+    if (_currentBracket != null &&
+        currentContext?.careerId == career.id &&
+        currentContext?.seasonNumber == career.currentSeason.seasonNumber &&
+        currentContext?.calendarItem.id == item.id) {
+      return _serializedProfilesForBracket(_currentBracket!);
+    }
+    final participants = item.isLeagueSeriesItem
+        ? _previewParticipantsForLeagueSeriesItem(career: career, item: item)
+        : _buildCareerParticipants(career: career, item: item);
+    return _serializedProfilesForParticipants(participants);
   }
 
   void openArchive(String archiveId) {
@@ -1035,11 +1182,13 @@ class TournamentRepository extends ChangeNotifier {
             if (selectedIds.contains(entry.id)) {
               continue;
             }
-            if (!_matchesCareerTags(
-              entry,
-              requiredTags: slotRule.requiredCareerTags,
-              excludedTags: slotRule.excludedCareerTags,
-            )) {
+              if (!_matchesCareerTags(
+                entry,
+                requiredTags: slotRule.requiredCareerTags,
+                excludedTags: slotRule.excludedCareerTags,
+                requiredNationalities: slotRule.requiredNationalities,
+                excludedNationalities: slotRule.excludedNationalities,
+              )) {
               continue;
             }
             selected.add(
@@ -1067,9 +1216,11 @@ class TournamentRepository extends ChangeNotifier {
           orderedPool: orderedPool,
           rankingId: rankingId,
           standingsCache: standingsCache,
-          requiredTags: slotRule.requiredCareerTags,
-          excludedTags: slotRule.excludedCareerTags,
-        );
+            requiredTags: slotRule.requiredCareerTags,
+            excludedTags: slotRule.excludedCareerTags,
+            requiredNationalities: slotRule.requiredNationalities,
+            excludedNationalities: slotRule.excludedNationalities,
+          );
         final start = slotRule.fromRank <= slotRule.toRank
             ? slotRule.fromRank
             : slotRule.toRank;
@@ -1121,9 +1272,11 @@ class TournamentRepository extends ChangeNotifier {
           orderedPool: orderedPool,
           rankingId: fillRule.rankingId!,
           standingsCache: standingsCache,
-          requiredTags: fillRule.requiredCareerTags,
-          excludedTags: fillRule.excludedCareerTags,
-        );
+            requiredTags: fillRule.requiredCareerTags,
+            excludedTags: fillRule.excludedCareerTags,
+            requiredNationalities: fillRule.requiredNationalities,
+            excludedNationalities: fillRule.excludedNationalities,
+          );
         final rankingName =
             rankingsById[fillRule.rankingId!]?.name ?? fillRule.rankingId!;
         var fillCount = 0;
@@ -1156,11 +1309,13 @@ class TournamentRepository extends ChangeNotifier {
         if (selected.length >= item.fieldSize) {
           break;
         }
-        if (!_matchesCareerTags(
-          entry,
-          requiredTags: fillRule.requiredCareerTags,
-          excludedTags: fillRule.excludedCareerTags,
-        )) {
+          if (!_matchesCareerTags(
+            entry,
+            requiredTags: fillRule.requiredCareerTags,
+            excludedTags: fillRule.excludedCareerTags,
+            requiredNationalities: fillRule.requiredNationalities,
+            excludedNationalities: fillRule.excludedNationalities,
+          )) {
           continue;
         }
         if (fillRule.maxCount > 0 && fillCount >= fillRule.maxCount) {
@@ -1181,18 +1336,43 @@ class TournamentRepository extends ChangeNotifier {
           fillCount += 1;
         }
       }
+
+      if (fillRule.autoGeneratePlayers && selected.length < item.fieldSize) {
+        final remainingCapacity = item.fieldSize - selected.length;
+        final remainingRuleCapacity = fillRule.maxCount > 0
+            ? max(0, fillRule.maxCount - fillCount)
+            : remainingCapacity;
+        final generateCount = min(remainingCapacity, remainingRuleCapacity);
+        if (generateCount > 0) {
+          final generatedEntries = _generateAverageFillEntries(
+            orderedPool: orderedPool,
+            selectedIds: selectedIds,
+            fillRule: fillRule,
+            count: generateCount,
+          );
+          for (final generatedEntry in generatedEntries) {
+            if (selected.length >= item.fieldSize) {
+              break;
+            }
+            selected.add(generatedEntry);
+            selectedIds.add(generatedEntry.id);
+          }
+        }
+      }
     }
 
     final seedMap = <String, int>{};
     if (item.seedingRankingId != null && item.seedCount > 0) {
-      final rankedEntries = _rankingCandidates(
-        pool: pool,
-        orderedPool: orderedPool,
-        rankingId: item.seedingRankingId!,
-        standingsCache: standingsCache,
-        requiredTags: const <String>[],
-        excludedTags: const <String>[],
-      );
+        final rankedEntries = _rankingCandidates(
+          pool: pool,
+          orderedPool: orderedPool,
+          rankingId: item.seedingRankingId!,
+          standingsCache: standingsCache,
+          requiredTags: const <String>[],
+          excludedTags: const <String>[],
+          requiredNationalities: const <String>[],
+          excludedNationalities: const <String>[],
+        );
       var nextSeed = 1;
       for (final rankedEntry in rankedEntries) {
         if (nextSeed > item.seedCount) {
@@ -1221,14 +1401,125 @@ class TournamentRepository extends ChangeNotifier {
     }).toList();
   }
 
+  List<_CareerPoolEntry> _generateAverageFillEntries({
+    required List<_CareerPoolEntry> orderedPool,
+    required Set<String> selectedIds,
+    required CareerTournamentFillRule fillRule,
+    required int count,
+  }) {
+    if (count <= 0) {
+      return const <_CareerPoolEntry>[];
+    }
+
+    final matchingPool = orderedPool
+        .where(
+          (entry) => !_isGeneratedCareerEntry(entry.id),
+        )
+        .where(
+          (entry) => _matchesCareerTags(
+            entry,
+            requiredTags: fillRule.requiredCareerTags,
+            excludedTags: fillRule.excludedCareerTags,
+            requiredNationalities: fillRule.requiredNationalities,
+            excludedNationalities: fillRule.excludedNationalities,
+          ),
+        )
+        .toList();
+    final referencePool = matchingPool.isNotEmpty
+        ? matchingPool
+        : orderedPool
+            .where((entry) => !_isGeneratedCareerEntry(entry.id))
+            .toList();
+
+    var minimumAverage = 60.0;
+    var maximumAverage = 80.0;
+    if (referencePool.isNotEmpty) {
+      minimumAverage = referencePool
+          .map((entry) => entry.average)
+          .reduce((left, right) => left < right ? left : right);
+      maximumAverage = referencePool
+          .map((entry) => entry.average)
+          .reduce((left, right) => left > right ? left : right);
+    }
+    if ((maximumAverage - minimumAverage).abs() < 0.001) {
+      minimumAverage = (minimumAverage - 2).clamp(0, 180).toDouble();
+      maximumAverage = (maximumAverage + 2).clamp(0, 180).toDouble();
+    }
+
+    final result = <_CareerPoolEntry>[];
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final random = Random();
+    final usedNamesLowercase = <String>{
+      ...orderedPool.map((entry) => entry.name.trim().toLowerCase()),
+    };
+
+    for (var index = 0; index < count; index += 1) {
+      final targetAverage = _generatedTargetAverage(
+        index: index,
+        totalCount: count,
+        minimumAverage: minimumAverage,
+        maximumAverage: maximumAverage,
+        biasToLowerEnd: true,
+      );
+      final resolution =
+          ComputerRepository.instance.resolveSkillsForTheoreticalAverageQuick(
+        targetAverage,
+      );
+      final nationality = _pickGeneratedNationality(
+        fillRule: fillRule,
+        referencePool: referencePool,
+        random: random,
+      );
+      final generatedAge = _pickGeneratedAge(
+        fillRule: fillRule,
+        targetAverage: resolution.theoreticalAverage,
+        random: random,
+      );
+      final generatedName = GeneratedNameCatalog.generateUniquePlayerName(
+        random: random,
+        usedNamesLowercase: usedNamesLowercase,
+        nationality: nationality,
+        fallbackPrefix: 'CPU',
+      );
+      usedNamesLowercase.add(generatedName.trim().toLowerCase());
+      result.add(
+        _CareerPoolEntry(
+          id: 'generated-career-fill-$timestamp-$index',
+          name: generatedName,
+          type: TournamentParticipantType.computer,
+          average: resolution.theoreticalAverage,
+          entryRound: 1,
+          nationality: nationality,
+          careerTags: fillRule.requiredCareerTags,
+          qualificationReason:
+              'Automatische Auffuellung'
+              '${fillRule.requiredCareerTags.isEmpty ? '' : ' | Tags ${fillRule.requiredCareerTags.join(', ')}'}'
+              '${fillRule.excludedCareerTags.isEmpty ? '' : ' | Ohne ${fillRule.excludedCareerTags.join(', ')}'}'
+              '${nationality == null ? '' : ' | Nationalitaet $nationality'}'
+              '${generatedAge == null ? '' : ' | Alter $generatedAge'}',
+          botSkill: resolution.skill,
+          botFinishingSkill: resolution.finishingSkill,
+        ),
+      );
+    }
+
+    return result;
+  }
+
+  bool _isGeneratedCareerEntry(String id) {
+    return id.startsWith('generated-career-fill-');
+  }
+
   List<_CareerRankedEntry> _rankingCandidates({
     required Map<String, _CareerPoolEntry> pool,
     required List<_CareerPoolEntry> orderedPool,
-    required String rankingId,
-    required Map<String, List<RankingStanding>> standingsCache,
-    required List<String> requiredTags,
-    required List<String> excludedTags,
-  }) {
+      required String rankingId,
+      required Map<String, List<RankingStanding>> standingsCache,
+      required List<String> requiredTags,
+      required List<String> excludedTags,
+      required List<String> requiredNationalities,
+      required List<String> excludedNationalities,
+    }) {
     final standings = standingsCache.putIfAbsent(
       rankingId,
       () => CareerRepository.instance.standingsForRanking(rankingId),
@@ -1246,11 +1537,13 @@ class TournamentRepository extends ChangeNotifier {
         if (entry == null) {
           continue;
         }
-        if (!_matchesCareerTags(
-          entry,
-          requiredTags: requiredTags,
-          excludedTags: excludedTags,
-        )) {
+          if (!_matchesCareerTags(
+            entry,
+            requiredTags: requiredTags,
+            excludedTags: excludedTags,
+            requiredNationalities: requiredNationalities,
+            excludedNationalities: excludedNationalities,
+          )) {
           continue;
         }
         rankedEntries.add(
@@ -1268,11 +1561,13 @@ class TournamentRepository extends ChangeNotifier {
     final fallbackEntries = <_CareerRankedEntry>[];
     var rank = 1;
     for (final entry in orderedPool) {
-      if (!_matchesCareerTags(
-        entry,
-        requiredTags: requiredTags,
-        excludedTags: excludedTags,
-      )) {
+        if (!_matchesCareerTags(
+          entry,
+          requiredTags: requiredTags,
+          excludedTags: excludedTags,
+          requiredNationalities: requiredNationalities,
+          excludedNationalities: excludedNationalities,
+        )) {
         continue;
       }
       fallbackEntries.add(
@@ -1315,13 +1610,14 @@ class TournamentRepository extends ChangeNotifier {
     final sourcePlayers = career.databasePlayers.isEmpty
         ? ComputerRepository.instance.players
             .map(
-              (player) => CareerDatabasePlayer(
-                databasePlayerId: player.id,
-                name: player.name,
-                average: player.theoreticalAverage,
-                skill: player.skill,
-                finishingSkill: player.finishingSkill,
-              ),
+                (player) => CareerDatabasePlayer(
+                  databasePlayerId: player.id,
+                  name: player.name,
+                  average: player.theoreticalAverage,
+                  skill: player.skill,
+                  finishingSkill: player.finishingSkill,
+                  nationality: player.nationality,
+                ),
             )
             .toList()
         : career.databasePlayers;
@@ -1351,12 +1647,13 @@ class TournamentRepository extends ChangeNotifier {
         type: TournamentParticipantType.computer,
         average: effectiveAverage,
         careerTags: sourcePlayer.activeTagNames,
-        qualificationReason: sourcePlayer.activeTagNames.isEmpty
-            ? null
-            : 'Tags: ${sourcePlayer.activeTagNames.join(', ')}',
-        botSkill: effectiveSkill,
-        botFinishingSkill: effectiveFinishingSkill,
-      );
+          qualificationReason: sourcePlayer.activeTagNames.isEmpty
+              ? null
+              : 'Tags: ${sourcePlayer.activeTagNames.join(', ')}',
+          nationality: sourcePlayer.nationality,
+          botSkill: effectiveSkill,
+          botFinishingSkill: effectiveFinishingSkill,
+        );
       pool[sourcePlayer.databasePlayerId] = poolEntry;
       if (weakestPoolEntry == null || poolEntry.average < weakestPoolEntry.average) {
         weakestPoolEntry = poolEntry;
@@ -1391,12 +1688,13 @@ class TournamentRepository extends ChangeNotifier {
         type: selectedHuman.type,
         average: existingHumanEntry?.average ?? selectedHuman.average,
         careerTags: inheritedTags,
-        qualificationReason: inheritedTags.isEmpty
-            ? 'Karriere-Spieler'
-            : 'Karriere-Spieler | Tags: ${inheritedTags.join(', ')}',
-        botSkill: existingHumanEntry?.botSkill,
-        botFinishingSkill: existingHumanEntry?.botFinishingSkill,
-      );
+          qualificationReason: inheritedTags.isEmpty
+              ? 'Karriere-Spieler'
+              : 'Karriere-Spieler | Tags: ${inheritedTags.join(', ')}',
+          nationality: selectedHuman.nationality,
+          botSkill: existingHumanEntry?.botSkill,
+          botFinishingSkill: existingHumanEntry?.botFinishingSkill,
+        );
     }
 
     return pool;
@@ -1406,27 +1704,38 @@ class TournamentRepository extends ChangeNotifier {
     _CareerPoolEntry entry, {
     required List<String> requiredTags,
     required List<String> excludedTags,
+    List<String> requiredNationalities = const <String>[],
+    List<String> excludedNationalities = const <String>[],
   }) {
-    if (requiredTags.isEmpty) {
-      for (final tag in excludedTags) {
-        if (entry.careerTags.contains(tag)) {
-          return false;
+      if (requiredTags.isEmpty) {
+        for (final tag in excludedTags) {
+          if (entry.careerTags.contains(tag)) {
+            return false;
+          }
         }
+      } else {
+        for (final tag in requiredTags) {
+          if (!entry.careerTags.contains(tag)) {
+            return false;
+          }
+        }
+        for (final tag in excludedTags) {
+          if (entry.careerTags.contains(tag)) {
+            return false;
+          }
+        }
+      }
+      final nationality = (entry.nationality ?? '').trim();
+      if (requiredNationalities.isNotEmpty &&
+          !requiredNationalities.contains(nationality)) {
+        return false;
+      }
+      if (nationality.isNotEmpty &&
+          excludedNationalities.contains(nationality)) {
+        return false;
       }
       return true;
     }
-    for (final tag in requiredTags) {
-      if (!entry.careerTags.contains(tag)) {
-        return false;
-      }
-    }
-    for (final tag in excludedTags) {
-      if (entry.careerTags.contains(tag)) {
-        return false;
-      }
-    }
-    return true;
-  }
 
   BotProfile _profileForParticipant(String participantId) {
     final bracket = _currentBracket;
@@ -1528,6 +1837,42 @@ class TournamentRepository extends ChangeNotifier {
     return result;
   }
 
+  Map<String, Object?> _serializedProfilesForParticipants(
+    List<TournamentParticipant> participants,
+  ) {
+    final activePlayer = PlayerRepository.instance.activePlayer;
+    final computerProfiles = <String, BotProfile>{
+      for (final player in ComputerRepository.instance.players)
+        player.id: SettingsRepository.instance.createBotProfile(
+          skill: player.skill,
+          finishingSkill: player.finishingSkill,
+        ),
+    };
+    final result = <String, Object?>{};
+    for (final participant in participants) {
+      BotProfile profile;
+      if (participant.botSkill != null && participant.botFinishingSkill != null) {
+        profile = SettingsRepository.instance.createBotProfile(
+          skill: participant.botSkill!,
+          finishingSkill: participant.botFinishingSkill!,
+        );
+      } else if (activePlayer != null && activePlayer.id == participant.id) {
+        profile = _profileForAverage(activePlayer.average);
+      } else if (computerProfiles.containsKey(participant.id)) {
+        profile = computerProfiles[participant.id]!;
+      } else {
+        profile = _profileForAverage(participant.average);
+      }
+      result[participant.id] = <String, Object?>{
+        'skill': profile.skill,
+        'finishingSkill': profile.finishingSkill,
+        'radiusCalibrationPercent': profile.radiusCalibrationPercent,
+        'simulationSpreadPercent': profile.simulationSpreadPercent,
+      };
+    }
+    return result;
+  }
+
   int _countCompletedMatchesLowMemory(TournamentBracket bracket) {
     var count = 0;
     for (final round in bracket.rounds) {
@@ -1582,16 +1927,158 @@ class TournamentRepository extends ChangeNotifier {
     required int totalCount,
     required double minimumAverage,
     required double maximumAverage,
+    bool biasToLowerEnd = false,
   }) {
     if (totalCount <= 1 || (maximumAverage - minimumAverage).abs() < 0.001) {
       return minimumAverage;
     }
-    final factor = index / (totalCount - 1);
+    final linearFactor = index / (totalCount - 1);
+    final factor = biasToLowerEnd
+        ? pow(linearFactor, 2).toDouble()
+        : linearFactor;
     return minimumAverage + ((maximumAverage - minimumAverage) * factor);
+  }
+
+  String? _pickGeneratedNationality({
+    required CareerTournamentFillRule fillRule,
+    required List<_CareerPoolEntry> referencePool,
+    required Random random,
+  }) {
+    final allowedNationalities = <String>{
+      ...referencePool
+          .map((entry) => (entry.nationality ?? '').trim())
+          .where((entry) => entry.isNotEmpty),
+    };
+    if (fillRule.requiredNationalities.isNotEmpty) {
+      allowedNationalities.removeWhere(
+        (entry) => !fillRule.requiredNationalities.contains(entry),
+      );
+    }
+    if (fillRule.excludedNationalities.isNotEmpty) {
+      allowedNationalities.removeWhere(
+        (entry) => fillRule.excludedNationalities.contains(entry),
+      );
+    }
+
+    final weightedConfigured = fillRule.generatedNationalityDistributions
+        .where((entry) => entry.percent > 0 && entry.nationality.trim().isNotEmpty)
+        .where(
+          (entry) =>
+              allowedNationalities.isEmpty ||
+              allowedNationalities.contains(entry.nationality),
+        )
+        .toList();
+    if (weightedConfigured.isNotEmpty) {
+      return _pickWeightedValue<CareerGeneratedNationalityDistribution, String>(
+        weightedConfigured,
+        random,
+        (entry) => entry.percent,
+        (entry) => entry.nationality,
+      );
+    }
+    if (fillRule.requiredNationalities.length == 1) {
+      return fillRule.requiredNationalities.first;
+    }
+    if (fillRule.requiredNationalities.length > 1) {
+      final candidates = fillRule.requiredNationalities
+          .where(
+            (entry) => !fillRule.excludedNationalities.contains(entry),
+          )
+          .toList();
+      if (candidates.isNotEmpty) {
+        return candidates[random.nextInt(candidates.length)];
+      }
+    }
+    if (allowedNationalities.isEmpty) {
+      return null;
+    }
+    final fallback = allowedNationalities.toList()..sort();
+    return fallback[random.nextInt(fallback.length)];
+  }
+
+  int? _pickGeneratedAge({
+    required CareerTournamentFillRule fillRule,
+    required double targetAverage,
+    required Random random,
+  }) {
+    final weightedConfigured = fillRule.generatedAgeDistributions
+        .where(
+          (entry) =>
+              entry.percent > 0 &&
+              entry.minAge > 0 &&
+              entry.maxAge >= entry.minAge,
+        )
+        .toList();
+    if (weightedConfigured.isNotEmpty) {
+      final selected =
+          _pickWeightedValue<CareerGeneratedAgeDistribution, CareerGeneratedAgeDistribution>(
+        weightedConfigured,
+        random,
+        (entry) => entry.percent,
+        (entry) => entry,
+      );
+      if (selected != null) {
+        final span = max(0, selected.maxAge - selected.minAge);
+        return selected.minAge + random.nextInt(span + 1);
+      }
+    }
+    final fallbackRange = _suggestGeneratedAgeRange(targetAverage);
+    final span = max(0, fallbackRange.$2 - fallbackRange.$1);
+    return fallbackRange.$1 + random.nextInt(span + 1);
+  }
+
+  (int, int) _suggestGeneratedAgeRange(double targetAverage) {
+    if (targetAverage >= 95) {
+      return (23, 38);
+    }
+    if (targetAverage >= 85) {
+      return (20, 36);
+    }
+    if (targetAverage >= 75) {
+      return (19, 34);
+    }
+    if (targetAverage >= 65) {
+      return (18, 33);
+    }
+    return (17, 30);
+  }
+
+  T? _pickWeightedValue<E, T>(
+    List<E> values,
+    Random random,
+    int Function(E entry) weightOf,
+    T Function(E entry) valueOf,
+  ) {
+    final totalWeight = values.fold<int>(
+      0,
+      (sum, entry) => sum + max(0, weightOf(entry)),
+    );
+    if (totalWeight <= 0) {
+      return null;
+    }
+    var ticket = random.nextInt(totalWeight);
+    for (final entry in values) {
+      ticket -= max(0, weightOf(entry));
+      if (ticket < 0) {
+        return valueOf(entry);
+      }
+    }
+    return valueOf(values.last);
   }
 
   String _generatedComputerName(int number) {
     return 'CPU $number';
+  }
+
+  TournamentMatch? _matchById(TournamentBracket bracket, String matchId) {
+    for (final round in bracket.rounds) {
+      for (final match in round.matches) {
+        if (match.id == matchId) {
+          return match;
+        }
+      }
+    }
+    return null;
   }
 
   int? _roundNumberForMatch(TournamentBracket bracket, String matchId) {
@@ -1603,6 +2090,74 @@ class TournamentRepository extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  String _manualScoreTextForMatch({
+    required TournamentBracket bracket,
+    required TournamentMatch? match,
+    required String? winnerId,
+    required bool isDraw,
+  }) {
+    if (match == null) {
+      return isDraw ? 'Unentschieden' : 'Manuell entschieden';
+    }
+    final stageRound = bracket.definition.format == TournamentFormat.leaguePlayoff &&
+            bracket.stageForRound(match.roundNumber) == TournamentRoundStage.playoff
+        ? bracket.stageRoundIndex(match.roundNumber)
+        : match.roundNumber;
+    if (isDraw) {
+      return bracket.definition.matchMode == MatchMode.sets
+          ? '1:1 Sets'
+          : '1:1 Legs';
+    }
+    final target = bracket.definition.distanceForRound(stageRound);
+    if (bracket.definition.matchMode == MatchMode.sets) {
+      final leftScore = match.playerA?.id == winnerId ? target : 0;
+      final rightScore = match.playerB?.id == winnerId ? target : 0;
+      return '$leftScore:$rightScore Sets';
+    }
+    final leftScore = match.playerA?.id == winnerId ? target : 0;
+    final rightScore = match.playerB?.id == winnerId ? target : 0;
+    return '$leftScore:$rightScore Legs';
+  }
+
+  List<TournamentPlayerMatchStats> _manualParticipantStatsForMatch({
+    required TournamentBracket bracket,
+    required TournamentMatch? match,
+    required String? winnerId,
+    required bool isDraw,
+  }) {
+    if (match == null || match.playerA == null || match.playerB == null) {
+      return const <TournamentPlayerMatchStats>[];
+    }
+    final stageRound = bracket.definition.format == TournamentFormat.leaguePlayoff &&
+            bracket.stageForRound(match.roundNumber) == TournamentRoundStage.playoff
+        ? bracket.stageRoundIndex(match.roundNumber)
+        : match.roundNumber;
+    final distance = bracket.definition.distanceForRound(stageRound);
+    final isSetsMatch = bracket.definition.matchMode == MatchMode.sets;
+    final legsA = isDraw
+        ? 1
+        : (match.playerA!.id == winnerId ? (isSetsMatch ? 0 : distance) : 0);
+    final legsB = isDraw
+        ? 1
+        : (match.playerB!.id == winnerId ? (isSetsMatch ? 0 : distance) : 0);
+    final legsPlayed = legsA + legsB;
+
+    return <TournamentPlayerMatchStats>[
+      TournamentPlayerMatchStats(
+        participantId: match.playerA!.id,
+        participantName: match.playerA!.name,
+        legsWon: legsA,
+        legsPlayed: legsPlayed,
+      ),
+      TournamentPlayerMatchStats(
+        participantId: match.playerB!.id,
+        participantName: match.playerB!.name,
+        legsWon: legsB,
+        legsPlayed: legsPlayed,
+      ),
+    ];
   }
 
   int? _nextPendingRoundNumber(TournamentBracket bracket) {
@@ -1724,39 +2279,7 @@ class TournamentRepository extends ChangeNotifier {
   }
 
   TournamentBracket _lightweightArchiveBracket(TournamentBracket bracket) {
-    return TournamentBracket(
-      definition: bracket.definition,
-      participants: bracket.participants,
-      rounds: bracket.rounds
-          .map(
-            (round) => TournamentRound(
-              roundNumber: round.roundNumber,
-              title: round.title,
-              stage: round.stage,
-              matches: round.matches
-                  .map(
-                    (match) => TournamentMatch(
-                      id: match.id,
-                      roundNumber: match.roundNumber,
-                      matchNumber: match.matchNumber,
-                      playerA: match.playerA,
-                      playerB: match.playerB,
-                      status: match.status,
-                      result: match.result == null
-                          ? null
-                          : TournamentMatchResult(
-                              winnerId: match.result!.winnerId,
-                              winnerName: match.result!.winnerName,
-                              scoreText: match.result!.scoreText,
-                              isDraw: match.result!.isDraw,
-                            ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          )
-          .toList(),
-    );
+    return TournamentBracket.fromJson(bracket.toJson());
   }
 
   void _pruneArchive() {
@@ -1828,6 +2351,22 @@ class TournamentRepository extends ChangeNotifier {
       ),
     );
     return initialParticipants;
+  }
+
+  List<TournamentParticipant> _previewParticipantsForLeagueSeriesItem({
+    required CareerDefinition career,
+    required CareerCalendarItem item,
+  }) {
+    if (item.leagueSeriesQualificationMode ==
+        CareerLeagueSeriesQualificationMode.recheckEachMatchday) {
+      return _buildCareerParticipants(career: career, item: item);
+    }
+    final existingState = _leagueSeriesState(career, item.seriesGroupId!);
+    final fixedIds = existingState?.fixedParticipantIds ?? const <String>[];
+    if (fixedIds.isNotEmpty) {
+      return _participantsByIds(career, fixedIds);
+    }
+    return _buildCareerParticipants(career: career, item: item);
   }
 
   List<TournamentParticipant> _participantsByIds(
@@ -1980,6 +2519,7 @@ class _CareerPoolEntry {
     required this.type,
     required this.average,
     this.entryRound = 1,
+    this.nationality,
     this.careerTags = const <String>[],
     this.qualificationReason,
     this.botSkill,
@@ -1991,6 +2531,7 @@ class _CareerPoolEntry {
   final TournamentParticipantType type;
   final double average;
   final int entryRound;
+  final String? nationality;
   final List<String> careerTags;
   final String? qualificationReason;
   final int? botSkill;
@@ -2003,10 +2544,11 @@ class _CareerPoolEntry {
     return _CareerPoolEntry(
       id: id,
       name: name,
-      type: type,
-      average: average,
-      entryRound: entryRound ?? this.entryRound,
-      careerTags: careerTags,
+        type: type,
+        average: average,
+        entryRound: entryRound ?? this.entryRound,
+        nationality: nationality,
+        careerTags: careerTags,
       qualificationReason: qualificationReason ?? this.qualificationReason,
       botSkill: botSkill,
       botFinishingSkill: botFinishingSkill,

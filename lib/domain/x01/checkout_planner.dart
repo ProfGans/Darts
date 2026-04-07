@@ -573,16 +573,18 @@ class CheckoutPlanner {
           continue;
         }
 
-        final nextRoute = <DartThrowResult>[...route, dartThrow];
+        route.add(dartThrow);
         if (next == targetScore) {
-          final key = nextRoute.map((entry) => entry.label).join('-');
+          final key = route.map((entry) => entry.label).join('-');
           if (seen.add(key)) {
-            routes.add(nextRoute);
+            routes.add(List<DartThrowResult>.from(route));
           }
+          route.removeLast();
           continue;
         }
 
-        search(next, dartsRemaining - 1, nextRoute);
+        search(next, dartsRemaining - 1, route);
+        route.removeLast();
       }
     }
 
@@ -687,23 +689,26 @@ class CheckoutPlanner {
         }
 
         final next = remaining - dartThrow.scoredPoints;
-        if (next < 0 || next == 1) {
+        if (next < 0 || _isDeadScoreForCheckout(next, checkoutRequirement)) {
           continue;
         }
 
-        final nextRoute = <DartThrowResult>[...route, dartThrow];
+        route.add(dartThrow);
         if (next == 0) {
           if (!dartThrow.matchesCheckoutRequirement(checkoutRequirement)) {
+            route.removeLast();
             continue;
           }
-          final key = nextRoute.map((entry) => entry.label).join('-');
+          final key = route.map((entry) => entry.label).join('-');
           if (seen.add(key)) {
-            finishes.add(nextRoute);
+            finishes.add(List<DartThrowResult>.from(route));
           }
+          route.removeLast();
           continue;
         }
 
-        search(next, dartsRemaining - 1, nextRoute);
+        search(next, dartsRemaining - 1, route);
+        route.removeLast();
       }
     }
 
@@ -847,18 +852,19 @@ class CheckoutPlanner {
         }
 
         final next = remaining - dartThrow.scoredPoints;
-        if (next < 0 || next == 1) {
+        if (next < 0 || _isDeadScoreForCheckout(next, checkoutRequirement)) {
           continue;
         }
 
-        final nextRoute = <DartThrowResult>[...route, dartThrow];
+        route.add(dartThrow);
         if (next == 0) {
           if (!dartThrow.matchesCheckoutRequirement(checkoutRequirement) ||
               !matcher(dartThrow)) {
+            route.removeLast();
             continue;
           }
           final candidateScore = scoreRoute(
-            route: nextRoute,
+            route: route,
             startScore: score,
             totalDarts: dartsLeft,
             checkoutRequirement: checkoutRequirement,
@@ -868,12 +874,14 @@ class CheckoutPlanner {
           );
           if (candidateScore > bestScore) {
             bestScore = candidateScore;
-            best = nextRoute;
+            best = List<DartThrowResult>.from(route);
           }
+          route.removeLast();
           continue;
         }
 
-        search(next, dartsRemaining - 1, nextRoute);
+        search(next, dartsRemaining - 1, route);
+        route.removeLast();
       }
     }
 
@@ -913,6 +921,7 @@ class CheckoutPlanner {
     }
 
     final candidates = <CheckoutSetupLeaveOption>[];
+    final candidateLimit = (maxResults * 6).clamp(24, 96);
     final seen = <String>{};
 
     void search(
@@ -941,7 +950,7 @@ class CheckoutPlanner {
           continue;
         }
 
-        final nextRoute = <DartThrowResult>[...route, dartThrow];
+        route.add(dartThrow);
         final finishRoute = bestFinishRoute(
           score: next,
           dartsLeft: 3,
@@ -952,11 +961,11 @@ class CheckoutPlanner {
         );
 
         if (finishRoute != null && nextNarrowFields == narrowFieldCount) {
-          final routeKey = nextRoute.map((entry) => entry.label).join('-');
+          final routeKey = route.map((entry) => entry.label).join('-');
           final key = '$next|$routeKey';
           if (seen.add(key)) {
             final breakdown = setupLeaveScoreBreakdown(
-              setupRoute: nextRoute,
+              setupRoute: route,
               startScore: startScore,
               remainingScore: next,
               finishRoute: finishRoute,
@@ -968,27 +977,35 @@ class CheckoutPlanner {
               bullPreference: bullPreference,
             );
             final candidate = CheckoutSetupLeaveOption(
-              setupRoute: nextRoute,
+              setupRoute: List<DartThrowResult>.unmodifiable(route),
               remainingScore: next,
               finishRoute: finishRoute,
               score: breakdown.totalScore,
               breakdown: breakdown,
             );
             candidates.add(candidate);
+            if (candidates.length > candidateLimit * 2) {
+              candidates.sort((a, b) => b.score.compareTo(a.score));
+              candidates.removeRange(candidateLimit, candidates.length);
+            }
           }
         }
 
         search(
           next,
           dartsRemaining - 1,
-          nextRoute,
+          route,
           nextNarrowFields,
         );
+        route.removeLast();
       }
     }
 
-    search(startScore, dartsLeft, const <DartThrowResult>[], 0);
+    search(startScore, dartsLeft, <DartThrowResult>[], 0);
     candidates.sort((a, b) => b.score.compareTo(a.score));
+    if (candidates.length > candidateLimit) {
+      candidates.removeRange(candidateLimit, candidates.length);
+    }
     final results = List<CheckoutSetupLeaveOption>.unmodifiable(
       candidates.take(maxResults),
     );
@@ -1495,7 +1512,7 @@ class CheckoutPlanner {
       }
 
       final next = score - dartThrow.scoredPoints;
-      if (next < 2 || next == 1) {
+      if (next < 0 || _isDeadScoreForCheckout(next, checkoutRequirement)) {
         continue;
       }
 
@@ -1567,6 +1584,11 @@ class CheckoutPlanner {
   }) {
     final dartsUsedScore = 1280 - (route.length * 140);
     final twoDartCheckoutBonus = 0;
+    final smallCheckoutSingleDoubleBonus = _smallCheckoutSingleDoubleBonus(
+      route: route,
+      startScore: startScore,
+      checkoutRequirement: checkoutRequirement,
+    );
     final narrowFieldPenalty = _narrowFieldPenalty(
       route,
       defaultPenalty: 150,
@@ -1618,6 +1640,7 @@ class CheckoutPlanner {
 
     return dartsUsedScore +
         twoDartCheckoutBonus +
+        smallCheckoutSingleDoubleBonus +
         endingDoubleDoubleBonus +
         goodDoubleBonus +
         comfortBonus +
@@ -1653,17 +1676,23 @@ class CheckoutPlanner {
     }
     final dartsUsedScore = 1280 - (route.length * 140);
     final twoDartCheckoutBonus = 0;
-      final narrowFieldPenalty = _narrowFieldPenalty(
-        route,
-        defaultPenalty: 150,
-      );
-      final finalBullPenalty =
-          route.isNotEmpty && route.last.isBull
-              ? _bullPenaltyValue(65, bullPreference, scale: 1)
-              : 0;
-      final outerBullPenalty = route.where((entry) => entry.label == '25').length *
-          _outerBullPenaltyValue(0, outerBullPreference);
-      final endingDoubleDoubleBonus = doubleDoubleEndingBonus(route);
+    final smallCheckoutSingleDoubleBonus = _smallCheckoutSingleDoubleBonus(
+      route: route,
+      startScore: startScore,
+      checkoutRequirement: checkoutRequirement,
+    );
+    final narrowFieldPenalty = _narrowFieldPenalty(
+      route,
+      defaultPenalty: 150,
+    );
+    final finalBullPenalty =
+        route.isNotEmpty && route.last.isBull
+            ? _bullPenaltyValue(65, bullPreference, scale: 1)
+            : 0;
+    final outerBullPenalty =
+        route.where((entry) => entry.label == '25').length *
+        _outerBullPenaltyValue(0, outerBullPreference);
+    final endingDoubleDoubleBonus = doubleDoubleEndingBonus(route);
 
     final robustnessAnalysis = _robustnessDetails(
       route: route,
@@ -1685,23 +1714,24 @@ class CheckoutPlanner {
       bullPreference: bullPreference,
     );
 
-      final breakdown = CheckoutRouteScoreBreakdown(
-        dartPathScore: dartsUsedScore + twoDartCheckoutBonus,
-        comfort: comfortScore(route) + comfortRelief,
-        robustness: robustnessAnalysis.total +
-            singleOr25DoubleAccessBonus(
-              route: route,
-              startScore: startScore,
-            ),
-        doubleQuality:
-            (route.isEmpty ? 0 : doublePreference(route.last)) +
-            endingDoubleDoubleBonus,
-        narrowFieldPenalty: narrowFieldPenalty,
-        bullPenalty: finalBullPenalty + outerBullPenalty,
-        segmentFlow: continuityScore(route),
+    final breakdown = CheckoutRouteScoreBreakdown(
+      dartPathScore:
+          dartsUsedScore + twoDartCheckoutBonus + smallCheckoutSingleDoubleBonus,
+      comfort: comfortScore(route) + comfortRelief,
+      robustness: robustnessAnalysis.total +
+          singleOr25DoubleAccessBonus(
+            route: route,
+            startScore: startScore,
+          ),
+      doubleQuality:
+          (route.isEmpty ? 0 : doublePreference(route.last)) +
+          endingDoubleDoubleBonus,
+      narrowFieldPenalty: narrowFieldPenalty,
+      bullPenalty: finalBullPenalty + outerBullPenalty,
+      segmentFlow: continuityScore(route),
       dartPathDetails: _dartPathDetails(
         routeLength: route.length,
-        baseScore: dartsUsedScore,
+        baseScore: dartsUsedScore + smallCheckoutSingleDoubleBonus,
         twoDartBonus: twoDartCheckoutBonus,
       ),
       comfortDetails: _comfortDetails(
@@ -1753,6 +1783,11 @@ class CheckoutPlanner {
   }) {
     final dartsUsedScore = 1180 - (route.length * 135);
     final twoDartCheckoutBonus = 0;
+    final smallCheckoutSingleDoubleBonus = _smallCheckoutSingleDoubleBonus(
+      route: route,
+      startScore: route.fold<int>(0, (sum, entry) => sum + entry.scoredPoints),
+      checkoutRequirement: CheckoutRequirement.doubleOut,
+    );
     final narrowFieldPenalty = _narrowFieldPenalty(
       route,
       defaultPenalty: 120,
@@ -1768,6 +1803,7 @@ class CheckoutPlanner {
 
     final baseScore = dartsUsedScore +
         twoDartCheckoutBonus +
+        smallCheckoutSingleDoubleBonus +
         endingDoubleDoubleBonus +
         doublePreference(route.last) +
         comfortScore(route) +
@@ -1851,7 +1887,7 @@ class CheckoutPlanner {
       bullPreference: bullPreference,
     );
     final targetLeaveBonus = targetCheckout == null
-        ? _targetPreference(targetScore)
+        ? _targetPreference(targetScore, checkoutRequirement)
         : 220 +
             (scoreRoute(
                   route: targetCheckout,
@@ -3326,9 +3362,15 @@ class CheckoutPlanner {
     }
   }
 
-  int _targetPreference(int targetScore) {
+  int _targetPreference(
+    int targetScore,
+    CheckoutRequirement checkoutRequirement,
+  ) {
     if (targetScore == 50) {
       return 24;
+    }
+    if (checkoutRequirement == CheckoutRequirement.singleOut && targetScore == 1) {
+      return 80;
     }
     if (targetScore > 1 && targetScore <= 40 && targetScore.isEven) {
       return 180 + doublePreference(rules.createDouble(targetScore ~/ 2));
@@ -3375,6 +3417,28 @@ class CheckoutPlanner {
     }
 
     return halvingCount * 12;
+  }
+
+  int _smallCheckoutSingleDoubleBonus({
+    required List<DartThrowResult> route,
+    required int startScore,
+    required CheckoutRequirement checkoutRequirement,
+  }) {
+    if (checkoutRequirement != CheckoutRequirement.doubleOut ||
+        startScore > 60 ||
+        route.length != 2) {
+      return 0;
+    }
+    final first = route.first;
+    final last = route.last;
+    final isPreferredSingleDouble =
+        !first.isBull &&
+        !first.isDouble &&
+        !first.isTriple &&
+        first.label != '25' &&
+        last.isDouble &&
+        !last.isBull;
+    return isPreferredSingleDouble ? 600 : 0;
   }
 
   bool isNarrowField(DartThrowResult dartThrow) {
@@ -3450,5 +3514,18 @@ class CheckoutPlanner {
 
   int _bullPenaltyValue(int base, int preference, {int scale = 2}) {
     return base + ((preference - 50) * scale);
+  }
+
+  bool _isDeadScoreForCheckout(
+    int score,
+    CheckoutRequirement checkoutRequirement,
+  ) {
+    if (score < 0) {
+      return true;
+    }
+    if (score != 1) {
+      return false;
+    }
+    return checkoutRequirement != CheckoutRequirement.singleOut;
   }
 }

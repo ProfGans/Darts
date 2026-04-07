@@ -27,8 +27,8 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
       TextEditingController(text: '3');
   final TextEditingController _setsToWinController =
       TextEditingController(text: '3');
-  final Map<String, TextEditingController> _startScoreControllers =
-      <String, TextEditingController>{};
+  final TextEditingController _x01StartScoreController =
+      TextEditingController(text: '501');
   final List<TextEditingController> _customComputerAverageControllers =
       <TextEditingController>[];
 
@@ -42,6 +42,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
   bool _bob27AllowNegativeScores = false;
   bool _bob27BonusMode = false;
   bool _bob27ReverseOrder = false;
+  bool _showValidation = false;
   final List<String?> _selectedHumanIds = <String?>[];
   final List<String?> _selectedComputerIds = <String?>[];
 
@@ -55,20 +56,11 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
   void dispose() {
     _legsToWinController.dispose();
     _setsToWinController.dispose();
-    for (final controller in _startScoreControllers.values) {
-      controller.dispose();
-    }
+    _x01StartScoreController.dispose();
     for (final controller in _customComputerAverageControllers) {
       controller.dispose();
     }
     super.dispose();
-  }
-
-  TextEditingController _scoreControllerFor(String id, {int initialValue = 501}) {
-    return _startScoreControllers.putIfAbsent(
-      id,
-      () => TextEditingController(text: '$initialValue'),
-    );
   }
 
   void _syncSelections() {
@@ -106,9 +98,18 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
 
   String _customComputerValue(int index) => '__custom_computer__$index';
 
+  bool get _isX01 => widget.gameMode == GameMode.x01;
+
+  bool get _x01ParticipantLimitReached =>
+      _isX01 && (1 + _humanOpponents + _computerOpponents) >= 2;
+
   void _addOpponent({
     required bool isHuman,
   }) {
+    if (_x01ParticipantLimitReached) {
+      _showInfo('X01 ist aktuell auf 2 Teilnehmer begrenzt.');
+      return;
+    }
     setState(() {
       if (isHuman) {
         _humanOpponents += 1;
@@ -201,17 +202,25 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
   }
 
   void _startMatch() {
+    setState(() {
+      _showValidation = true;
+    });
     final playerRepository = PlayerRepository.instance;
     final computerRepository = ComputerRepository.instance;
     final activePlayer = playerRepository.activePlayer;
     final legsToWin = int.tryParse(_legsToWinController.text.trim());
     final setsToWin = int.tryParse(_setsToWinController.text.trim());
     final isX01 = widget.gameMode == GameMode.x01;
+    final x01StartScore = isX01
+        ? int.tryParse(_x01StartScoreController.text.trim())
+        : null;
 
     if (activePlayer == null ||
         (isX01 &&
             (legsToWin == null ||
                 legsToWin <= 0 ||
+                x01StartScore == null ||
+                x01StartScore <= 1 ||
                 (_matchMode == MatchMode.sets &&
                     (setsToWin == null || setsToWin <= 0))))) {
       _showInfo('Bitte alle Werte gueltig eingeben.');
@@ -223,9 +232,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
           id: activePlayer.id,
           name: activePlayer.name,
           isHuman: true,
-          startingScore: isX01
-              ? int.tryParse(_scoreControllerFor(activePlayer.id).text.trim())
-              : null,
+          startingScore: x01StartScore,
         ),
       ];
 
@@ -246,8 +253,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
           id: player.id,
           name: player.name,
           isHuman: true,
-          startingScore:
-              isX01 ? int.tryParse(_scoreControllerFor(player.id).text.trim()) : null,
+          startingScore: x01StartScore,
         ),
       );
     }
@@ -276,8 +282,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             id: customId,
             name: 'Build Your Opponent ${computerIndex + 1}',
             isHuman: false,
-            startingScore:
-                isX01 ? int.tryParse(_scoreControllerFor(customId).text.trim()) : null,
+            startingScore: x01StartScore,
             botProfile: SettingsRepository.instance.createBotProfile(
               skill: resolution.skill,
               finishingSkill: resolution.finishingSkill,
@@ -297,9 +302,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             id: computer.id,
             name: computer.name,
             isHuman: false,
-            startingScore: isX01
-                ? int.tryParse(_scoreControllerFor(computer.id).text.trim())
-                : null,
+            startingScore: x01StartScore,
             botProfile: SettingsRepository.instance.createBotProfile(
               skill: computer.skill,
               finishingSkill: computer.finishingSkill,
@@ -327,7 +330,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
       gameMode: widget.gameMode,
       participants: participants,
       matchConfig: MatchConfig(
-        startScore: isX01 ? participants.first.startingScore! : 0,
+        startScore: isX01 ? x01StartScore! : 0,
         mode: isX01 ? _matchMode : MatchMode.legs,
         startRequirement:
             isX01 ? _startRequirement : StartRequirement.straightIn,
@@ -361,6 +364,53 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
     );
   }
 
+  List<String> _validationIssues({
+    required bool isX01,
+    required bool isBob27,
+    required Object? activePlayer,
+  }) {
+    final issues = <String>[];
+    if (activePlayer == null) {
+      issues.add('Lege zuerst ein aktives Spielerprofil fest.');
+    }
+    if (_selectedHumanIds.any((entry) => entry == null)) {
+      issues.add('Waehle fuer alle menschlichen Gegner ein Profil aus.');
+    }
+    if (_selectedComputerIds.any((entry) => entry == null)) {
+      issues.add('Waehle fuer alle Computergegner einen Eintrag aus.');
+    }
+    for (var index = 0; index < _selectedComputerIds.length; index += 1) {
+      final selected = _selectedComputerIds[index];
+      if (selected == _customComputerValue(index)) {
+        final avg = double.tryParse(
+          _customComputerAverageControllers[index].text.trim().replaceAll(',', '.'),
+        );
+        if (avg == null || avg <= 0 || avg > 180) {
+          issues.add('Pruefe die Average-Werte fuer freie Computergegner.');
+          break;
+        }
+      }
+    }
+    if (isX01) {
+      final legs = int.tryParse(_legsToWinController.text.trim());
+      final sets = int.tryParse(_setsToWinController.text.trim());
+      final startScore = int.tryParse(_x01StartScoreController.text.trim());
+      if (legs == null || legs <= 0) {
+        issues.add('Gib eine gueltige Distanz fuer Legs ein.');
+      }
+      if (_matchMode == MatchMode.sets && (sets == null || sets <= 0)) {
+        issues.add('Gib eine gueltige Anzahl Saetze zum Sieg ein.');
+      }
+      if (startScore == null || startScore <= 1) {
+        issues.add('Gib einen gueltigen gemeinsamen Startscore ein.');
+      }
+    }
+    if (isBob27 && _selectedComputerIds.any((entry) => entry == null)) {
+      issues.add('Bob27 braucht ebenfalls vollstaendige Gegnerauswahl.');
+    }
+    return issues;
+  }
+
   @override
   Widget build(BuildContext context) {
     final playerRepository = PlayerRepository.instance;
@@ -372,6 +422,11 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
     final availableComputers = computerRepository.players;
     final isX01 = widget.gameMode == GameMode.x01;
     final isBob27 = widget.gameMode == GameMode.bob27;
+    final issues = _validationIssues(
+      isX01: isX01,
+      isBob27: isBob27,
+      activePlayer: activePlayer,
+    );
     final previewParticipants = <({String id, String name})>[
       if (activePlayer != null) (id: activePlayer.id, name: activePlayer.name),
       ..._selectedHumanIds
@@ -411,19 +466,37 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
         : previewParticipants.isNotEmpty
             ? previewParticipants.first.id
             : null;
-    for (final participant in previewParticipants) {
-      if (isX01) {
-        _scoreControllerFor(participant.id);
-      }
-    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Match Setup'),
+        title: const Text('Match konfigurieren'),
+      ),
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (_showValidation && issues.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  issues.first,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF8C2F39),
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+            FilledButton(
+              onPressed: _startMatch,
+              child: const Text('Match starten'),
+            ),
+          ],
+        ),
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 160),
           children: <Widget>[
             Text(
               '${widget.gameMode.title} konfigurieren',
@@ -440,9 +513,75 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
             ),
             const SizedBox(height: 16),
             _SetupCard(
+              title: 'Uebersicht',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      _SetupPill(
+                        label:
+                            '${1 + _humanOpponents + _computerOpponents} Teilnehmer',
+                      ),
+                      _SetupPill(label: widget.gameMode.title),
+                      if (isX01)
+                        _SetupPill(
+                          label: _matchMode == MatchMode.legs
+                              ? 'Legs'
+                              : 'Sets',
+                        ),
+                      if (isX01)
+                        _SetupPill(
+                          label: 'Start ${_x01StartScoreController.text.trim().isEmpty ? '-' : _x01StartScoreController.text.trim()}',
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    issues.isEmpty
+                        ? 'Der Flow ist vollstaendig. Du kannst das Match direkt starten.'
+                        : 'Noch offen: ${issues.take(2).join(' ')}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: issues.isEmpty
+                              ? const Color(0xFF365F4B)
+                              : const Color(0xFF8C2F39),
+                          height: 1.35,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            if (_showValidation && issues.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 16),
+              _SetupCard(
+                title: 'Bitte noch pruefen',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: issues
+                      .map(
+                        (issue) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text('- $issue'),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            _SetupCard(
               title: 'Startspieler',
               child: activePlayer == null
-                  ? const Text('Kein aktives Spielerprofil vorhanden.')
+                  ? Text(
+                      'Kein aktives Spielerprofil vorhanden.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: _showValidation
+                                ? const Color(0xFF8C2F39)
+                                : const Color(0xFF556372),
+                          ),
+                    )
                   : Column(
                       children: <Widget>[
                         SwitchListTile(
@@ -464,8 +603,12 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                           const SizedBox(height: 8),
                           DropdownButtonFormField<String>(
                             initialValue: effectiveStartingParticipantId,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Wer beginnt',
+                              errorText: _showValidation &&
+                                      previewParticipants.isEmpty
+                                  ? 'Fuege zuerst Teilnehmer hinzu.'
+                                  : null,
                             ),
                             items: previewParticipants
                                 .map(
@@ -494,7 +637,9 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.tonalIcon(
-                      onPressed: _showAddOpponentSheet,
+                      onPressed: _x01ParticipantLimitReached
+                          ? null
+                          : _showAddOpponentSheet,
                       icon: const Icon(Icons.person_add_alt_1_rounded),
                       label: const Text('Gegner hinzufuegen'),
                     ),
@@ -511,6 +656,7 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                       'Du spielst mit ${1 + _humanOpponents + _computerOpponents} Teilnehmern: '
                       '1 aktives Profil, $_humanOpponents menschlich, $_computerOpponents Computer.'
                       '${1 + _humanOpponents + _computerOpponents == 1 ? ' Solo-Spiel ist moeglich.' : ''}'
+                      '${isX01 ? ' X01 laeuft aktuell stabil als 1-oder-2-Spieler-Modus mit gemeinsamem Startscore.' : ''}'
                       '${isBob27 ? ' Alle Teilnehmer spielen pro Runde auf dasselbe Zielfeld.' : ''}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: const Color(0xFF4F5E6C),
@@ -535,6 +681,10 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                 initialValue: _selectedHumanIds[index],
                                 decoration: InputDecoration(
                                   labelText: 'Spieler ${index + 2}',
+                                  errorText: _showValidation &&
+                                          _selectedHumanIds[index] == null
+                                      ? 'Profil auswaehlen'
+                                      : null,
                                 ),
                                 items: availableHumans
                                     .map(
@@ -585,6 +735,10 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                     initialValue: _selectedComputerIds[index],
                                     decoration: InputDecoration(
                                       labelText: 'Computer ${index + 1}',
+                                      errorText: _showValidation &&
+                                              _selectedComputerIds[index] == null
+                                          ? 'Gegner auswaehlen'
+                                          : null,
                                     ),
                                     items: <DropdownMenuItem<String>>[
                                       ...availableComputers.map(
@@ -624,11 +778,25 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                 keyboardType: const TextInputType.numberWithOptions(
                                   decimal: true,
                                 ),
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Theoretischer Average',
                                   suffixText: 'Avg',
                                   helperText:
                                       'Gib den theoretischen 3-Dart-Average ein.',
+                                  errorText: _showValidation &&
+                                          (() {
+                                            final value = double.tryParse(
+                                              _customComputerAverageControllers[index]
+                                                  .text
+                                                  .trim()
+                                                  .replaceAll(',', '.'),
+                                            );
+                                            return value == null ||
+                                                    value <= 0 ||
+                                                    value > 180;
+                                          })()
+                                      ? '0.1 bis 180'
+                                      : null,
                                 ),
                               ),
                             ],
@@ -735,15 +903,27 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                         labelText: _matchMode == MatchMode.legs
                             ? 'Legs zum Sieg'
                             : 'Legs pro Satz',
-                          ),
+                        errorText: _showValidation &&
+                                (int.tryParse(_legsToWinController.text.trim()) ==
+                                        null ||
+                                    int.parse(_legsToWinController.text.trim()) <= 0)
+                            ? 'Bitte gueltige Distanz eingeben'
+                            : null,
+                      ),
                     ),
                     if (_matchMode == MatchMode.sets) ...<Widget>[
                       const SizedBox(height: 12),
                       TextField(
                         controller: _setsToWinController,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Saetze zum Sieg',
+                          errorText: _showValidation &&
+                                  (int.tryParse(_setsToWinController.text.trim()) ==
+                                          null ||
+                                      int.parse(_setsToWinController.text.trim()) <= 0)
+                              ? 'Bitte gueltige Satzanzahl eingeben'
+                              : null,
                         ),
                       ),
                     ],
@@ -840,34 +1020,35 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Jeder Teilnehmer kann mit einem eigenen X01-Startscore beginnen.',
+                      'Alle Teilnehmer starten im X01 mit demselben Startscore.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: const Color(0xFF5B6A79),
                           ),
                     ),
                     const SizedBox(height: 12),
-                    ...previewParticipants.map(
-                      (participant) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: TextField(
-                          controller: _scoreControllerFor(participant.id),
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: participant.name,
-                            suffixText: 'Startscore',
-                          ),
-                        ),
+                    TextField(
+                      controller: _x01StartScoreController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Gemeinsamer Startscore',
+                        suffixText: 'X01',
+                        errorText: _showValidation &&
+                                (int.tryParse(
+                                          _x01StartScoreController.text.trim(),
+                                        ) ==
+                                        null ||
+                                    int.parse(
+                                          _x01StartScoreController.text.trim(),
+                                        ) <=
+                                        1)
+                            ? 'Bitte gueltigen Startscore eingeben'
+                            : null,
                       ),
                     ),
                   ],
                 ),
               ),
             ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _startMatch,
-              child: const Text('Match starten'),
-            ),
           ],
         ),
       ),
@@ -913,6 +1094,29 @@ class _SetupCard extends StatelessWidget {
             child,
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SetupPill extends StatelessWidget {
+  const _SetupPill({
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F8),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelLarge,
       ),
     );
   }

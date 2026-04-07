@@ -95,11 +95,11 @@ class DartThrowResult {
   bool matchesCheckoutRequirement(CheckoutRequirement requirement) {
     switch (requirement) {
       case CheckoutRequirement.singleOut:
-        return isFinishSingle;
+        return !isMiss;
       case CheckoutRequirement.doubleOut:
         return isFinishDouble;
       case CheckoutRequirement.masterOut:
-        return isFinishTriple;
+        return isFinishDouble || isFinishTriple;
     }
   }
 }

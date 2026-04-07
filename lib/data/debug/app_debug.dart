@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 enum AppDebugLevel {
@@ -112,6 +113,9 @@ class AppDebug extends ChangeNotifier {
   int _actionSequence = 0;
   int _entrySequence = 0;
   bool _notifyQueued = false;
+  int _lastSlowFrameLogAtEpochMs = -1000;
+  int? _lastSlowFrameBuildMilliseconds;
+  int? _lastSlowFrameRasterMilliseconds;
 
   List<AppDebugEntry> get entries => List<AppDebugEntry>.unmodifiable(_entries);
   List<AppDebugAction> get activeActions =>
@@ -183,13 +187,25 @@ class AppDebug extends ChangeNotifier {
     required int buildMilliseconds,
     required int rasterMilliseconds,
   }) {
+    final nowEpochMs = DateTime.now().millisecondsSinceEpoch;
+    final nearDuplicate = _lastSlowFrameBuildMilliseconds == buildMilliseconds &&
+        _lastSlowFrameRasterMilliseconds == rasterMilliseconds &&
+        nowEpochMs - _lastSlowFrameLogAtEpochMs < 250;
+    final belowNoiseThreshold =
+        totalMilliseconds < 55 && buildMilliseconds < 50 && rasterMilliseconds < 8;
+    if (nearDuplicate || belowNoiseThreshold) {
+      return;
+    }
+    _lastSlowFrameLogAtEpochMs = nowEpochMs;
+    _lastSlowFrameBuildMilliseconds = buildMilliseconds;
+    _lastSlowFrameRasterMilliseconds = rasterMilliseconds;
     final activeActionsText = activeActionLabels.isEmpty
         ? 'keine aktive Aktion'
         : activeActionLabels.join(' | ');
     warning(
       'Performance',
-      'Langsamer Frame: ${totalMilliseconds} ms gesamt '
-      '(Build ${buildMilliseconds} ms, Raster ${rasterMilliseconds} ms) '
+      'Langsamer Frame: $totalMilliseconds ms gesamt '
+      '(Build $buildMilliseconds ms, Raster $rasterMilliseconds ms) '
       '- aktiv: $activeActionsText',
     );
   }
@@ -228,7 +244,10 @@ class AppDebug extends ChangeNotifier {
   }
 
   bool _shouldPrintToConsole(AppDebugEntry entry) {
-    return true;
+    if (kDebugMode) {
+      return true;
+    }
+    return entry.level != AppDebugLevel.info;
   }
 }
 

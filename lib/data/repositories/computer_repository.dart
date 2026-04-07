@@ -15,6 +15,7 @@ import '../../domain/x01/x01_match_simulator.dart';
 import '../models/generated_name_catalog.dart';
 import '../models/nationality_catalog.dart';
 import '../models/computer_player.dart';
+import '../background/simulation_service.dart';
 import 'settings_repository.dart';
 import '../storage/app_storage.dart';
 
@@ -66,25 +67,82 @@ class _RepositorySnapshot {
   final List<String> nationalityDefinitions;
 }
 
+class _TheoAverageCacheEntry {
+  const _TheoAverageCacheEntry({
+    required this.average,
+    required this.sampleCount,
+  });
+
+  final double average;
+  final int sampleCount;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'average': average,
+      'sampleCount': sampleCount,
+    };
+  }
+
+  static _TheoAverageCacheEntry? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final map = value.cast<String, dynamic>();
+    final average = (map['average'] as num?)?.toDouble();
+    final sampleCount = (map['sampleCount'] as num?)?.toInt();
+    if (average == null || sampleCount == null || sampleCount <= 0) {
+      return null;
+    }
+    return _TheoAverageCacheEntry(
+      average: average.clamp(0, 180).toDouble(),
+      sampleCount: sampleCount,
+    );
+  }
+}
+
+enum ComputerTheoRefreshMode {
+  fast,
+  standard,
+  precise,
+}
+
 class ComputerRepository extends ChangeNotifier {
   ComputerRepository._();
 
   static final ComputerRepository instance = ComputerRepository._();
 
   static const _storageKey = 'computer_players';
+  static const _theoreticalAverageCacheKey = 'computer_theoretical_average_cache';
+  static const _theoreticalAverageCacheVersion = 2;
+  static const _bundledTheoreticalAverageCacheAssetPath =
+      'assets/data/bundled_theoretical_average_cache.json';
+  static const int _bundledTheoSeedSampleCount = 24;
   static const _skillResolutionVersion = 2;
   static const _bundledDefaultsAssetPath =
       'assets/data/default_computer_players.json';
+  static const Set<String> _legacySeedPlayerNames = <String>{
+    'Luke Humphries',
+    'Luke Littler',
+    'Michael van Gerwen',
+    'Gerwyn Price',
+    'Gary Anderson',
+    'Nathan Aspinall',
+  };
   static const bulkTag = 'Bulk';
   static const realPlayerTag = 'Echter Spieler';
   static const List<String> officialNationalities =
       NationalityCatalog.officialNationalities;
-  static const int _manualTheoReferenceMatchCount = 100;
+  static const int _interactiveTheoReferenceMatchCount = 8;
+  static const int _fastRefreshTheoReferenceMatchCount = 6;
+  static const int _standardRefreshTheoReferenceMatchCount = 24;
+  static const int _preciseRefreshTheoReferenceMatchCount = 100;
+  static const int _manualTheoReferenceMatchCount = 24;
 
-  final BotEngine _botEngine = BotEngine();
+  final BotEngine _botEngine = BotEngine(recordPerformanceLogs: false);
   late final X01MatchSimulator _theoreticalMatchSimulator = X01MatchSimulator(
     matchEngine: X01MatchEngine(),
     botEngine: _botEngine,
+    recordPerformanceLogs: false,
   );
   final List<ComputerPlayer> _players = <ComputerPlayer>[];
   final List<String> _tagDefinitions = <String>[];
@@ -92,10 +150,13 @@ class ComputerRepository extends ChangeNotifier {
   final List<_RepositorySnapshot> _undoStack = <_RepositorySnapshot>[];
   final Map<String, ComputerSkillResolution> _resolutionCache =
       <String, ComputerSkillResolution>{};
+  final Map<String, _TheoAverageCacheEntry> _theoreticalAverageCache =
+      <String, _TheoAverageCacheEntry>{};
   int _changeToken = 0;
   bool _isRefreshingTheoreticalAverages = false;
   double _theoreticalRefreshProgress = 0;
   String _theoreticalRefreshLabel = '';
+  Timer? _theoreticalAverageCachePersistTimer;
 
   List<ComputerPlayer> get players =>
       List<ComputerPlayer>.unmodifiable(_players);
@@ -116,8 +177,11 @@ class ComputerRepository extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    final storedJson = await AppStorage.instance.readJsonMap(_storageKey);
     final bundledJson = await _loadBundledDefaults();
+    _primeTheoreticalAverageCacheFromBundledDefaults(bundledJson);
+    await _loadBundledTheoreticalAverageCache();
+    await _loadTheoreticalAverageCache();
+    final storedJson = await AppStorage.instance.readJsonMap(_storageKey);
     final json = _shouldUseBundledDefaults(storedJson)
         ? (bundledJson ?? storedJson)
         : (storedJson ?? bundledJson);
@@ -149,6 +213,10 @@ class ComputerRepository extends ChangeNotifier {
       return true;
     }
 
+    if (_isLegacySeedPlayerList(players)) {
+      return true;
+    }
+
     if (players.length > 6) {
       return false;
     }
@@ -163,6 +231,21 @@ class ComputerRepository extends ChangeNotifier {
     });
 
     return allSeedDefaults;
+  }
+
+  bool _isLegacySeedPlayerList(List<dynamic> players) {
+    if (players.length != _legacySeedPlayerNames.length) {
+      return false;
+    }
+
+    final loadedNames = players
+        .whereType<Map>()
+        .map((entry) => (entry['name'] ?? '').toString().trim())
+        .where((name) => name.isNotEmpty)
+        .toSet();
+
+    return loadedNames.length == _legacySeedPlayerNames.length &&
+        loadedNames.containsAll(_legacySeedPlayerNames);
   }
 
   void _applyStoragePayload(Map<String, dynamic> json) {
@@ -215,6 +298,114 @@ class ComputerRepository extends ChangeNotifier {
       // the database player pool.
     }
     return null;
+  }
+
+  Future<void> _loadTheoreticalAverageCache() async {
+    final payload = await AppStorage.instance.readJsonMap(
+      _theoreticalAverageCacheKey,
+    );
+    if (payload == null) {
+      return;
+    }
+    final version = (payload['version'] as num?)?.toInt() ?? 0;
+    if (version != _theoreticalAverageCacheVersion) {
+      return;
+    }
+    final values = payload['values'];
+    if (values is! Map) {
+      return;
+    }
+    for (final entry in values.entries) {
+      final cacheEntry = _TheoAverageCacheEntry.fromJson(entry.value);
+      if (cacheEntry != null) {
+        _theoreticalAverageCache[entry.key.toString()] = cacheEntry;
+      }
+    }
+  }
+
+  Future<void> _loadBundledTheoreticalAverageCache() async {
+    try {
+      final raw = await rootBundle.loadString(
+        _bundledTheoreticalAverageCacheAssetPath,
+      );
+      final decoded = jsonDecode(raw.replaceFirst('\uFEFF', ''));
+      if (decoded is! Map) {
+        return;
+      }
+      final payload = decoded.cast<String, dynamic>();
+      final version = (payload['version'] as num?)?.toInt() ?? 0;
+      if (version != _theoreticalAverageCacheVersion) {
+        return;
+      }
+      final values = payload['values'];
+      if (values is! Map) {
+        return;
+      }
+      for (final entry in values.entries) {
+        final cacheEntry = _TheoAverageCacheEntry.fromJson(entry.value);
+        if (cacheEntry != null) {
+          _theoreticalAverageCache.putIfAbsent(
+            entry.key.toString(),
+            () => cacheEntry,
+          );
+        }
+      }
+    } catch (_) {
+      // Fall back to bundled defaults and local cache only.
+    }
+  }
+
+  void _primeTheoreticalAverageCacheFromBundledDefaults(
+    Map<String, dynamic>? bundledJson,
+  ) {
+    if (!_isValidStoragePayload(bundledJson)) {
+      return;
+    }
+    final bundledPlayers =
+        (bundledJson!['players'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => entry.cast<String, dynamic>())
+            .toList();
+    for (final player in bundledPlayers) {
+      final skill = (player['skill'] as num?)?.toInt();
+      final finishingSkill = (player['finishingSkill'] as num?)?.toInt();
+      final theoreticalAverage =
+          (player['theoreticalAverage'] as num?)?.toDouble();
+      if (skill == null || finishingSkill == null || theoreticalAverage == null) {
+        continue;
+      }
+      final cacheKey = _theoreticalAverageCacheKeyFor(skill, finishingSkill);
+      _theoreticalAverageCache.putIfAbsent(
+        cacheKey,
+        () => _TheoAverageCacheEntry(
+          average: theoreticalAverage.clamp(0, 180).toDouble(),
+          sampleCount: _bundledTheoSeedSampleCount,
+        ),
+      );
+    }
+  }
+
+  void _scheduleTheoreticalAverageCachePersist() {
+    _theoreticalAverageCachePersistTimer?.cancel();
+    _theoreticalAverageCachePersistTimer = Timer(
+      const Duration(milliseconds: 250),
+      () {
+        unawaited(_persistTheoreticalAverageCache());
+      },
+    );
+  }
+
+  Future<void> _persistTheoreticalAverageCache() {
+    return AppStorage.instance.writeJson(
+      _theoreticalAverageCacheKey,
+      <String, dynamic>{
+        'version': _theoreticalAverageCacheVersion,
+        'values': <String, dynamic>{
+          for (final entry in _theoreticalAverageCache.entries)
+            entry.key: entry.value.toJson(),
+        },
+      },
+    );
   }
 
   bool _isValidStoragePayload(Map<String, dynamic>? payload) {
@@ -313,6 +504,7 @@ class ComputerRepository extends ChangeNotifier {
     int? skill,
     int? finishingSkill,
     int? age,
+    DateTime? birthDate,
     String? nationality,
     List<String> tags = const <String>[],
     ComputerPlayerSource source = ComputerPlayerSource.manual,
@@ -325,7 +517,7 @@ class ComputerRepository extends ChangeNotifier {
 
     final now = DateTime.now();
     final resolution =
-        resolveSkillsForTheoreticalAverage(targetTheoreticalAverage);
+        resolveSkillsForTheoreticalAverageQuick(targetTheoreticalAverage);
     final normalizedSkill = skill?.clamp(1, 1000).toInt();
     final normalizedFinishingSkill = finishingSkill?.clamp(1, 1000).toInt();
     final resolvedSkill = normalizedSkill ?? resolution.skill;
@@ -354,7 +546,8 @@ class ComputerRepository extends ChangeNotifier {
             updatedAt: now,
             lastModifiedReason: 'manual_create',
             source: source,
-            age: age,
+            age: age ?? _deriveAgeFromBirthDate(birthDate),
+            birthDate: birthDate,
             nationality: normalizedNationality,
             tags: normalizedTags,
           ),
@@ -374,7 +567,8 @@ class ComputerRepository extends ChangeNotifier {
             updatedAt: now,
             lastModifiedReason: 'manual_create',
             source: source,
-            age: age,
+            age: age ?? _deriveAgeFromBirthDate(birthDate),
+            birthDate: birthDate,
             nationality: normalizedNationality,
             tags: normalizedTags,
           ),
@@ -391,7 +585,8 @@ class ComputerRepository extends ChangeNotifier {
         updatedAt: now,
         lastModifiedReason: 'manual_create',
         source: source,
-        age: age,
+        age: age ?? _deriveAgeFromBirthDate(birthDate),
+        birthDate: birthDate,
         nationality: normalizedNationality,
         tags: normalizedTags,
       ),
@@ -441,6 +636,7 @@ class ComputerRepository extends ChangeNotifier {
       final ageRange =
           explicitAgeRange ?? _suggestAgeRangeForAverage(targetAverage);
       final age = _randomFromRange(ageRange, random);
+      final birthDate = _randomBirthDateForAge(age, random);
       final normalizedTags = _normalizeTags(
         <String>[
           ...tags,
@@ -471,6 +667,7 @@ class ComputerRepository extends ChangeNotifier {
           lastModifiedReason: 'bulk_create',
           source: ComputerPlayerSource.bulk,
           age: age,
+          birthDate: birthDate,
           nationality: nationality,
           tags: normalizedTags,
         ),
@@ -535,6 +732,7 @@ class ComputerRepository extends ChangeNotifier {
     int? skill,
     int? finishingSkill,
     int? age,
+    DateTime? birthDate,
     String? nationality,
     List<String> tags = const <String>[],
     ComputerPlayerSource? source,
@@ -548,7 +746,7 @@ class ComputerRepository extends ChangeNotifier {
     }
 
     final resolution =
-        resolveSkillsForTheoreticalAverage(targetTheoreticalAverage);
+        resolveSkillsForTheoreticalAverageQuick(targetTheoreticalAverage);
     final normalizedSkill = skill?.clamp(1, 1000).toInt();
     final normalizedFinishingSkill = finishingSkill?.clamp(1, 1000).toInt();
     final resolvedSkill = normalizedSkill ?? resolution.skill;
@@ -573,8 +771,10 @@ class ComputerRepository extends ChangeNotifier {
       source: source ?? _players[index].source,
       isFavorite: isFavorite ?? _players[index].isFavorite,
       isProtected: isProtected ?? _players[index].isProtected,
-      age: age,
-      clearAge: age == null,
+      age: age ?? _deriveAgeFromBirthDate(birthDate),
+      clearAge: age == null && birthDate == null,
+      birthDate: birthDate,
+      clearBirthDate: age == null && birthDate == null,
       nationality: normalizedNationality,
       clearNationality: normalizedNationality == null,
       tags: normalizedTags,
@@ -684,59 +884,124 @@ class ComputerRepository extends ChangeNotifier {
     if (cached != null) {
       return cached;
     }
-    ComputerPlayer? closestPlayer;
-    var closestGap = double.infinity;
-    for (final player in _players) {
-      final gap = (player.theoreticalAverage - target).abs();
-      if (gap < closestGap) {
-        closestGap = gap;
-        closestPlayer = player;
-      }
-    }
-    if (closestPlayer == null) {
+    if (_players.isEmpty) {
       return resolveSkillsForTheoreticalAverage(target);
     }
+    final sortedPlayers = List<ComputerPlayer>.from(_players)
+      ..sort(
+        (left, right) =>
+            left.theoreticalAverage.compareTo(right.theoreticalAverage),
+      );
+    final firstPlayer = sortedPlayers.first;
+    final lastPlayer = sortedPlayers.last;
+
+    if (target <= firstPlayer.theoreticalAverage ||
+        target >= lastPlayer.theoreticalAverage) {
+      final resolution = resolveSkillsForTheoreticalAverage(target);
+      _resolutionCache[cacheKey] = resolution;
+      return resolution;
+    }
+
+    ComputerPlayer lowerPlayer = firstPlayer;
+    ComputerPlayer upperPlayer = lastPlayer;
+    for (var index = 0; index < sortedPlayers.length - 1; index += 1) {
+      final current = sortedPlayers[index];
+      final next = sortedPlayers[index + 1];
+      if (current.theoreticalAverage <= target &&
+          next.theoreticalAverage >= target) {
+        lowerPlayer = current;
+        upperPlayer = next;
+        break;
+      }
+    }
+
+    final averageSpan =
+        upperPlayer.theoreticalAverage - lowerPlayer.theoreticalAverage;
+    if (averageSpan.abs() < 0.0001) {
+      final lowerGap = (lowerPlayer.theoreticalAverage - target).abs();
+      final upperGap = (upperPlayer.theoreticalAverage - target).abs();
+      final chosen = lowerGap <= upperGap ? lowerPlayer : upperPlayer;
+      final resolution = ComputerSkillResolution(
+        skill: chosen.skill,
+        finishingSkill: chosen.finishingSkill,
+        theoreticalAverage: target,
+      );
+      _resolutionCache[cacheKey] = resolution;
+      return resolution;
+    }
+
+    final progress =
+        ((target - lowerPlayer.theoreticalAverage) / averageSpan).clamp(0, 1);
+    final interpolatedSkill = (lowerPlayer.skill +
+            ((upperPlayer.skill - lowerPlayer.skill) * progress))
+        .round()
+        .clamp(1, 1000);
+    final interpolatedFinishingSkill = (lowerPlayer.finishingSkill +
+            ((upperPlayer.finishingSkill - lowerPlayer.finishingSkill) *
+                progress))
+        .round()
+        .clamp(1, 1000);
     final resolution = ComputerSkillResolution(
-      skill: closestPlayer.skill,
-      finishingSkill: closestPlayer.finishingSkill,
-      theoreticalAverage: closestPlayer.theoreticalAverage,
+      skill: interpolatedSkill,
+      finishingSkill: interpolatedFinishingSkill,
+      theoreticalAverage: target,
     );
     _resolutionCache[cacheKey] = resolution;
     return resolution;
   }
 
-  Future<void> refreshTheoreticalAverages() async {
-    _captureSnapshot();
-    _isRefreshingTheoreticalAverages = true;
-    _theoreticalRefreshProgress = 0;
-    _theoreticalRefreshLabel = 'Theoretische Averages werden vorbereitet...';
-    notifyListeners();
-    try {
-      final normalizedPlayers = <ComputerPlayer>[];
-      final now = DateTime.now();
-      for (var index = 0; index < _players.length; index += 1) {
-        final player = _players[index];
+  Future<void> refreshTheoreticalAverages({
+    ComputerTheoRefreshMode mode = ComputerTheoRefreshMode.standard,
+  }) async {
+      final refreshStopwatch = Stopwatch()..start();
+      final refreshMatchCount = _matchCountForRefreshMode(mode);
+      if (kDebugMode) {
+        debugPrint(
+          '[TheoRefresh] START mode=$mode players=${_players.length} matchCount=$refreshMatchCount '
+          'radius=${SettingsRepository.instance.settings.radiusCalibrationPercent} '
+          'spread=${SettingsRepository.instance.settings.simulationSpreadPercent}',
+        );
+      }
+      _captureSnapshot();
+      _isRefreshingTheoreticalAverages = true;
+      _theoreticalRefreshProgress = 0;
+      _theoreticalRefreshLabel = 'Theoretische Averages werden vorbereitet...';
+      notifyListeners();
+        try {
+          await _prewarmTheoRefreshWorkerIfNeeded(matchCount: refreshMatchCount);
+          final normalizedPlayers = <ComputerPlayer>[];
+          final now = DateTime.now();
+        for (var index = 0; index < _players.length; index += 1) {
+          final player = _players[index];
+        final playerStopwatch = Stopwatch()..start();
         _theoreticalRefreshLabel =
             'Theo wird berechnet: ${player.name} (${index + 1}/${_players.length})';
         _theoreticalRefreshProgress =
             _players.isEmpty ? 0 : index / _players.length;
-        notifyListeners();
-        await Future<void>.delayed(Duration.zero);
-
-        final theoreticalAverage = await _estimateManualTheoreticalAverage(
-          skill: player.skill,
-          finishingSkill: player.finishingSkill,
-          playerName: player.name,
-          onProgress: (matchIndex, matchCount) {
-            final totalSteps = (_players.length * matchCount).clamp(1, 1 << 30);
-            final completedSteps = (index * matchCount) + matchIndex;
-            _theoreticalRefreshLabel =
-                'Theo wird berechnet: ${player.name} (${index + 1}/${_players.length}) '
-                '- Referenz-Match $matchIndex/$matchCount';
-            _theoreticalRefreshProgress = completedSteps / totalSteps;
+          if (index == 0 || index % 3 == 0 || index == _players.length - 1) {
             notifyListeners();
-          },
-        );
+          }
+          await Future<void>.delayed(Duration.zero);
+
+          final theoreticalAverage = await _estimateRefreshTheoreticalAverage(
+            skill: player.skill,
+            finishingSkill: player.finishingSkill,
+            playerName: player.name,
+            matchCount: refreshMatchCount,
+            onProgress: (matchIndex, matchCount) {
+              final totalSteps = (_players.length * matchCount).clamp(1, 1 << 30);
+              final completedSteps = (index * matchCount) + matchIndex;
+              _theoreticalRefreshLabel =
+                  'Theo wird berechnet: ${player.name} (${index + 1}/${_players.length}) '
+                  '- Referenz-Match $matchIndex/$matchCount';
+              _theoreticalRefreshProgress = completedSteps / totalSteps;
+              if (matchIndex == 0 ||
+                  matchIndex == matchCount ||
+                  matchIndex % 4 == 0) {
+                notifyListeners();
+              }
+            },
+          );
         normalizedPlayers.add(
           _normalizePlayer(
             player.copyWith(
@@ -746,10 +1011,19 @@ class ComputerRepository extends ChangeNotifier {
             ),
           ),
         );
+        if (kDebugMode) {
+          debugPrint(
+            '[TheoRefresh] PLAYER_DONE index=${index + 1}/${_players.length} '
+            'name="${player.name}" oldTheo=${player.theoreticalAverage.toStringAsFixed(2)} '
+            'newTheo=${theoreticalAverage.toStringAsFixed(2)} '
+            'skill=${player.skill} finish=${player.finishingSkill} '
+            'durationMs=${playerStopwatch.elapsedMilliseconds}',
+          );
+        }
 
         _theoreticalRefreshProgress = (index + 1) / _players.length;
         notifyListeners();
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(const Duration(milliseconds: 8));
       }
       _players
         ..clear()
@@ -758,10 +1032,78 @@ class ComputerRepository extends ChangeNotifier {
       notifyListeners();
       await _persist();
     } finally {
+      if (kDebugMode) {
+        debugPrint(
+          '[TheoRefresh] END totalDurationMs=${refreshStopwatch.elapsedMilliseconds} '
+          'players=${_players.length}',
+        );
+      }
       _isRefreshingTheoreticalAverages = false;
       _theoreticalRefreshProgress = 0;
       _theoreticalRefreshLabel = '';
       notifyListeners();
+    }
+  }
+
+  Future<void> prewarmTheoreticalRefresh({
+    ComputerTheoRefreshMode mode = ComputerTheoRefreshMode.fast,
+  }) {
+    return _prewarmTheoRefreshWorkerIfNeeded(
+      matchCount: _matchCountForRefreshMode(mode),
+    );
+  }
+
+  Future<void> _prewarmTheoRefreshWorkerIfNeeded({
+    required int matchCount,
+  }) async {
+    final profilesById = <String, Object?>{};
+    for (final player in _players) {
+      final cacheKey = _theoreticalAverageCacheKeyFor(
+        player.skill,
+        player.finishingSkill,
+      );
+      final cached = _theoreticalAverageCache[cacheKey];
+      if (cached != null && cached.sampleCount >= matchCount) {
+        continue;
+      }
+      final profile = SettingsRepository.instance.createBotProfile(
+        skill: player.skill,
+        finishingSkill: player.finishingSkill,
+      );
+      final profileKey = [
+        profile.skill,
+        profile.finishingSkill,
+        profile.radiusCalibrationPercent,
+        profile.simulationSpreadPercent,
+      ].join(':');
+      profilesById[profileKey] = <String, Object?>{
+        'skill': profile.skill,
+        'finishingSkill': profile.finishingSkill,
+        'radiusCalibrationPercent': profile.radiusCalibrationPercent,
+        'simulationSpreadPercent': profile.simulationSpreadPercent,
+      };
+    }
+
+    if (profilesById.isEmpty) {
+      if (kDebugMode) {
+        debugPrint('[TheoRefresh] PREWARM_SKIPPED all_profiles_cached');
+      }
+      return;
+    }
+
+    final stopwatch = Stopwatch()..start();
+    if (kDebugMode) {
+      debugPrint(
+        '[TheoRefresh] PREWARM_START profiles=${profilesById.length} '
+        'matchCount=$matchCount',
+      );
+    }
+    await SimulationService.instance.prewarmProfiles(profilesById);
+    if (kDebugMode) {
+      debugPrint(
+        '[TheoRefresh] PREWARM_DONE profiles=${profilesById.length} '
+        'durationMs=${stopwatch.elapsedMilliseconds}',
+      );
     }
   }
 
@@ -906,8 +1248,9 @@ class ComputerRepository extends ChangeNotifier {
         isProtected: isProtected ?? player.isProtected,
         updatedAt: DateTime.now(),
         lastModifiedReason: 'bulk_edit',
-      );
-    }
+        );
+        _scheduleTheoreticalAverageCachePersist();
+      }
 
     _tagDefinitions
       ..clear()
@@ -1089,67 +1432,217 @@ class ComputerRepository extends ChangeNotifier {
   }
 
   double _estimateTheoreticalAverage({
-    required int skill,
-    required int finishingSkill,
-  }) {
-    return _estimateOfficialReferenceTheoAverage(
-      skill: skill,
-      finishingSkill: finishingSkill,
-    );
-  }
+      required int skill,
+      required int finishingSkill,
+    }) {
+      return _estimateOfficialReferenceTheoAverage(
+        skill: skill,
+        finishingSkill: finishingSkill,
+        matchCount: _interactiveTheoReferenceMatchCount,
+      );
+    }
 
   Future<double> _estimateManualTheoreticalAverage({
-    required int skill,
-    required int finishingSkill,
-    String playerName = 'Spieler',
-    void Function(int matchIndex, int matchCount)? onProgress,
-  }) async {
-    final profile = SettingsRepository.instance.createBotProfile(
-      skill: skill,
-      finishingSkill: finishingSkill,
-    );
-    onProgress?.call(0, _manualTheoReferenceMatchCount);
-    await Future<void>.delayed(Duration.zero);
-    var totalAverage = 0.0;
-    for (var index = 0; index < _manualTheoReferenceMatchCount; index += 1) {
-      final matchIndex = index + 1;
-      onProgress?.call(matchIndex, _manualTheoReferenceMatchCount);
-      _theoreticalRefreshLabel =
-          'Theo wird berechnet: $playerName - Referenz-Match $matchIndex/$_manualTheoReferenceMatchCount';
-      notifyListeners();
-      await Future<void>.delayed(Duration.zero);
-      totalAverage += _simulateOfficialReferenceMatchAverage(
-        profile: profile,
-        matchIndex: index,
+      required int skill,
+      required int finishingSkill,
+      String playerName = 'Spieler',
+      void Function(int matchIndex, int matchCount)? onProgress,
+    }) async {
+      final cached = _theoreticalAverageCache[_theoreticalAverageCacheKeyFor(
+        skill,
+        finishingSkill,
+      )];
+      if (cached != null &&
+          cached.sampleCount >= _manualTheoReferenceMatchCount) {
+        onProgress?.call(
+          _manualTheoReferenceMatchCount,
+          _manualTheoReferenceMatchCount,
+        );
+        return cached.average;
+      }
+      final profile = SettingsRepository.instance.createBotProfile(
+        skill: skill,
+        finishingSkill: finishingSkill,
       );
+      onProgress?.call(0, _manualTheoReferenceMatchCount);
+      await Future<void>.delayed(const Duration(milliseconds: 24));
+      var totalAverage = 0.0;
+      for (var index = 0; index < _manualTheoReferenceMatchCount; index += 1) {
+        final matchIndex = index + 1;
+        onProgress?.call(matchIndex, _manualTheoReferenceMatchCount);
+        _theoreticalRefreshLabel =
+            'Theo wird berechnet: $playerName - Referenz-Match $matchIndex/$_manualTheoReferenceMatchCount';
+        if (matchIndex == 1 ||
+            matchIndex == _manualTheoReferenceMatchCount ||
+            matchIndex % 4 == 0) {
+          notifyListeners();
+        }
+        if (index % 4 == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 4));
+        } else {
+          await Future<void>.delayed(Duration.zero);
+        }
+        totalAverage += _simulateOfficialReferenceMatchAverage(
+          profile: profile,
+          matchIndex: index,
+        );
+        if (index % 4 == 3) {
+          await Future<void>.delayed(const Duration(milliseconds: 2));
+        }
+      }
       await Future<void>.delayed(Duration.zero);
-    }
-    await Future<void>.delayed(Duration.zero);
-    return (totalAverage / _manualTheoReferenceMatchCount)
-        .clamp(0, 180)
-        .toDouble();
-  }
-
-  double _estimateOfficialReferenceTheoAverage({
-    required int skill,
-    required int finishingSkill,
-  }) {
-    final profile = SettingsRepository.instance.createBotProfile(
-      skill: skill,
-      finishingSkill: finishingSkill,
-    );
-    var totalAverage = 0.0;
-    const matchCount = _manualTheoReferenceMatchCount;
-
-    for (var index = 0; index < matchCount; index += 1) {
-      totalAverage += _simulateOfficialReferenceMatchAverage(
-        profile: profile,
-        matchIndex: index,
+      final average = (totalAverage / _manualTheoReferenceMatchCount)
+          .clamp(0, 180)
+          .toDouble();
+      _theoreticalAverageCache[_theoreticalAverageCacheKeyFor(
+        skill,
+        finishingSkill,
+      )] = _TheoAverageCacheEntry(
+        average: average,
+        sampleCount: _manualTheoReferenceMatchCount,
       );
+      _scheduleTheoreticalAverageCachePersist();
+      return average;
     }
 
-    return (totalAverage / matchCount).clamp(0, 180).toDouble();
-  }
+    Future<double> _estimateRefreshTheoreticalAverage({
+      required int skill,
+      required int finishingSkill,
+      String playerName = 'Spieler',
+      required int matchCount,
+      void Function(int matchIndex, int matchCount)? onProgress,
+    }) async {
+      final cacheKey = _theoreticalAverageCacheKeyFor(skill, finishingSkill);
+      final cached = _theoreticalAverageCache[cacheKey];
+      if (cached != null && cached.sampleCount >= matchCount) {
+        if (kDebugMode) {
+          debugPrint(
+            '[TheoRefresh] CACHE_HIT player="$playerName" skill=$skill finish=$finishingSkill '
+            'sampleCount=${cached.sampleCount} requested=$matchCount '
+            'average=${cached.average.toStringAsFixed(2)}',
+          );
+        }
+        onProgress?.call(
+          matchCount,
+          matchCount,
+        );
+        return cached.average;
+      }
+
+      final settingsProfile = SettingsRepository.instance.createBotProfile(
+        skill: skill,
+        finishingSkill: finishingSkill,
+      );
+      if (kDebugMode) {
+        debugPrint(
+          '[TheoRefresh] WORKER_START player="$playerName" skill=$skill finish=$finishingSkill '
+          'matchCount=$matchCount radius=${settingsProfile.radiusCalibrationPercent} '
+          'spread=${settingsProfile.simulationSpreadPercent}',
+        );
+      }
+      onProgress?.call(0, matchCount);
+      final workerStopwatch = Stopwatch()..start();
+      final handle = SimulationService.instance.startPersistentJob<double>(
+        taskType: 'estimate_theo_average',
+        initialLabel: 'Theo wird berechnet: $playerName',
+        payload: <String, Object?>{
+          'skill': skill,
+          'finishingSkill': finishingSkill,
+          'radiusCalibrationPercent': settingsProfile.radiusCalibrationPercent,
+          'simulationSpreadPercent': settingsProfile.simulationSpreadPercent,
+          'matchCount': matchCount,
+          'playerName': playerName,
+        },
+      );
+      void updateTheoProgress() {
+        final rawProgress = handle.progress ?? 0;
+        final matchProgress = (rawProgress * matchCount).clamp(
+          0,
+          matchCount.toDouble(),
+        );
+        onProgress?.call(
+          matchProgress.round(),
+          matchCount,
+        );
+        _theoreticalRefreshLabel = handle.label;
+        if (handle.progress != null) {
+          _theoreticalRefreshProgress = handle.progress!;
+        }
+        notifyListeners();
+      }
+      handle.addListener(updateTheoProgress);
+      late final double average;
+      try {
+        average = await handle.result;
+      } finally {
+        handle.removeListener(updateTheoProgress);
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[TheoRefresh] WORKER_DONE player="$playerName" average=${average.toStringAsFixed(2)} '
+          'durationMs=${workerStopwatch.elapsedMilliseconds}',
+        );
+      }
+      _theoreticalAverageCache[cacheKey] = _TheoAverageCacheEntry(
+        average: average,
+        sampleCount: matchCount,
+      );
+      _scheduleTheoreticalAverageCachePersist();
+      return average;
+    }
+
+    int _matchCountForRefreshMode(ComputerTheoRefreshMode mode) {
+      switch (mode) {
+        case ComputerTheoRefreshMode.fast:
+          return _fastRefreshTheoReferenceMatchCount;
+        case ComputerTheoRefreshMode.standard:
+          return _standardRefreshTheoReferenceMatchCount;
+        case ComputerTheoRefreshMode.precise:
+          return _preciseRefreshTheoReferenceMatchCount;
+      }
+    }
+
+    double _estimateOfficialReferenceTheoAverage({
+      required int skill,
+      required int finishingSkill,
+      required int matchCount,
+    }) {
+      final cacheKey = _theoreticalAverageCacheKeyFor(skill, finishingSkill);
+      final cached = _theoreticalAverageCache[cacheKey];
+      if (cached != null && cached.sampleCount >= matchCount) {
+        return cached.average;
+      }
+      final profile = SettingsRepository.instance.createBotProfile(
+        skill: skill,
+        finishingSkill: finishingSkill,
+      );
+      var totalAverage = 0.0;
+
+      for (var index = 0; index < matchCount; index += 1) {
+        totalAverage += _simulateOfficialReferenceMatchAverage(
+          profile: profile,
+          matchIndex: index,
+        );
+      }
+
+      final average = (totalAverage / matchCount).clamp(0, 180).toDouble();
+      _theoreticalAverageCache[cacheKey] = _TheoAverageCacheEntry(
+        average: average,
+        sampleCount: matchCount,
+      );
+      _scheduleTheoreticalAverageCachePersist();
+      return average;
+    }
+
+    String _theoreticalAverageCacheKeyFor(int skill, int finishingSkill) {
+      final settings = SettingsRepository.instance.settings;
+      return [
+        skill,
+        finishingSkill,
+        settings.radiusCalibrationPercent,
+        settings.simulationSpreadPercent,
+      ].join(':');
+    }
 
   double _simulateOfficialReferenceMatchAverage({
     required BotProfile profile,
@@ -1337,6 +1830,7 @@ class ComputerRepository extends ChangeNotifier {
         'source',
         'isFavorite',
         'isProtected',
+        'birthDate',
         'age',
         'nationality',
         'tags',
@@ -1357,6 +1851,7 @@ class ComputerRepository extends ChangeNotifier {
           player.source.storageValue,
           player.isFavorite.toString(),
           player.isProtected.toString(),
+          player.birthDate?.toIso8601String() ?? '',
           player.age?.toString() ?? '',
           player.nationality ?? '',
           player.tags.join('|'),
@@ -1411,6 +1906,8 @@ class ComputerRepository extends ChangeNotifier {
       for (var index = 0; index < header.length && index < row.length; index += 1) {
         data[header[index]] = row[index];
       }
+      final parsedBirthDate = DateTime.tryParse(data['birthDate'] ?? '');
+      final parsedAge = int.tryParse(data['age'] ?? '');
       players.add(
         ComputerPlayer(
           id: data['id']?.trim().isNotEmpty == true
@@ -1433,7 +1930,8 @@ class ComputerRepository extends ChangeNotifier {
           ),
           isFavorite: (data['isFavorite'] ?? '').toLowerCase() == 'true',
           isProtected: (data['isProtected'] ?? '').toLowerCase() == 'true',
-          age: int.tryParse(data['age'] ?? ''),
+          birthDate: parsedBirthDate,
+          age: parsedAge ?? _deriveAgeFromBirthDate(parsedBirthDate),
           nationality: _normalizeNationality(data['nationality']),
           tags: _normalizeTags(
             (data['tags'] ?? '')
@@ -1514,6 +2012,30 @@ class ComputerRepository extends ChangeNotifier {
 
   int _randomFromRange(({int min, int max}) range, Random random) {
     return range.min + random.nextInt((range.max - range.min) + 1);
+  }
+
+  int? _deriveAgeFromBirthDate(DateTime? birthDate) {
+    if (birthDate == null) {
+      return null;
+    }
+    final now = DateTime.now();
+    var years = now.year - birthDate.year;
+    final hadBirthday =
+        now.month > birthDate.month ||
+        (now.month == birthDate.month && now.day >= birthDate.day);
+    if (!hadBirthday) {
+      years -= 1;
+    }
+    return years < 0 ? null : years;
+  }
+
+  DateTime _randomBirthDateForAge(int age, Random random) {
+    final now = DateTime.now();
+    final year = now.year - age;
+    final month = random.nextInt(12) + 1;
+    final maxDay = DateTime(year, month + 1, 0).day;
+    final day = random.nextInt(maxDay) + 1;
+    return DateTime(year, month, day);
   }
 
   List<String> _suggestTagsForBulkProfile({

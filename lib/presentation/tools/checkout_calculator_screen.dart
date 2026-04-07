@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/background/background_task_runner.dart';
+import '../../data/background/simulation_service.dart';
 import '../../domain/x01/checkout_planner.dart';
 import '../../domain/x01/x01_models.dart';
 import '../../domain/x01/x01_rules.dart';
@@ -143,7 +143,7 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
     await Future<void>.delayed(Duration.zero);
 
     try {
-      final result = await BackgroundTaskRunner.instance.runJob<Map<String, Object?>>(
+      final handle = SimulationService.instance.startJob<Map<String, Object?>>(
         taskType: 'checkout_calculator',
         initialLabel: _tabController.index == 0
             ? 'Checkout-Wege werden berechnet'
@@ -158,15 +158,22 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
           'preferredDoubles': preferredDoubles.toList()..sort(),
           'dislikedDoubles': dislikedDoubles.toList()..sort(),
         },
-        onUpdate: (snapshot) {
+      );
+      void updateCalculationLabel() {
           if (!mounted || requestId != _calculationRequestId) {
             return;
           }
           setState(() {
-            _calculationLabel = snapshot.label;
+            _calculationLabel = handle.label;
           });
-        },
-      );
+      }
+      handle.addListener(updateCalculationLabel);
+      late final Map<String, Object?> result;
+      try {
+        result = await handle.result;
+      } finally {
+        handle.removeListener(updateCalculationLabel);
+      }
       if (!mounted || requestId != _calculationRequestId) {
         return;
       }
@@ -357,11 +364,11 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
     final score = int.tryParse(_scoreController.text.trim()) ?? 0;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Checkout Rechner'),
+        title: const Text('Checkout-Rechner'),
         bottom: TabBar(
           controller: _tabController,
           tabs: const <Widget>[
-            Tab(text: 'Checkout Rechner'),
+            Tab(text: 'Checkout-Rechner'),
             Tab(text: 'Stell Rechner'),
           ],
         ),
@@ -531,7 +538,7 @@ class _CheckoutCalculatorScreenState extends State<CheckoutCalculatorScreen>
                   ? 'Stell Rechner und Einstellungen'
                   : includeRangeFields
                       ? 'Bereich und Einstellungen'
-                      : 'Checkout Rechner und Einstellungen',
+                      : 'Checkout-Rechner und Einstellungen',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
@@ -1555,6 +1562,11 @@ class _SetupBandCardState extends State<_SetupBandCard> {
   @override
   Widget build(BuildContext context) {
     final option = widget.presentation?.option;
+    final fallbackTree =
+        widget.presentation == null
+            ? null
+            : (widget.presentation!.fallbackTree ??
+                widget.resolveFallbackTree(widget.presentation!));
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1619,12 +1631,7 @@ class _SetupBandCardState extends State<_SetupBandCard> {
                     ),
                     const SizedBox(height: 10),
                     _SetupFallbackTreeView(
-                      node: widget.presentation!.fallbackTree ??
-                          const _SetupFallbackNode(
-                            route: <DartThrowResult>[],
-                            startScore: 0,
-                            branches: <_SetupFallbackBranch>[],
-                          ),
+                      node: fallbackTree!,
                       isRoot: true,
                       showBranches: false,
                     ),
@@ -1657,9 +1664,7 @@ class _SetupBandCardState extends State<_SetupBandCard> {
                               ? <Widget>[
                                   const SizedBox(height: 6),
                                   _SetupFallbackTreeView(
-                                    node: widget.resolveFallbackTree(
-                                      widget.presentation!,
-                                    ),
+                                    node: fallbackTree!,
                                     isRoot: true,
                                   ),
                                 ]

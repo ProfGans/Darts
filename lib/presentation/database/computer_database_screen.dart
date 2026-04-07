@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/export/file_export_service.dart';
@@ -79,7 +80,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       TextEditingController(text: '60.0');
   final TextEditingController _skillController = TextEditingController();
   final TextEditingController _finishingSkillController = TextEditingController();
-  final TextEditingController _ageController = TextEditingController();
+  final TextEditingController _birthDateController = TextEditingController();
   final TextEditingController _newTagController = TextEditingController();
 
   final TextEditingController _bulkPrefixController =
@@ -148,6 +149,11 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   int _bulkRowsPerPage = 10;
   _VisiblePlayersCacheEntry? _manualVisiblePlayersCache;
   _VisiblePlayersCacheEntry? _bulkVisiblePlayersCache;
+  bool _expertMode = false;
+
+  bool get _suppressAccessibilityUpdates =>
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
@@ -161,7 +167,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     _theoreticalAverageController.dispose();
     _skillController.dispose();
     _finishingSkillController.dispose();
-    _ageController.dispose();
+    _birthDateController.dispose();
     _newTagController.dispose();
     _bulkPrefixController.dispose();
     _bulkCountController.dispose();
@@ -182,6 +188,43 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   double? _parseDouble(String rawValue) {
     final normalized = rawValue.trim().replaceAll(',', '.');
     return double.tryParse(normalized);
+  }
+
+  DateTime? _parseBirthDate(String rawValue) {
+    final trimmed = rawValue.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final iso = DateTime.tryParse(trimmed);
+    if (iso != null) {
+      return DateTime(iso.year, iso.month, iso.day);
+    }
+    final parts = trimmed.split(RegExp(r'[./-]'));
+    if (parts.length != 3) {
+      return null;
+    }
+    final first = int.tryParse(parts[0]);
+    final second = int.tryParse(parts[1]);
+    final third = int.tryParse(parts[2]);
+    if (first == null || second == null || third == null) {
+      return null;
+    }
+    if (parts[0].length == 4) {
+      return DateTime.tryParse(
+        '${first.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${third.toString().padLeft(2, '0')}',
+      );
+    }
+    return DateTime.tryParse(
+      '${third.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${first.toString().padLeft(2, '0')}',
+    );
+  }
+
+  String _formatBirthDate(DateTime? value) {
+    if (value == null) {
+      return '-';
+    }
+    final local = value.toLocal();
+    return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}.${local.year}';
   }
 
   bool _isRealPlayer(ComputerPlayer player) {
@@ -314,7 +357,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     final customFinishingSkill = int.tryParse(
       _finishingSkillController.text.trim(),
     );
-    final age = int.tryParse(_ageController.text.trim());
+    final birthDate = _parseBirthDate(_birthDateController.text);
     if (name.isEmpty || (!_useCustomSkills && targetAverage == null)) {
       return;
     }
@@ -325,7 +368,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
         skill: _useCustomSkills ? customSkill : null,
         finishingSkill: _useCustomSkills ? customFinishingSkill : null,
-        age: age,
+        birthDate: birthDate,
         nationality: _selectedNationality,
         tags: List<String>.from(_draftTags),
         source: ComputerPlayerSource.manual,
@@ -340,7 +383,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
         skill: _useCustomSkills ? customSkill : null,
         finishingSkill: _useCustomSkills ? customFinishingSkill : null,
-        age: age,
+        birthDate: birthDate,
         nationality: _selectedNationality,
         tags: List<String>.from(_draftTags),
         source: existing.source,
@@ -359,7 +402,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       _theoreticalAverageController.text = '60.0';
       _skillController.clear();
       _finishingSkillController.clear();
-      _ageController.clear();
+      _birthDateController.clear();
       _selectedNationality = null;
       _draftTags.clear();
       _useCustomSkills = false;
@@ -374,7 +417,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
           player.theoreticalAverage.toStringAsFixed(1);
       _skillController.text = player.skill.toString();
       _finishingSkillController.text = player.finishingSkill.toString();
-      _ageController.text = player.age?.toString() ?? '';
+      _birthDateController.text =
+          player.birthDate == null ? '' : _formatBirthDate(player.birthDate);
       _selectedNationality = player.nationality;
       _draftTags
         ..clear()
@@ -494,6 +538,10 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   }
 
   Future<void> _refreshTheoreticalAveragesWithLoading() async {
+    final mode = await _showTheoRefreshModeDialog();
+    if (mode == null) {
+      return;
+    }
     final navigator = Navigator.of(context, rootNavigator: true);
     final repository = _repository;
     showDialog<void>(
@@ -507,33 +555,83 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
             final label = repository.theoreticalRefreshLabel.isNotEmpty
                 ? repository.theoreticalRefreshLabel
                 : 'Theoretische Averages werden neu berechnet...';
+            final hasDeterminateProgress = progress > 0 && progress <= 1;
+            final percentText =
+                '${(progress.clamp(0, 1) * 100).toStringAsFixed(0)}%';
             return AlertDialog(
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
+              title: const Text('Theo-Berechnung laeuft'),
+              content: ExcludeSemantics(
+                excluding: _suppressAccessibilityUpdates,
+                child: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(),
+                      Row(
+                        children: <Widget>[
+                          SizedBox(
+                            width: 42,
+                            height: 42,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 4,
+                              value: hasDeterminateProgress ? progress : null,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  hasDeterminateProgress
+                                      ? '$percentText abgeschlossen'
+                                      : 'Berechnung wird vorbereitet...',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Bitte die App waehrend der Berechnung offen lassen.',
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Hinweis: Die erste Berechnung mit neuen Einstellungen kann deutlich laenger dauern.',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
+                      const SizedBox(height: 20),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 12,
+                          value: hasDeterminateProgress ? progress : null,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color:
+                              Theme.of(context).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: Text(label),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        hasDeterminateProgress
+                            ? 'Fortschritt wird laufend aktualisiert.'
+                            : 'Der Fortschritt springt an, sobald die ersten Referenz-Matches abgeschlossen sind.',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  LinearProgressIndicator(
-                    value: progress > 0 && progress < 1 ? progress : null,
-                  ),
-                  if (progress > 0) ...<Widget>[
-                    const SizedBox(height: 8),
-                    Text('${(progress * 100).toStringAsFixed(0)}%'),
-                  ],
-                ],
+                ),
               ),
             );
           },
@@ -542,15 +640,58 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     );
     await Future<void>.delayed(Duration.zero);
     await WidgetsBinding.instance.endOfFrame;
-    await Future<void>.delayed(const Duration(milliseconds: 16));
-    try {
-      await _repository.refreshTheoreticalAverages();
-    } finally {
-      if (navigator.canPop()) {
-        navigator.pop();
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+      try {
+        await _repository.refreshTheoreticalAverages(mode: mode);
+      } finally {
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
       }
-    }
     _showMessage('Theoretische Averages wurden neu berechnet.');
+  }
+
+  Future<ComputerTheoRefreshMode?> _showTheoRefreshModeDialog() {
+    return showDialog<ComputerTheoRefreshMode>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Theo-Berechnung'),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('Bitte den Berechnungsmodus auswaehlen.'),
+              SizedBox(height: 12),
+              Text('Schnell: sehr leicht, grobere Naeherung'),
+              Text('Standard: guter Mittelweg'),
+              Text('Praezise: 100 Referenzmatches, deutlich langsamer'),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Abbrechen'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(ComputerTheoRefreshMode.fast),
+              child: const Text('Schnell'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(ComputerTheoRefreshMode.standard),
+              child: const Text('Standard'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(ComputerTheoRefreshMode.precise),
+              child: const Text('Praezise'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _showMessage(String message) {
@@ -768,7 +909,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     final targetAverage = _parseDouble(_theoreticalAverageController.text);
     final skill = int.tryParse(_skillController.text.trim());
     final finishingSkill = int.tryParse(_finishingSkillController.text.trim());
-    final age = int.tryParse(_ageController.text.trim());
+    final birthDateText = _birthDateController.text.trim();
+    final birthDate = _parseBirthDate(birthDateText);
     if (name.isEmpty) {
       _showMessage('Bitte einen Namen eingeben.');
       return false;
@@ -790,8 +932,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         return false;
       }
     }
-    if (age != null && (age < 10 || age > 100)) {
-      _showMessage('Alter muss zwischen 10 und 100 liegen.');
+    if (birthDateText.isNotEmpty && birthDate == null) {
+      _showMessage('Geburtsdatum bitte als TT.MM.JJJJ oder JJJJ-MM-TT eingeben.');
       return false;
     }
     return true;
@@ -1348,7 +1490,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         return false;
       }
       if (lowAge != null) {
-        final age = player.age;
+        final age = player.effectiveAge;
         if (age == null || age < lowAge || age > highAge!) {
           return false;
         }
@@ -1364,7 +1506,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         case _PlayerSortOption.realAverage:
           result = left.average.compareTo(right.average);
         case _PlayerSortOption.age:
-          result = (left.age ?? -1).compareTo(right.age ?? -1);
+          result = (left.effectiveAge ?? -1).compareTo(right.effectiveAge ?? -1);
         case _PlayerSortOption.matches:
           result = left.matchesPlayed.compareTo(right.matchesPlayed);
         case _PlayerSortOption.wins:
@@ -1394,11 +1536,86 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     return AnimatedBuilder(
       animation: _repository,
       builder: (context, _) {
+        if (!_expertMode) {
+          final visiblePlayers = _visiblePlayers(bulkOnly: false);
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Computer-Datenbank'),
+              actions: <Widget>[
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _expertMode = true;
+                    });
+                  },
+                  icon: const Icon(Icons.tune, size: 18),
+                  label: const Text('Expertenmodus'),
+                ),
+              ],
+            ),
+            body: ExcludeSemantics(
+              excluding: _suppressAccessibilityUpdates,
+              child: ListView(
+                padding: const EdgeInsets.all(24),
+                children: <Widget>[
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Standardansicht',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Schneller Zugriff auf Suche, neue Gegner und eine lesbare Kartenansicht. Bulk-Aktionen und Tabellen gibt es nur im Expertenmodus.',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _buildManualCreationCard(context),
+                  const SizedBox(height: 20),
+                  _buildFilterCard(
+                    context,
+                    bulkOnly: false,
+                    visiblePlayers: visiblePlayers,
+                  ),
+                  const SizedBox(height: 20),
+                  if (visiblePlayers.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('Keine Spieler fuer diese Filter gefunden.'),
+                      ),
+                    )
+                  else
+                    _buildCompactPlayersList(context, visiblePlayers),
+                ],
+              ),
+            ),
+          );
+        }
         return DefaultTabController(
           length: 2,
           child: Scaffold(
             appBar: AppBar(
               title: const Text('Computer-Datenbank'),
+              actions: <Widget>[
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _expertMode = false;
+                    });
+                  },
+                  icon: const Icon(Icons.view_agenda_outlined, size: 18),
+                  label: const Text('Standardansicht'),
+                ),
+              ],
               bottom: const TabBar(
                 tabs: <Widget>[
                   Tab(text: 'Erstellte Spieler'),
@@ -1406,15 +1623,144 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                 ],
               ),
             ),
-            body: TabBarView(
-              children: <Widget>[
-                _buildPlayersTab(context, bulkOnly: false),
-                _buildPlayersTab(context, bulkOnly: true),
-              ],
+            body: ExcludeSemantics(
+              excluding: _suppressAccessibilityUpdates,
+              child: TabBarView(
+                children: <Widget>[
+                  _buildPlayersTab(context, bulkOnly: false),
+                  _buildPlayersTab(context, bulkOnly: true),
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildSimplePlayerCard(BuildContext context, ComputerPlayer player) {
+    final sourceLabel = switch (player.source) {
+      ComputerPlayerSource.imported => 'Importiert',
+      ComputerPlayerSource.manual => 'Manuell',
+      ComputerPlayerSource.bulk => 'Bulk',
+    };
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    player.name,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                ),
+                if (player.isFavorite)
+                  const Icon(Icons.star, color: Color(0xFF8A5A0E)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                _SimpleInfoChip(label: sourceLabel),
+                _SimpleInfoChip(
+                  label: 'Theo ${player.theoreticalAverage.toStringAsFixed(1)}',
+                ),
+                _SimpleInfoChip(
+                  label: 'Real ${player.average.toStringAsFixed(1)}',
+                ),
+                _SimpleInfoChip(
+                  label: player.nationality ?? 'Ohne Nation',
+                ),
+              ],
+            ),
+            if (player.tags.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(
+                player.tags.join(', '),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF556372),
+                    ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                OutlinedButton(
+                  onPressed: () => _openPlayerDetails(player),
+                  child: const Text('Details'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _edit(player),
+                  child: const Text('Bearbeiten'),
+                ),
+                OutlinedButton(
+                  onPressed: player.isProtected
+                      ? null
+                      : () => _repository.deletePlayer(player.id),
+                  child: const Text('Loeschen'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactPlayersList(
+    BuildContext context,
+    List<ComputerPlayer> players,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      'Spielerliste',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  Text(
+                    '${players.length} Spieler',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF556372),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            ...players.map(
+              (player) => _CompactPlayerRow(
+                player: player,
+                onOpen: () => _openPlayerDetails(player),
+                onEdit: () => _edit(player),
+                onDelete: player.isProtected
+                    ? null
+                    : () => _repository.deletePlayer(player.id),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1534,11 +1880,10 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               ),
             const SizedBox(height: 12),
             TextField(
-              controller: _ageController,
-              keyboardType: TextInputType.number,
+              controller: _birthDateController,
               decoration: const InputDecoration(
-                labelText: 'Alter',
-                helperText: 'Optional, 10 bis 100',
+                labelText: 'Geburtsdatum',
+                helperText: 'Optional, z. B. 09.04.1985',
               ),
             ),
             const SizedBox(height: 12),
@@ -1960,7 +2305,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                 const MapEntry('source', 'Quelle'),
                 const MapEntry('theo', 'Theo'),
                 const MapEntry('real', 'Real'),
-                const MapEntry('age', 'Alter'),
+                const MapEntry('age', 'Geburtsdatum'),
                 const MapEntry('nationality', 'Nationalitaet'),
                 const MapEntry('tags', 'Tags'),
                 const MapEntry('stats', 'Stats'),
@@ -1997,7 +2342,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                 ),
                 DropdownMenuItem(
                   value: _PlayerSortOption.age,
-                  child: Text('Alter'),
+                  child: Text('Geburtsdatum'),
                 ),
                 DropdownMenuItem(
                   value: _PlayerSortOption.matches,
@@ -2348,7 +2693,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                     if (_visibleColumns.contains('real'))
                       const DataColumn(label: Text('Real')),
                     if (_visibleColumns.contains('age'))
-                      const DataColumn(label: Text('Alter')),
+                      const DataColumn(label: Text('Geburtsdatum')),
                     if (_visibleColumns.contains('nationality'))
                       const DataColumn(label: Text('Nationalitaet')),
                     if (_visibleColumns.contains('tags'))
@@ -2448,7 +2793,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         if (_visibleColumns.contains('real'))
           DataCell(Text(player.average.toStringAsFixed(1))),
         if (_visibleColumns.contains('age'))
-          DataCell(Text(player.age?.toString() ?? '-')),
+          DataCell(Text(_formatBirthDate(player.birthDate))),
         if (_visibleColumns.contains('nationality'))
           DataCell(
             ConstrainedBox(
@@ -2544,6 +2889,147 @@ class _StatisticTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text(value, style: Theme.of(context).textTheme.titleMedium),
         ],
+      ),
+    );
+  }
+}
+
+class _SimpleInfoChip extends StatelessWidget {
+  const _SimpleInfoChip({
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+class _CompactPlayerRow extends StatelessWidget {
+  const _CompactPlayerRow({
+    required this.player,
+    required this.onOpen,
+    required this.onEdit,
+    this.onDelete,
+  });
+
+  final ComputerPlayer player;
+  final VoidCallback onOpen;
+  final VoidCallback onEdit;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = <String>[
+      'Theo ${player.theoreticalAverage.toStringAsFixed(1)}',
+      'Real ${player.average.toStringAsFixed(1)}',
+      if (player.nationality != null && player.nationality!.trim().isNotEmpty)
+        player.nationality!,
+      switch (player.source) {
+        ComputerPlayerSource.imported => 'Importiert',
+        ComputerPlayerSource.manual => 'Manuell',
+        ComputerPlayerSource.bulk => 'Bulk',
+      },
+    ];
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onOpen,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          player.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                      ),
+                      if (player.isFavorite)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 6),
+                          child: Icon(
+                            Icons.star,
+                            size: 16,
+                            color: Color(0xFF8A5A0E),
+                          ),
+                        ),
+                      if (player.isProtected)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 6),
+                          child: Icon(
+                            Icons.lock,
+                            size: 16,
+                            color: Color(0xFF556372),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    meta.join('  |  '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF556372),
+                        ),
+                  ),
+                  if (player.tags.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      player.tags.join(', '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF7A8794),
+                          ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Bearbeiten',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Details',
+              onPressed: onOpen,
+              icon: const Icon(Icons.insights_outlined, size: 18),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Loeschen',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline, size: 18),
+            ),
+          ],
+        ),
       ),
     );
   }

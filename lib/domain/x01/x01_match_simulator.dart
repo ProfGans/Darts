@@ -519,16 +519,62 @@ class X01MatchSimulator {
   X01MatchSimulator({
     required this.matchEngine,
     required this.botEngine,
+    this.recordPerformanceLogs = true,
   });
 
   final X01MatchEngine matchEngine;
   final BotEngine botEngine;
+  final bool recordPerformanceLogs;
   final Map<String, int?> _checkoutOpportunityCache = <String, int?>{};
   final Map<String, bool> _checkoutReachabilityCache = <String, bool>{};
   final List<DartThrowResult> _allCheckoutThrows = const X01Rules().buildAllThrows()
       .where((entry) => !entry.isMiss)
       .toList(growable: false);
   final _SimulationPerfTotals _perfTotals = _SimulationPerfTotals();
+
+  Map<String, Object?> exportDeterministicTables() {
+    return <String, Object?>{
+      'version': 1,
+      'checkoutOpportunity': <String, Object?>{
+        for (final entry in _checkoutOpportunityCache.entries)
+          entry.key: entry.value,
+      },
+      'checkoutReachability': <String, Object?>{
+        for (final entry in _checkoutReachabilityCache.entries)
+          entry.key: entry.value,
+      },
+    };
+  }
+
+  void importDeterministicTables(Map<String, Object?> json) {
+    final opportunity =
+        ((json['checkoutOpportunity'] as Map?) ?? const <Object?, Object?>{})
+            .cast<Object?, Object?>();
+    for (final entry in opportunity.entries) {
+      _checkoutOpportunityCache[entry.key.toString()] = (entry.value as num?)?.toInt();
+    }
+    final reachability =
+        ((json['checkoutReachability'] as Map?) ?? const <Object?, Object?>{})
+            .cast<Object?, Object?>();
+    for (final entry in reachability.entries) {
+      final value = entry.value;
+      if (value is bool) {
+        _checkoutReachabilityCache[entry.key.toString()] = value;
+      }
+    }
+  }
+
+  void warmCheckoutOpportunityCache({
+    required int score,
+    required CheckoutRequirement checkoutRequirement,
+  }) {
+    _checkoutOpportunityDarts(score, checkoutRequirement);
+  }
+
+  void compactSimulationCaches() {
+    // Keep the small checkout opportunity tables; they are cheap and useful
+    // across tournaments. The larger planner state is compacted in BotEngine.
+  }
 
   void resetPerformanceTotals() {
     _perfTotals.reset();
@@ -1146,10 +1192,13 @@ class X01MatchSimulator {
     required int visitCount,
     required int botThrowCount,
     required int checkoutOpportunityMicroseconds,
-    required int evaluateMicroseconds,
-    required int statsMicroseconds,
-  }) {
-    _perfTotals.record(
+      required int evaluateMicroseconds,
+      required int statsMicroseconds,
+    }) {
+      if (!recordPerformanceLogs) {
+        return;
+      }
+      _perfTotals.record(
       matchMicrosecondsValue: matchMicroseconds,
       legMicrosecondsValue: legMicroseconds,
       visitMicrosecondsValue: visitMicroseconds,
@@ -1539,7 +1588,7 @@ class X01MatchSimulator {
   }
 
   bool _couldBeMasterOutCheckout(int score) {
-    if (score < 3 || score > 180) {
+    if (score < 2 || score > 180) {
       return false;
     }
     return true;
