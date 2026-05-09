@@ -1604,6 +1604,10 @@ class CheckoutPlanner {
     final goodDoubleBonus = doublePreference(route.last);
     final continuityBonus = continuityScore(route);
     final comfortBonus = comfortScore(route) +
+        _smallTripleOver100Penalty(
+          route: route,
+          startScore: startScore,
+        ) +
         _checkoutFallbackComfortRelief(
           route: route,
           startScore: startScore,
@@ -1717,7 +1721,13 @@ class CheckoutPlanner {
     final breakdown = CheckoutRouteScoreBreakdown(
       dartPathScore:
           dartsUsedScore + twoDartCheckoutBonus + smallCheckoutSingleDoubleBonus,
-      comfort: comfortScore(route) + comfortRelief,
+      comfort:
+          comfortScore(route) +
+          _smallTripleOver100Penalty(
+            route: route,
+            startScore: startScore,
+          ) +
+          comfortRelief,
       robustness: robustnessAnalysis.total +
           singleOr25DoubleAccessBonus(
             route: route,
@@ -2419,6 +2429,7 @@ class CheckoutPlanner {
     var score = 0;
     final details = <String>[];
     final isThreeDartFinish = route.length == 3;
+    var premiumBetterThanBullTripleFallbackUsed = false;
 
     for (var index = 0; index < route.length; index += 1) {
       final dartThrow = route[index];
@@ -2464,15 +2475,33 @@ class CheckoutPlanner {
             );
             final firstDartImmediateFinishBonus =
                 index == 0 && exactFallback.length <= dartsAfterThis ? 90 : 0;
+            final isPremiumBetterThanBullTripleFallback =
+                exactFallback.where((entry) => entry.isTriple).length == 1 &&
+                !exactFallback.last.isBull &&
+                exactFallback.last.matchesCheckoutRequirement(
+                  checkoutRequirement,
+                );
+            final limitAdditionalTripleFallbackBonus =
+                premiumBetterThanBullTripleFallbackUsed;
+            final effectiveFallbackFinishBonus =
+                limitAdditionalTripleFallbackBonus ? 0 : fallbackFinishBonus;
+            final effectiveOneDartFinishBonus =
+                limitAdditionalTripleFallbackBonus ? 0 : oneDartFinishBonus;
+            final effectiveFirstDartImmediateFinishBonus =
+                limitAdditionalTripleFallbackBonus
+                    ? 0
+                    : firstDartImmediateFinishBonus;
             final rawPartScore =
-                index == 0
+                limitAdditionalTripleFallbackBonus
+                    ? 0
+                    : index == 0
                     ? 180
                     : 28 +
                         urgencyBonus +
-                        firstDartImmediateFinishBonus +
+                        effectiveFirstDartImmediateFinishBonus +
                         (fallbackScore ~/ 11) +
-                        fallbackFinishBonus +
-                        oneDartFinishBonus +
+                        effectiveFallbackFinishBonus +
+                        effectiveOneDartFinishBonus +
                         noTripleFallbackBonus +
                         bullRescueBonus -
                         narrowFallbackPenalty +
@@ -2487,19 +2516,24 @@ class CheckoutPlanner {
               '${partScore >= 0 ? '+' : ''}$partScore',
             );
             details.add(
-              index == 0
+              limitAdditionalTripleFallbackBonus
+                  ? '  Weiterer Triple-Fallbackbonus gesperrt, weil bereits ein besser-als-Bull-Fallback mit genau einem Triple offen ist: +0'
+                  : index == 0
                   ? '  Einheitlicher 1. Dart-Finish-Fallback: +150'
                   : '  Basis +28, Dringlichkeit ${urgencyBonus >= 0 ? '+' : ''}$urgencyBonus, '
-                      'Finish-offen ${firstDartImmediateFinishBonus >= 0 ? '+' : ''}$firstDartImmediateFinishBonus, '
+                      'Finish-offen ${effectiveFirstDartImmediateFinishBonus >= 0 ? '+' : ''}$effectiveFirstDartImmediateFinishBonus, '
                       'Fallback-Qualitaet ${((fallbackScore ~/ 11) >= 0 ? '+' : '')}${fallbackScore ~/ 11}, '
-                      'Doppel ${fallbackFinishBonus >= 0 ? '+' : ''}$fallbackFinishBonus, '
-                      '1-Dart-Finish ${oneDartFinishBonus >= 0 ? '+' : ''}$oneDartFinishBonus, '
+                      'Doppel ${effectiveFallbackFinishBonus >= 0 ? '+' : ''}$effectiveFallbackFinishBonus, '
+                      '1-Dart-Finish ${effectiveOneDartFinishBonus >= 0 ? '+' : ''}$effectiveOneDartFinishBonus, '
                       'ohne Triple ${noTripleFallbackBonus >= 0 ? '+' : ''}$noTripleFallbackBonus, '
                       'Bull-Rettung ${bullRescueBonus >= 0 ? '+' : ''}$bullRescueBonus, '
                       'Schmalfeld -$narrowFallbackPenalty, '
                       'gleiches Segment ${sameSegmentFallbackBonus >= 0 ? '+' : ''}$sameSegmentFallbackBonus, '
                       'Doppel-Leave ${doubleLeaveBonus >= 0 ? '+' : ''}$doubleLeaveBonus',
             );
+            if (isPremiumBetterThanBullTripleFallback) {
+              premiumBetterThanBullTripleFallbackUsed = true;
+            }
             if (threeDartReduction > 0) {
               details.add(
                 '  3-Dart-Finish-Reduktion ${threeDartReduction >= 0 ? '-' : '+'}$threeDartReduction, '
@@ -2795,6 +2829,24 @@ class CheckoutPlanner {
     }
 
     return score;
+  }
+
+  int _smallTripleOver100Penalty({
+    required List<DartThrowResult> route,
+    required int startScore,
+  }) {
+    var penalty = 0;
+    var remaining = startScore;
+    for (final dartThrow in route) {
+      if (remaining > 100 &&
+          dartThrow.isTriple &&
+          dartThrow.baseValue > 0 &&
+          dartThrow.baseValue < 15) {
+        penalty -= 25;
+      }
+      remaining -= dartThrow.scoredPoints;
+    }
+    return penalty;
   }
 
   _SetupComfortRelief _setupComfortRelief({
@@ -3118,6 +3170,18 @@ class CheckoutPlanner {
         details.add('25: -50 als fruehes schmales Feld');
       } else if (!dartThrow.isBull) {
         details.add('${dartThrow.label}: +75 als fruehes Single');
+      }
+      remaining -= dartThrow.scoredPoints;
+    }
+    remaining = startScore;
+    for (final dartThrow in route) {
+      if (remaining > 100 &&
+          dartThrow.isTriple &&
+          dartThrow.baseValue > 0 &&
+          dartThrow.baseValue < 15) {
+        details.add(
+          '${dartThrow.label}: -25 kleines Triple unter T15 bei Rest $remaining',
+        );
       }
       remaining -= dartThrow.scoredPoints;
     }

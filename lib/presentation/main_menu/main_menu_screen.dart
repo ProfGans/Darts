@@ -275,6 +275,15 @@ class _ToolsHub extends StatelessWidget {
               },
             ),
             _HubTile(
+              icon: Icons.center_focus_strong_rounded,
+              title: 'Erkennungs-Tester',
+              subtitle:
+                  'Board-Erkennung, Kalibrierung und Dartspitzen-Vorschlag ohne Match testen.',
+              onTap: () {
+                Navigator.of(context).pushNamed(AppRoutes.boardRecognitionTester);
+              },
+            ),
+            _HubTile(
               icon: Icons.memory_rounded,
               title: 'Bot-Simulator',
               subtitle:

@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import '../../data/repositories/checkout_route_repository.dart';
 import '../../data/debug/app_debug.dart';
 import '../board/board_geometry.dart';
 import '../x01/checkout_planner.dart';
@@ -138,10 +139,12 @@ class BotEngine {
       <String, DartThrowResult?>{};
   final Map<String, List<DartThrowResult>?> _preferredSetupRouteCache =
       <String, List<DartThrowResult>?>{};
-  final Map<int, DartThrowResult?> _preferredLeaveTargetCache =
-      <int, DartThrowResult?>{};
-  final Map<int, int> _leavePreferenceCache = <int, int>{};
-  final Map<int, int> _leaveBullPenaltyCache = <int, int>{};
+  final Map<String, List<DartThrowResult>?> _preferredHighScoreSetupRouteCache =
+      <String, List<DartThrowResult>?>{};
+  final Map<String, DartThrowResult?> _preferredLeaveTargetCache =
+      <String, DartThrowResult?>{};
+  final Map<String, int> _leavePreferenceCache = <String, int>{};
+  final Map<String, int> _leaveBullPenaltyCache = <String, int>{};
   final Map<String, List<List<DartThrowResult>>> _checkoutRoutesCache =
       <String, List<List<DartThrowResult>>>{};
   final Map<String, double> _theoreticalAverageCache = <String, double>{};
@@ -166,6 +169,10 @@ class BotEngine {
         for (final entry in _preferredSetupRouteCache.entries)
           entry.key: _serializeRoute(entry.value),
       },
+      'preferredHighScoreSetupRoutes': <String, Object?>{
+        for (final entry in _preferredHighScoreSetupRouteCache.entries)
+          entry.key: _serializeRoute(entry.value),
+      },
       'preferredSetupTargets': <String, Object?>{
         for (final entry in _preferredSetupTargetCache.entries)
           entry.key: _serializeThrowLabel(entry.value),
@@ -182,11 +189,9 @@ class BotEngine {
         ((json['preferredLeaveTargets'] as Map?) ?? const <Object?, Object?>{})
             .cast<Object?, Object?>();
     for (final entry in leaveTargets.entries) {
-      final score = int.tryParse(entry.key.toString());
-      if (score == null) {
-        continue;
-      }
-      _preferredLeaveTargetCache[score] = _deserializeThrowLabel(entry.value);
+      _preferredLeaveTargetCache[entry.key.toString()] = _deserializeThrowLabel(
+        entry.value,
+      );
     }
 
     void importRouteMap(
@@ -202,6 +207,10 @@ class BotEngine {
 
     importRouteMap(_preferredCheckoutCache, json['preferredCheckouts']);
     importRouteMap(_preferredSetupRouteCache, json['preferredSetupRoutes']);
+    importRouteMap(
+      _preferredHighScoreSetupRouteCache,
+      json['preferredHighScoreSetupRoutes'],
+    );
 
     void importThrowMap(
       Map<String, DartThrowResult?> target,
@@ -272,14 +281,23 @@ class BotEngine {
     required BotProfile profile,
     required int score,
     required int dartsRemaining,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
-    final cacheKey = '$score|$dartsRemaining|${score == 50 && profile.finishingSkill >= 350 ? 1 : 0}';
+    final cacheKey = <Object>[
+      score,
+      dartsRemaining,
+      checkoutRequirement.name,
+      playStyle.name,
+      score == 50 && profile.finishingSkill >= 350 ? 1 : 0,
+    ].join('|');
     final cached = _aimDecisionCache[cacheKey];
     if (cached != null) {
       return cached;
     }
 
-    if (score == 50) {
+    if (score == 50 &&
+        checkoutRequirement != CheckoutRequirement.singleOut) {
       final target = profile.finishingSkill >= 350
           ? rules.createBull()
           : rules.createOuterBull();
@@ -291,7 +309,9 @@ class BotEngine {
       return decision;
     }
 
-    if (score <= 40 && score.isEven) {
+    if (checkoutRequirement == CheckoutRequirement.doubleOut &&
+        score <= 40 &&
+        score.isEven) {
       final decision = BotAimDecision(
         target: rules.createDouble(score ~/ 2),
         reason: 'Direct double finish',
@@ -302,7 +322,11 @@ class BotEngine {
 
     if (dartsRemaining == 1 && score > 40) {
       final leaveTarget =
-          findPreferredLeaveTarget(score) ??
+          findPreferredLeaveTarget(
+            score,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+          ) ??
           rules.createSingle((score - 2).clamp(0, 20));
       final decision = BotAimDecision(
         target: leaveTarget,
@@ -313,14 +337,38 @@ class BotEngine {
     }
 
     if (score > 170) {
-      final continuation = checkoutPlanner.bestContinuationPlan(
-        score: score,
-        dartsLeft: dartsRemaining,
-        checkoutRequirement: CheckoutRequirement.doubleOut,
-        playStyle: CheckoutPlayStyle.balanced,
-        outerBullPreference: 50,
-        bullPreference: 50,
-      );
+      if (score >= 350 && dartsRemaining == 3) {
+        final highScoreSetup = findPreferredHighScoreSetupRoute(
+          score: score,
+          dartsLeft: dartsRemaining,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        );
+        if (highScoreSetup != null && highScoreSetup.isNotEmpty) {
+          final decision = BotAimDecision(
+            target: highScoreSetup.first,
+            reason: 'Preferred high-score setup',
+            route: highScoreSetup,
+          );
+          _aimDecisionCache[cacheKey] = decision;
+          return decision;
+        }
+      }
+
+      final continuation = CheckoutRouteRepository.instance.bestContinuationPlan(
+            score: score,
+            dartsLeft: dartsRemaining,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+          ) ??
+          checkoutPlanner.bestContinuationPlan(
+            score: score,
+            dartsLeft: dartsRemaining,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+            outerBullPreference: 50,
+            bullPreference: 50,
+          );
       if (continuation != null && continuation.throws.isNotEmpty) {
         final decision = BotAimDecision(
           target: continuation.throws.first,
@@ -342,6 +390,8 @@ class BotEngine {
     final preferredCheckout = findPreferredCheckout(
       score: score,
       dartsLeft: dartsRemaining,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
     );
     if (preferredCheckout != null && preferredCheckout.isNotEmpty) {
       final decision = BotAimDecision(
@@ -365,6 +415,8 @@ class BotEngine {
     final setupRoute = findPreferredSetupRoute(
       score: score,
       dartsLeft: dartsRemaining,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
     );
     if (setupRoute != null && setupRoute.isNotEmpty) {
       final decision = BotAimDecision(
@@ -377,7 +429,13 @@ class BotEngine {
     }
 
     final decision = BotAimDecision(
-      target: rules.createSingle((score - 2).clamp(0, 20)),
+      target:
+          findPreferredLeaveTarget(
+            score,
+            checkoutRequirement: checkoutRequirement,
+            playStyle: playStyle,
+          ) ??
+          rules.createSingle((score - 2).clamp(0, 20)),
       reason: 'Default leave choice',
     );
     _aimDecisionCache[cacheKey] = decision;
@@ -506,6 +564,8 @@ class BotEngine {
     required int score,
     required int dartsLeft,
     required BotProfile profile,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
     Random? random,
   }) {
     final decideAimStopwatch = Stopwatch()..start();
@@ -513,6 +573,8 @@ class BotEngine {
       profile: profile,
       score: score,
       dartsRemaining: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
     );
     decideAimStopwatch.stop();
     return simulateTargetThrow(
@@ -864,13 +926,27 @@ class BotEngine {
   List<DartThrowResult>? findPreferredCheckout({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
-    final cacheKey = '$score|$dartsLeft';
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}|${playStyle.name}';
     if (_preferredCheckoutCache.containsKey(cacheKey)) {
       return _preferredCheckoutCache[cacheKey];
     }
 
-    final best = checkoutPlanner.bestFinishRoute(score: score, dartsLeft: dartsLeft);
+    final best =
+        CheckoutRouteRepository.instance.bestFinishRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        ) ??
+        checkoutPlanner.bestFinishRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        );
     if (best == null || best.isEmpty) {
       _preferredCheckoutCache[cacheKey] = null;
       return null;
@@ -882,8 +958,10 @@ class BotEngine {
   DartThrowResult? findPreferredSetupTarget({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
-    final cacheKey = '$score|$dartsLeft';
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}|${playStyle.name}';
     if (_preferredSetupTargetCache.containsKey(cacheKey)) {
       return _preferredSetupTargetCache[cacheKey];
     }
@@ -896,6 +974,8 @@ class BotEngine {
     final setupRoute = findPreferredSetupRoute(
       score: score,
       dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
     );
     if (setupRoute != null && setupRoute.isNotEmpty) {
       final target = setupRoute.first;
@@ -904,7 +984,11 @@ class BotEngine {
     }
 
     if (dartsLeft == 1 || score > 170) {
-      final leaveTarget = findPreferredLeaveTarget(score);
+      final leaveTarget = findPreferredLeaveTarget(
+        score,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+      );
       _preferredSetupTargetCache[cacheKey] = leaveTarget;
       return leaveTarget;
     }
@@ -916,8 +1000,10 @@ class BotEngine {
   DartThrowResult? findInVisitSetupTarget({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
-    final cacheKey = '$score|$dartsLeft';
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}|${playStyle.name}';
     if (_inVisitSetupTargetCache.containsKey(cacheKey)) {
       return _inVisitSetupTargetCache[cacheKey];
     }
@@ -930,6 +1016,8 @@ class BotEngine {
     final setupRoute = findPreferredSetupRoute(
       score: score,
       dartsLeft: dartsLeft,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
     );
     if (setupRoute == null || setupRoute.isEmpty) {
       _inVisitSetupTargetCache[cacheKey] = null;
@@ -944,8 +1032,10 @@ class BotEngine {
   List<DartThrowResult>? findPreferredSetupRoute({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
-    final cacheKey = '$score|$dartsLeft';
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}|${playStyle.name}';
     if (_preferredSetupRouteCache.containsKey(cacheKey)) {
       return _preferredSetupRouteCache[cacheKey];
     }
@@ -955,10 +1045,19 @@ class BotEngine {
       return null;
     }
 
-    final route = _bestPlannerSetupRoute(
-      score: score,
-      dartsLeft: dartsLeft,
-    );
+    final route =
+        CheckoutRouteRepository.instance.bestSetupRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        ) ??
+        _bestPlannerSetupRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        );
     if (route == null || route.isEmpty) {
       _preferredSetupRouteCache[cacheKey] = null;
       return null;
@@ -968,15 +1067,55 @@ class BotEngine {
     return route;
   }
 
+  List<DartThrowResult>? findPreferredHighScoreSetupRoute({
+    required int score,
+    required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+  }) {
+    final cacheKey = '$score|$dartsLeft|${checkoutRequirement.name}|${playStyle.name}';
+    if (_preferredHighScoreSetupRouteCache.containsKey(cacheKey)) {
+      return _preferredHighScoreSetupRouteCache[cacheKey];
+    }
+
+    if (dartsLeft != 3 || score < 350) {
+      _preferredHighScoreSetupRouteCache[cacheKey] = null;
+      return null;
+    }
+
+    final route =
+        CheckoutRouteRepository.instance.bestHighScoreSetupRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        ) ??
+        _bestPlannerSetupRoute(
+          score: score,
+          dartsLeft: dartsLeft,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        );
+    if (route == null || route.isEmpty) {
+      _preferredHighScoreSetupRouteCache[cacheKey] = null;
+      return null;
+    }
+
+    _preferredHighScoreSetupRouteCache[cacheKey] = route;
+    return route;
+  }
+
   List<DartThrowResult>? _bestPlannerSetupRoute({
     required int score,
     required int dartsLeft,
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
   }) {
     final options = checkoutPlanner.setupLeaveOptions(
       startScore: score,
       dartsLeft: dartsLeft,
-      checkoutRequirement: CheckoutRequirement.doubleOut,
-      playStyle: CheckoutPlayStyle.balanced,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
       leavePreference: 85,
       outerBullPreference: 50,
       bullPreference: 50,
@@ -989,9 +1128,14 @@ class BotEngine {
     return options.first.setupRoute;
   }
 
-  DartThrowResult? findPreferredLeaveTarget(int score) {
-    if (_preferredLeaveTargetCache.containsKey(score)) {
-      return _preferredLeaveTargetCache[score];
+  DartThrowResult? findPreferredLeaveTarget(
+    int score, {
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+  }) {
+    final cacheKey = '$score|${checkoutRequirement.name}|${playStyle.name}';
+    if (_preferredLeaveTargetCache.containsKey(cacheKey)) {
+      return _preferredLeaveTargetCache[cacheKey];
     }
 
     _LeaveCandidate? bestCandidate;
@@ -1008,17 +1152,27 @@ class BotEngine {
       final candidate = _LeaveCandidate(
         target: dartThrow,
         rest: rest,
-        leavePreference: getLeavePreference(rest),
+        leavePreference: getLeavePreference(
+          rest,
+          checkoutRequirement: checkoutRequirement,
+          playStyle: playStyle,
+        ),
       );
 
       if (bestCandidate == null ||
-          _compareLeaveCandidates(candidate, bestCandidate) < 0) {
+          _compareLeaveCandidates(
+                candidate,
+                bestCandidate,
+                checkoutRequirement: checkoutRequirement,
+                playStyle: playStyle,
+              ) <
+              0) {
         bestCandidate = candidate;
       }
     }
 
     final bestTarget = bestCandidate?.target;
-    _preferredLeaveTargetCache[score] = bestTarget;
+    _preferredLeaveTargetCache[cacheKey] = bestTarget;
     return bestTarget;
   }
 
@@ -1069,9 +1223,14 @@ class BotEngine {
     return routes;
   }
 
-  int getLeavePreference(int rest) {
-    if (_leavePreferenceCache.containsKey(rest)) {
-      return _leavePreferenceCache[rest]!;
+  int getLeavePreference(
+    int rest, {
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+  }) {
+    final cacheKey = '$rest|${checkoutRequirement.name}|${playStyle.name}';
+    if (_leavePreferenceCache.containsKey(cacheKey)) {
+      return _leavePreferenceCache[cacheKey]!;
     }
 
     late final int value;
@@ -1080,7 +1239,12 @@ class BotEngine {
     } else if (rest > 1 && rest <= 40 && rest.isEven) {
       value = 10000 + getFinishPreference(rules.createDouble(rest ~/ 2));
     } else {
-      final checkoutRoute = findPreferredCheckout(score: rest, dartsLeft: 3);
+      final checkoutRoute = findPreferredCheckout(
+        score: rest,
+        dartsLeft: 3,
+        checkoutRequirement: checkoutRequirement,
+        playStyle: playStyle,
+      );
       if (checkoutRoute != null && checkoutRoute.isNotEmpty) {
         final finalThrow = checkoutRoute.last;
         value = 8000 -
@@ -1097,23 +1261,33 @@ class BotEngine {
       }
     }
 
-    _leavePreferenceCache[rest] = value;
+    _leavePreferenceCache[cacheKey] = value;
     return value;
   }
 
-  int getLeaveBullPenalty(int rest) {
-    if (_leaveBullPenaltyCache.containsKey(rest)) {
-      return _leaveBullPenaltyCache[rest]!;
+  int getLeaveBullPenalty(
+    int rest, {
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+  }) {
+    final cacheKey = '$rest|${checkoutRequirement.name}|${playStyle.name}';
+    if (_leaveBullPenaltyCache.containsKey(cacheKey)) {
+      return _leaveBullPenaltyCache[cacheKey]!;
     }
 
     if (rest == 50) {
-      _leaveBullPenaltyCache[rest] = 200;
+      _leaveBullPenaltyCache[cacheKey] = 200;
       return 200;
     }
 
-    final route = findPreferredCheckout(score: rest, dartsLeft: 3);
+    final route = findPreferredCheckout(
+      score: rest,
+      dartsLeft: 3,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+    );
     final penalty = route == null ? 0 : getBullPenalty(route);
-    _leaveBullPenaltyCache[rest] = penalty;
+    _leaveBullPenaltyCache[cacheKey] = penalty;
     return penalty;
   }
 
@@ -1262,13 +1436,26 @@ class BotEngine {
     return hits / _circleSamplePattern.length;
   }
 
-  int _compareLeaveCandidates(_LeaveCandidate a, _LeaveCandidate b) {
+  int _compareLeaveCandidates(
+    _LeaveCandidate a,
+    _LeaveCandidate b, {
+    CheckoutRequirement checkoutRequirement = CheckoutRequirement.doubleOut,
+    CheckoutPlayStyle playStyle = CheckoutPlayStyle.balanced,
+  }) {
     if (a.leavePreference != b.leavePreference) {
       return b.leavePreference - a.leavePreference;
     }
 
-    final aBullPenalty = getLeaveBullPenalty(a.rest);
-    final bBullPenalty = getLeaveBullPenalty(b.rest);
+    final aBullPenalty = getLeaveBullPenalty(
+      a.rest,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+    );
+    final bBullPenalty = getLeaveBullPenalty(
+      b.rest,
+      checkoutRequirement: checkoutRequirement,
+      playStyle: playStyle,
+    );
     if (aBullPenalty != bBullPenalty) {
       return aBullPenalty - bBullPenalty;
     }

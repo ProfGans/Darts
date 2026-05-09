@@ -27,21 +27,29 @@ class SettingsRepository extends ChangeNotifier {
 
   AppSettings get settings => _settings;
 
+  static int effectiveRadiusPercentForDisplay(int radiusCalibrationPercent) {
+    return (radiusCalibrationPercent *
+            _radiusDisplayNeutralPercent *
+            _legacyRadiusBaselinePercent /
+            10000)
+        .round();
+  }
+
+  static int effectiveSpreadPercentForDisplay(int simulationSpreadPercent) {
+    return (simulationSpreadPercent *
+            _legacySimulationSpreadBaselinePercent /
+            100)
+        .round();
+  }
+
   BotProfile createBotProfile({
     required int skill,
     required int finishingSkill,
   }) {
     final effectiveRadius =
-        (_settings.radiusCalibrationPercent *
-                _radiusDisplayNeutralPercent *
-                _legacyRadiusBaselinePercent /
-                10000)
-            .round();
+        effectiveRadiusPercentForDisplay(_settings.radiusCalibrationPercent);
     final effectiveSpread =
-        (_settings.simulationSpreadPercent *
-                _legacySimulationSpreadBaselinePercent /
-                100)
-            .round();
+        effectiveSpreadPercentForDisplay(_settings.simulationSpreadPercent);
 
     return BotProfile(
       skill: skill,

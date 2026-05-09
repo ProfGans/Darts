@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../presentation/match/bob27_result_models.dart';
 import '../../presentation/match/cricket_result_models.dart';
 import '../../presentation/match/match_result_models.dart';
+import '../background/simulation_service.dart';
 import '../models/nationality_catalog.dart';
 import '../models/player_profile.dart';
 import '../storage/app_storage.dart';
@@ -24,6 +25,25 @@ class PlayerStatsWindow {
   final PlayerProfileStats stats;
 
   double get winRate => matchCount <= 0 ? 0 : (winCount / matchCount) * 100;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'label': label,
+        'matchCount': matchCount,
+        'winCount': winCount,
+        'stats': stats.toJson(),
+      };
+
+  static PlayerStatsWindow fromJson(Map<String, Object?> json) {
+    return PlayerStatsWindow(
+      label: json['label'] as String? ?? '',
+      matchCount: (json['matchCount'] as num?)?.toInt() ?? 0,
+      winCount: (json['winCount'] as num?)?.toInt() ?? 0,
+      stats: PlayerProfileStats.fromJson(
+        ((json['stats'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, dynamic>(),
+      ),
+    );
+  }
 }
 
 class PlayerHeadToHeadStats {
@@ -44,6 +64,31 @@ class PlayerHeadToHeadStats {
   final DateTime lastPlayedAt;
 
   double get winRate => matches <= 0 ? 0 : (wins / matches) * 100;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'opponentName': opponentName,
+        'opponentType': opponentType.storageValue,
+        'matches': matches,
+        'wins': wins,
+        'average': average,
+        'lastPlayedAt': lastPlayedAt.toIso8601String(),
+      };
+
+  static PlayerHeadToHeadStats fromJson(Map<String, Object?> json) {
+    return PlayerHeadToHeadStats(
+      opponentName: json['opponentName'] as String? ?? '',
+      opponentType: PlayerOpponentKindSerialization.fromStorageValue(
+        json['opponentType'] as String?,
+      ),
+      matches: (json['matches'] as num?)?.toInt() ?? 0,
+      wins: (json['wins'] as num?)?.toInt() ?? 0,
+      average: (json['average'] as num?)?.toDouble() ?? 0,
+      lastPlayedAt: DateTime.tryParse(
+            json['lastPlayedAt'] as String? ?? '',
+          ) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
 }
 
 class PlayerEquipmentPerformance {
@@ -64,6 +109,29 @@ class PlayerEquipmentPerformance {
   final int winCount;
 
   double get winRate => matchCount <= 0 ? 0 : (winCount / matchCount) * 100;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'equipmentId': equipmentId,
+        'equipmentName': equipmentName,
+        'matchCount': matchCount,
+        'trainingCount': trainingCount,
+        'stats': stats.toJson(),
+        'winCount': winCount,
+      };
+
+  static PlayerEquipmentPerformance fromJson(Map<String, Object?> json) {
+    return PlayerEquipmentPerformance(
+      equipmentId: json['equipmentId'] as String? ?? '',
+      equipmentName: json['equipmentName'] as String? ?? 'Equipment',
+      matchCount: (json['matchCount'] as num?)?.toInt() ?? 0,
+      trainingCount: (json['trainingCount'] as num?)?.toInt() ?? 0,
+      stats: PlayerProfileStats.fromJson(
+        ((json['stats'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, dynamic>(),
+      ),
+      winCount: (json['winCount'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 enum PlayerAnalyticsRange {
@@ -134,6 +202,122 @@ class PlayerProfileAnalytics {
   final PlayerHeadToHeadStats? toughestOpponent;
   final List<double> movingAverage;
   final List<PlayerEquipmentPerformance> equipment;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'filterRange': filterRange.name,
+        'filterEquipmentId': filterEquipmentId,
+        'filterStartDate': filterStartDate?.toIso8601String(),
+        'filterEndDate': filterEndDate?.toIso8601String(),
+        'filtered': filtered.toJson(),
+        'filteredTrainingCount': filteredTrainingCount,
+        'last5': last5.toJson(),
+        'last10': last10.toJson(),
+        'last25': last25.toJson(),
+        'last3Months': last3Months.toJson(),
+        'allTime': allTime.toJson(),
+        'withThrow': withThrow.toJson(),
+        'againstThrow': againstThrow.toJson(),
+        'decider': decider.toJson(),
+        'bestOfShort': bestOfShort.toJson(),
+        'bestOfLong': bestOfLong.toJson(),
+        'vsHuman': vsHuman.toJson(),
+        'vsCpu': vsCpu.toJson(),
+        'headToHead': headToHead.map((entry) => entry.toJson()).toList(),
+        'favoriteOpponent': favoriteOpponent?.toJson(),
+        'toughestOpponent': toughestOpponent?.toJson(),
+        'movingAverage': movingAverage,
+        'equipment': equipment.map((entry) => entry.toJson()).toList(),
+      };
+
+  static PlayerProfileAnalytics fromJson(Map<String, Object?> json) {
+    final rangeName = json['filterRange'] as String?;
+    return PlayerProfileAnalytics(
+      filterRange: PlayerAnalyticsRange.values.byName(
+        rangeName ?? PlayerAnalyticsRange.allTime.name,
+      ),
+      filterEquipmentId: json['filterEquipmentId'] as String?,
+      filterStartDate: DateTime.tryParse(json['filterStartDate'] as String? ?? ''),
+      filterEndDate: DateTime.tryParse(json['filterEndDate'] as String? ?? ''),
+      filtered: PlayerStatsWindow.fromJson(
+        ((json['filtered'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      filteredTrainingCount:
+          (json['filteredTrainingCount'] as num?)?.toInt() ?? 0,
+      last5: PlayerStatsWindow.fromJson(
+        ((json['last5'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      last10: PlayerStatsWindow.fromJson(
+        ((json['last10'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      last25: PlayerStatsWindow.fromJson(
+        ((json['last25'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      last3Months: PlayerStatsWindow.fromJson(
+        ((json['last3Months'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      allTime: PlayerStatsWindow.fromJson(
+        ((json['allTime'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      withThrow: PlayerStatsWindow.fromJson(
+        ((json['withThrow'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      againstThrow: PlayerStatsWindow.fromJson(
+        ((json['againstThrow'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      decider: PlayerStatsWindow.fromJson(
+        ((json['decider'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      bestOfShort: PlayerStatsWindow.fromJson(
+        ((json['bestOfShort'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      bestOfLong: PlayerStatsWindow.fromJson(
+        ((json['bestOfLong'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      vsHuman: PlayerStatsWindow.fromJson(
+        ((json['vsHuman'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      vsCpu: PlayerStatsWindow.fromJson(
+        ((json['vsCpu'] as Map?) ?? const <Object?, Object?>{})
+            .cast<String, Object?>(),
+      ),
+      headToHead: (json['headToHead'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => PlayerHeadToHeadStats.fromJson(entry.cast<String, Object?>()))
+          .toList(),
+      favoriteOpponent: json['favoriteOpponent'] is Map
+          ? PlayerHeadToHeadStats.fromJson(
+              (json['favoriteOpponent'] as Map).cast<String, Object?>(),
+            )
+          : null,
+      toughestOpponent: json['toughestOpponent'] is Map
+          ? PlayerHeadToHeadStats.fromJson(
+              (json['toughestOpponent'] as Map).cast<String, Object?>(),
+            )
+          : null,
+      movingAverage: (json['movingAverage'] as List<dynamic>? ?? const <dynamic>[])
+          .map((entry) => (entry as num).toDouble())
+          .toList(),
+      equipment: (json['equipment'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (entry) =>
+                PlayerEquipmentPerformance.fromJson(entry.cast<String, Object?>()),
+          )
+          .toList(),
+    );
+  }
 }
 
 class PlayerRepository extends ChangeNotifier {
@@ -681,6 +865,19 @@ class PlayerRepository extends ChangeNotifier {
     });
   }
 
+  Future<String> exportAsJsonStringInBackground() async {
+    final handle = SimulationService.instance.startJob<String>(
+      taskType: 'export_player_profiles_json',
+      initialLabel: 'Spielerprofile werden exportiert',
+      payload: <String, Object?>{
+        'activePlayerId': _activePlayerId,
+        'tagDefinitions': _tagDefinitions,
+        'players': _players.map((entry) => entry.toJson()).toList(),
+      },
+    );
+    return handle.result;
+  }
+
   String exportAsCsvString() {
     final rows = <List<String>>[
       <String>[
@@ -725,6 +922,17 @@ class PlayerRepository extends ChangeNotifier {
     return rows.map(_toCsvRow).join('\n');
   }
 
+  Future<String> exportAsCsvStringInBackground() async {
+    final handle = SimulationService.instance.startJob<String>(
+      taskType: 'export_player_profiles_csv',
+      initialLabel: 'Spielerprofile werden exportiert',
+      payload: <String, Object?>{
+        'players': _players.map((entry) => entry.toJson()).toList(),
+      },
+    );
+    return handle.result;
+  }
+
   Future<void> importFromJsonString(
     String rawValue, {
     bool replaceExisting = false,
@@ -741,26 +949,35 @@ class PlayerRepository extends ChangeNotifier {
                   PlayerProfile.fromJson((entry as Map).cast<String, dynamic>()),
             )
             .toList();
-    if (replaceExisting) {
-      _players
-        ..clear()
-        ..addAll(importedPlayers.map(_normalizePlayer));
-    } else {
-      for (final player in importedPlayers) {
-        final normalized = _normalizePlayer(player);
-        final index = _players.indexWhere((entry) => entry.id == normalized.id);
-        if (index >= 0) {
-          _players[index] = normalized;
-          continue;
-        }
-        _players.add(normalized);
-      }
-    }
-    _activePlayerId = map['activePlayerId'] as String? ??
-        (_players.isNotEmpty ? _players.first.id : _activePlayerId);
-    _syncTagDefinitions();
-    notifyListeners();
-    await _persist();
+    await _applyImportedPlayers(
+      importedPlayers,
+      replaceExisting: replaceExisting,
+      activePlayerId: map['activePlayerId'] as String?,
+    );
+  }
+
+  Future<void> importFromJsonStringInBackground(
+    String rawValue, {
+    bool replaceExisting = false,
+  }) async {
+    final handle = SimulationService.instance.startJob<Map<String, Object?>>(
+      taskType: 'import_player_profiles_json',
+      initialLabel: 'Spielerprofile werden importiert',
+      payload: <String, Object?>{
+        'raw': rawValue,
+      },
+    );
+    final result = await handle.result;
+    final importedPlayers =
+        (result['players'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => PlayerProfile.fromJson(entry.cast<String, dynamic>()))
+            .toList();
+    await _applyImportedPlayers(
+      importedPlayers,
+      replaceExisting: replaceExisting,
+      activePlayerId: result['activePlayerId'] as String?,
+    );
   }
 
   Future<void> importFromCsvString(
@@ -838,6 +1055,30 @@ class PlayerRepository extends ChangeNotifier {
     );
   }
 
+  Future<void> importFromCsvStringInBackground(
+    String rawValue, {
+    bool replaceExisting = false,
+  }) async {
+    final handle = SimulationService.instance.startJob<Map<String, Object?>>(
+      taskType: 'import_player_profiles_csv',
+      initialLabel: 'Spielerprofile werden importiert',
+      payload: <String, Object?>{
+        'raw': rawValue,
+      },
+    );
+    final result = await handle.result;
+    final importedPlayers =
+        (result['players'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => PlayerProfile.fromJson(entry.cast<String, dynamic>()))
+            .toList();
+    await _applyImportedPlayers(
+      importedPlayers,
+      replaceExisting: replaceExisting,
+      activePlayerId: result['activePlayerId'] as String?,
+    );
+  }
+
   Future<void> _persist() {
     return AppStorage.instance.writeJson(
       _storageKey,
@@ -847,6 +1088,33 @@ class PlayerRepository extends ChangeNotifier {
         'players': _players.map((entry) => entry.toJson()).toList(),
       },
     );
+  }
+
+  Future<void> _applyImportedPlayers(
+    List<PlayerProfile> importedPlayers, {
+    required bool replaceExisting,
+    String? activePlayerId,
+  }) async {
+    if (replaceExisting) {
+      _players
+        ..clear()
+        ..addAll(importedPlayers.map(_normalizePlayer));
+    } else {
+      for (final player in importedPlayers) {
+        final normalized = _normalizePlayer(player);
+        final index = _players.indexWhere((entry) => entry.id == normalized.id);
+        if (index >= 0) {
+          _players[index] = normalized;
+          continue;
+        }
+        _players.add(normalized);
+      }
+    }
+    _activePlayerId = activePlayerId ??
+        (_players.isNotEmpty ? _players.first.id : _activePlayerId);
+    _syncTagDefinitions();
+    notifyListeners();
+    await _persist();
   }
 
   PlayerProfile _normalizePlayer(PlayerProfile player) {
@@ -901,158 +1169,35 @@ class PlayerRepository extends ChangeNotifier {
     DateTime? startDate,
     DateTime? endDate,
   }) {
-    final x01Entries = player.history.where((entry) => entry.match != null).toList()
-      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
-
-    PlayerStatsWindow buildWindow(String label, List<PlayerMatchHistoryEntry> entries) {
-      return PlayerStatsWindow(
-        label: label,
-        matchCount: entries.length,
-        winCount: entries.where((entry) => entry.won).length,
-        stats: _buildX01StatsFromEntries(
-          playerId: player.id,
-          playerName: player.name,
-          entries: entries,
-        ),
-      );
-    }
-
-    final setupFilteredEntries = equipmentId == null
-        ? x01Entries
-        : x01Entries
-            .where((entry) => entry.equipmentId == equipmentId)
-            .toList();
-    final dateFilteredEntries = _filterMatchEntriesByRange(
-      setupFilteredEntries,
+    return buildPlayerProfileAnalytics(
+      player: player,
+      range: range,
+      equipmentId: equipmentId,
       startDate: startDate,
       endDate: endDate,
     );
-    final filteredX01Entries =
-        startDate == null && endDate == null
-            ? _applyRangeToMatchEntries(dateFilteredEntries, range)
-            : dateFilteredEntries;
-    final setupFilteredTrainingEntries = equipmentId == null
-        ? player.trainingHistory
-        : player.trainingHistory
-            .where((entry) => entry.equipmentId == equipmentId)
-            .toList();
-    final filteredTrainingEntries = _applyRangeToTrainingEntries(
-      _filterTrainingEntriesByRange(
-        setupFilteredTrainingEntries,
-        startDate: startDate,
-        endDate: endDate,
-      ),
-      startDate == null && endDate == null
-          ? range
-          : PlayerAnalyticsRange.allTime,
-    );
-    final filteredStats = _buildX01StatsFromEntries(
-      playerId: player.id,
-      playerName: player.name,
-      entries: filteredX01Entries,
-    );
-    final threeMonthsAgo = DateTime.now().subtract(const Duration(days: 90));
-    final last5Entries = filteredX01Entries.take(5).toList();
-    final last10Entries = filteredX01Entries.take(10).toList();
-    final last25Entries = filteredX01Entries.take(25).toList();
-    final last3MonthsEntries = filteredX01Entries
-        .where((entry) => entry.playedAt.isAfter(threeMonthsAgo))
-        .toList();
-    final shortEntries = filteredX01Entries.where((entry) {
-      final stats = _resolveParticipantStats(
-        playerId: player.id,
-        playerName: player.name,
-        result: entry.match!,
-      );
-      return stats.legsPlayed <= 9;
-    }).toList();
-    final longEntries = filteredX01Entries.where((entry) {
-      final stats = _resolveParticipantStats(
-        playerId: player.id,
-        playerName: player.name,
-        result: entry.match!,
-      );
-      return stats.legsPlayed > 9;
-    }).toList();
-    final humanEntries = filteredX01Entries
-        .where((entry) => entry.opponentType == PlayerOpponentKind.human)
-        .toList();
-    final cpuEntries = filteredX01Entries
-        .where((entry) => entry.opponentType == PlayerOpponentKind.cpu)
-        .toList();
+  }
 
-    final allHeadToHead = _buildHeadToHead(player, filteredX01Entries);
-    final favoriteOpponent = allHeadToHead.isEmpty
-        ? null
-        : (List<PlayerHeadToHeadStats>.from(allHeadToHead)
-          ..sort((left, right) {
-            final byWinRate = right.winRate.compareTo(left.winRate);
-            if (byWinRate != 0) {
-              return byWinRate;
-            }
-            return right.matches.compareTo(left.matches);
-          })).first;
-    final toughestOpponent = allHeadToHead.isEmpty
-        ? null
-        : (List<PlayerHeadToHeadStats>.from(allHeadToHead)
-          ..sort((left, right) {
-            final byWinRate = left.winRate.compareTo(right.winRate);
-            if (byWinRate != 0) {
-              return byWinRate;
-            }
-            return right.matches.compareTo(left.matches);
-          })).first;
-
-    return PlayerProfileAnalytics(
-      filterRange: range,
-      filterEquipmentId: equipmentId,
-      filterStartDate: startDate,
-      filterEndDate: endDate,
-      filtered: buildWindow(range.label, filteredX01Entries),
-      filteredTrainingCount: filteredTrainingEntries.length,
-      last5: buildWindow('Letzte 5', last5Entries),
-      last10: buildWindow('Letzte 10', last10Entries),
-      last25: buildWindow('Letzte 25', last25Entries),
-      last3Months: buildWindow('Letzte 3 Monate', last3MonthsEntries),
-      allTime: buildWindow('All Time', filteredX01Entries),
-      withThrow: PlayerStatsWindow(
-        label: 'Mit Anwurf',
-        matchCount: filteredX01Entries.length,
-        winCount: filteredX01Entries.where((entry) => entry.won).length,
-        stats: const PlayerProfileStats().copyWith(
-          withThrowPoints: filteredStats.withThrowPoints,
-          withThrowDarts: filteredStats.withThrowDarts,
-        ),
-      ),
-      againstThrow: PlayerStatsWindow(
-        label: 'Ohne Anwurf',
-        matchCount: filteredX01Entries.length,
-        winCount: filteredX01Entries.where((entry) => entry.won).length,
-        stats: const PlayerProfileStats().copyWith(
-          againstThrowPoints: filteredStats.againstThrowPoints,
-          againstThrowDarts: filteredStats.againstThrowDarts,
-        ),
-      ),
-      decider: buildWindow(
-        'Decider',
-        filteredX01Entries.where((entry) => _entryHasDecider(entry)).toList(),
-      ),
-      bestOfShort: buildWindow('Best of Short', shortEntries),
-      bestOfLong: buildWindow('Best of Long', longEntries),
-      vsHuman: buildWindow('Gegen Menschen', humanEntries),
-      vsCpu: buildWindow('Gegen CPU', cpuEntries),
-      headToHead: allHeadToHead,
-      favoriteOpponent: favoriteOpponent,
-      toughestOpponent: toughestOpponent,
-      movingAverage: _buildMovingAverage(filteredX01Entries),
-      equipment: _buildEquipmentPerformance(
-        player,
-        range: range,
-        selectedEquipmentId: equipmentId,
-        startDate: startDate,
-        endDate: endDate,
-      ),
+  Future<PlayerProfileAnalytics> buildAnalyticsInBackground(
+    PlayerProfile player, {
+    PlayerAnalyticsRange range = PlayerAnalyticsRange.allTime,
+    String? equipmentId,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final handle = SimulationService.instance.startJob<Map<String, Object?>>(
+      taskType: 'build_player_analytics',
+      initialLabel: 'Spielerstatistiken werden berechnet',
+      payload: <String, Object?>{
+        'player': player.toJson(),
+        'range': range.name,
+        'equipmentId': equipmentId,
+        'startDate': startDate?.toIso8601String(),
+        'endDate': endDate?.toIso8601String(),
+      },
     );
+    final result = await handle.result;
+    return PlayerProfileAnalytics.fromJson(result);
   }
 
   MatchParticipantStats _resolveParticipantStats({
@@ -1470,9 +1615,10 @@ class PlayerRepository extends ChangeNotifier {
   }
 
   void _syncTagDefinitions() {
+    final existingDefinitions = List<String>.from(_tagDefinitions);
     _tagDefinitions
       ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
+      ..addAll(_mergeTagDefinitions(existingDefinitions, _players));
   }
 
   List<String> _mergeTagDefinitions(
@@ -1593,5 +1739,452 @@ class PlayerRepository extends ChangeNotifier {
     }
     pushRow();
     return rows;
+  }
+}
+
+PlayerProfileAnalytics buildPlayerProfileAnalytics({
+  required PlayerProfile player,
+  PlayerAnalyticsRange range = PlayerAnalyticsRange.allTime,
+  String? equipmentId,
+  DateTime? startDate,
+  DateTime? endDate,
+}) {
+  return _PlayerAnalyticsBuilder(
+    player: player,
+    range: range,
+    equipmentId: equipmentId,
+    startDate: startDate,
+    endDate: endDate,
+  ).build();
+}
+
+class _PlayerAnalyticsBuilder {
+  const _PlayerAnalyticsBuilder({
+    required this.player,
+    required this.range,
+    required this.equipmentId,
+    required this.startDate,
+    required this.endDate,
+  });
+
+  final PlayerProfile player;
+  final PlayerAnalyticsRange range;
+  final String? equipmentId;
+  final DateTime? startDate;
+  final DateTime? endDate;
+
+  PlayerProfileAnalytics build() {
+    final x01Entries =
+        player.history.where((entry) => entry.match != null).toList()
+          ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    final setupFilteredEntries = equipmentId == null
+        ? x01Entries
+        : x01Entries.where((entry) => entry.equipmentId == equipmentId).toList();
+    final dateFilteredEntries = _filterMatchEntriesByRange(
+      setupFilteredEntries,
+      startDate: startDate,
+      endDate: endDate,
+    );
+    final filteredX01Entries =
+        startDate == null && endDate == null
+            ? _applyRangeToMatchEntries(dateFilteredEntries, range)
+            : dateFilteredEntries;
+    final setupFilteredTrainingEntries = equipmentId == null
+        ? player.trainingHistory
+        : player.trainingHistory
+            .where((entry) => entry.equipmentId == equipmentId)
+            .toList();
+    final filteredTrainingEntries = _applyRangeToTrainingEntries(
+      _filterTrainingEntriesByRange(
+        setupFilteredTrainingEntries,
+        startDate: startDate,
+        endDate: endDate,
+      ),
+      startDate == null && endDate == null
+          ? range
+          : PlayerAnalyticsRange.allTime,
+    );
+    final filteredStats = _buildX01StatsFromEntries(filteredX01Entries);
+    final threeMonthsAgo = DateTime.now().subtract(const Duration(days: 90));
+    final last5Entries = filteredX01Entries.take(5).toList();
+    final last10Entries = filteredX01Entries.take(10).toList();
+    final last25Entries = filteredX01Entries.take(25).toList();
+    final last3MonthsEntries = filteredX01Entries
+        .where((entry) => entry.playedAt.isAfter(threeMonthsAgo))
+        .toList();
+    final shortEntries = filteredX01Entries.where((entry) {
+      final stats = _resolveParticipantStats(entry.match!);
+      return stats.legsPlayed <= 9;
+    }).toList();
+    final longEntries = filteredX01Entries.where((entry) {
+      final stats = _resolveParticipantStats(entry.match!);
+      return stats.legsPlayed > 9;
+    }).toList();
+    final humanEntries = filteredX01Entries
+        .where((entry) => entry.opponentType == PlayerOpponentKind.human)
+        .toList();
+    final cpuEntries = filteredX01Entries
+        .where((entry) => entry.opponentType == PlayerOpponentKind.cpu)
+        .toList();
+
+    final allHeadToHead = _buildHeadToHead(filteredX01Entries);
+    final favoriteOpponent = allHeadToHead.isEmpty
+        ? null
+        : (List<PlayerHeadToHeadStats>.from(allHeadToHead)
+              ..sort((left, right) {
+                final byWinRate = right.winRate.compareTo(left.winRate);
+                if (byWinRate != 0) {
+                  return byWinRate;
+                }
+                return right.matches.compareTo(left.matches);
+              }))
+            .first;
+    final toughestOpponent = allHeadToHead.isEmpty
+        ? null
+        : (List<PlayerHeadToHeadStats>.from(allHeadToHead)
+              ..sort((left, right) {
+                final byWinRate = left.winRate.compareTo(right.winRate);
+                if (byWinRate != 0) {
+                  return byWinRate;
+                }
+                return right.matches.compareTo(left.matches);
+              }))
+            .first;
+
+    return PlayerProfileAnalytics(
+      filterRange: range,
+      filterEquipmentId: equipmentId,
+      filterStartDate: startDate,
+      filterEndDate: endDate,
+      filtered: _buildWindow(range.label, filteredX01Entries),
+      filteredTrainingCount: filteredTrainingEntries.length,
+      last5: _buildWindow('Letzte 5', last5Entries),
+      last10: _buildWindow('Letzte 10', last10Entries),
+      last25: _buildWindow('Letzte 25', last25Entries),
+      last3Months: _buildWindow('Letzte 3 Monate', last3MonthsEntries),
+      allTime: _buildWindow('All Time', filteredX01Entries),
+      withThrow: PlayerStatsWindow(
+        label: 'Mit Anwurf',
+        matchCount: filteredX01Entries.length,
+        winCount: filteredX01Entries.where((entry) => entry.won).length,
+        stats: const PlayerProfileStats().copyWith(
+          withThrowPoints: filteredStats.withThrowPoints,
+          withThrowDarts: filteredStats.withThrowDarts,
+        ),
+      ),
+      againstThrow: PlayerStatsWindow(
+        label: 'Ohne Anwurf',
+        matchCount: filteredX01Entries.length,
+        winCount: filteredX01Entries.where((entry) => entry.won).length,
+        stats: const PlayerProfileStats().copyWith(
+          againstThrowPoints: filteredStats.againstThrowPoints,
+          againstThrowDarts: filteredStats.againstThrowDarts,
+        ),
+      ),
+      decider: _buildWindow(
+        'Decider',
+        filteredX01Entries.where(_entryHasDecider).toList(),
+      ),
+      bestOfShort: _buildWindow('Best of Short', shortEntries),
+      bestOfLong: _buildWindow('Best of Long', longEntries),
+      vsHuman: _buildWindow('Gegen Menschen', humanEntries),
+      vsCpu: _buildWindow('Gegen CPU', cpuEntries),
+      headToHead: allHeadToHead,
+      favoriteOpponent: favoriteOpponent,
+      toughestOpponent: toughestOpponent,
+      movingAverage: _buildMovingAverage(filteredX01Entries),
+      equipment: _buildEquipmentPerformance(filteredX01Entries, filteredTrainingEntries),
+    );
+  }
+
+  PlayerStatsWindow _buildWindow(
+    String label,
+    List<PlayerMatchHistoryEntry> entries,
+  ) {
+    return PlayerStatsWindow(
+      label: label,
+      matchCount: entries.length,
+      winCount: entries.where((entry) => entry.won).length,
+      stats: _buildX01StatsFromEntries(entries),
+    );
+  }
+
+  MatchParticipantStats _resolveParticipantStats(MatchResultSummary result) {
+    for (final participant in result.participants) {
+      if (participant.participantId == player.id) {
+        return participant;
+      }
+    }
+    for (final participant in result.participants) {
+      if (participant.participantName.trim().toLowerCase() ==
+          player.name.trim().toLowerCase()) {
+        return participant;
+      }
+    }
+    return result.participants.first;
+  }
+
+  PlayerProfileStats _buildX01StatsFromEntries(
+    List<PlayerMatchHistoryEntry> entries,
+  ) {
+    var aggregate = const PlayerProfileStats();
+    for (final entry in entries) {
+      final match = entry.match;
+      if (match == null) {
+        continue;
+      }
+      final participantStats = _resolveParticipantStats(match);
+      aggregate = aggregate.merge(
+        PlayerProfileStats.fromMatchParticipantStats(participantStats).merge(
+          _buildVisitDerivedStats(participantStats.participantId, match),
+        ),
+      );
+    }
+    return aggregate;
+  }
+
+  PlayerProfileStats _buildVisitDerivedStats(
+    String participantId,
+    MatchResultSummary result,
+  ) {
+    var firstThreePoints = 0.0;
+    var firstThreeDarts = 0;
+    var hundredPlusCheckouts = 0;
+    for (final leg in result.legs) {
+      final firstVisit = leg.visits.cast<MatchVisitEntry?>().firstWhere(
+            (entry) => entry != null && entry.side == participantId,
+            orElse: () => null,
+          );
+      if (firstVisit != null) {
+        firstThreePoints += firstVisit.scoredPoints;
+        firstThreeDarts += firstVisit.dartsUsed;
+      }
+      for (final visit in leg.visits) {
+        if (visit.side != participantId) {
+          continue;
+        }
+        if (visit.checkout && (visit.checkoutValue ?? 0) >= 100) {
+          hundredPlusCheckouts += 1;
+        }
+      }
+    }
+    return PlayerProfileStats(
+      hundredPlusCheckouts: hundredPlusCheckouts,
+      firstThreePoints: firstThreePoints,
+      firstThreeDarts: firstThreeDarts,
+    );
+  }
+
+  List<PlayerHeadToHeadStats> _buildHeadToHead(
+    List<PlayerMatchHistoryEntry> entries,
+  ) {
+    final grouped = <String, List<PlayerMatchHistoryEntry>>{};
+    for (final entry in entries) {
+      grouped.putIfAbsent(entry.opponentName, () => <PlayerMatchHistoryEntry>[]).add(entry);
+    }
+    final summaries = grouped.entries.map((entry) {
+      final matches = entry.value.length;
+      final wins = entry.value.where((item) => item.won).length;
+      final average =
+          entry.value.fold<double>(0, (sum, item) => sum + item.average) / matches;
+      final lastPlayedAt = entry.value
+          .map((item) => item.playedAt)
+          .reduce((left, right) => left.isAfter(right) ? left : right);
+      return PlayerHeadToHeadStats(
+        opponentName: entry.key,
+        opponentType: entry.value.first.opponentType,
+        matches: matches,
+        wins: wins,
+        average: average,
+        lastPlayedAt: lastPlayedAt,
+      );
+    }).toList();
+    summaries.sort((left, right) => right.matches.compareTo(left.matches));
+    return summaries;
+  }
+
+  List<double> _buildMovingAverage(List<PlayerMatchHistoryEntry> entries) {
+    if (entries.isEmpty) {
+      return const <double>[];
+    }
+    final chronological = entries.toList()
+      ..sort((left, right) => left.playedAt.compareTo(right.playedAt));
+    final result = <double>[];
+    for (var index = 0; index < chronological.length; index += 1) {
+      final start = index < 4 ? 0 : index - 4;
+      final window = chronological.sublist(start, index + 1);
+      final average =
+          window.fold<double>(0, (sum, item) => sum + item.average) / window.length;
+      result.add(average);
+    }
+    return result;
+  }
+
+  bool _entryHasDecider(PlayerMatchHistoryEntry entry) {
+    final match = entry.match;
+    if (match == null) {
+      return false;
+    }
+    return match.legs.any((leg) => leg.decidingLeg);
+  }
+
+  List<PlayerMatchHistoryEntry> _applyRangeToMatchEntries(
+    List<PlayerMatchHistoryEntry> entries,
+    PlayerAnalyticsRange range,
+  ) {
+    final sorted = entries.toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    switch (range) {
+      case PlayerAnalyticsRange.allTime:
+        return sorted;
+      case PlayerAnalyticsRange.last5:
+        return sorted.take(5).toList();
+      case PlayerAnalyticsRange.last10:
+        return sorted.take(10).toList();
+      case PlayerAnalyticsRange.last25:
+        return sorted.take(25).toList();
+      case PlayerAnalyticsRange.last3Months:
+        final threshold = DateTime.now().subtract(const Duration(days: 90));
+        return sorted.where((entry) => entry.playedAt.isAfter(threshold)).toList();
+    }
+  }
+
+  List<PlayerMatchHistoryEntry> _filterMatchEntriesByRange(
+    List<PlayerMatchHistoryEntry> entries, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
+    if (startDate == null && endDate == null) {
+      return entries.toList()
+        ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    }
+    final normalizedStart = startDate == null ? null : _startOfDay(startDate);
+    final normalizedEnd = endDate == null ? null : _endOfDay(endDate);
+    return entries.where((entry) {
+      final playedAt = entry.playedAt.toLocal();
+      if (normalizedStart != null && playedAt.isBefore(normalizedStart)) {
+        return false;
+      }
+      if (normalizedEnd != null && playedAt.isAfter(normalizedEnd)) {
+        return false;
+      }
+      return true;
+    }).toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+  }
+
+  List<PlayerTrainingEntry> _applyRangeToTrainingEntries(
+    List<PlayerTrainingEntry> entries,
+    PlayerAnalyticsRange range,
+  ) {
+    final sorted = entries.toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    switch (range) {
+      case PlayerAnalyticsRange.allTime:
+        return sorted;
+      case PlayerAnalyticsRange.last5:
+        return sorted.take(5).toList();
+      case PlayerAnalyticsRange.last10:
+        return sorted.take(10).toList();
+      case PlayerAnalyticsRange.last25:
+        return sorted.take(25).toList();
+      case PlayerAnalyticsRange.last3Months:
+        final threshold = DateTime.now().subtract(const Duration(days: 90));
+        return sorted.where((entry) => entry.playedAt.isAfter(threshold)).toList();
+    }
+  }
+
+  List<PlayerTrainingEntry> _filterTrainingEntriesByRange(
+    List<PlayerTrainingEntry> entries, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
+    if (startDate == null && endDate == null) {
+      return entries.toList()
+        ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+    }
+    final normalizedStart = startDate == null ? null : _startOfDay(startDate);
+    final normalizedEnd = endDate == null ? null : _endOfDay(endDate);
+    return entries.where((entry) {
+      final playedAt = entry.playedAt.toLocal();
+      if (normalizedStart != null && playedAt.isBefore(normalizedStart)) {
+        return false;
+      }
+      if (normalizedEnd != null && playedAt.isAfter(normalizedEnd)) {
+        return false;
+      }
+      return true;
+    }).toList()
+      ..sort((left, right) => right.playedAt.compareTo(left.playedAt));
+  }
+
+  DateTime _startOfDay(DateTime value) {
+    final local = value.toLocal();
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  DateTime _endOfDay(DateTime value) {
+    final local = value.toLocal();
+    return DateTime(local.year, local.month, local.day, 23, 59, 59, 999, 999);
+  }
+
+  List<PlayerEquipmentPerformance> _buildEquipmentPerformance(
+    List<PlayerMatchHistoryEntry> filteredHistory,
+    List<PlayerTrainingEntry> filteredTrainings,
+  ) {
+    final setupsById = <String, PlayerEquipmentSetup>{
+      for (final setup in player.equipmentSetups) setup.id: setup,
+    };
+    final buckets =
+        <String, ({List<PlayerMatchHistoryEntry> matches, List<PlayerTrainingEntry> trainings})>{};
+
+    for (final entry in filteredHistory) {
+      final currentEquipmentId = entry.equipmentId;
+      if (currentEquipmentId == null ||
+          entry.match == null ||
+          (equipmentId != null && currentEquipmentId != equipmentId)) {
+        continue;
+      }
+      final bucket = buckets[currentEquipmentId] ??
+          (matches: <PlayerMatchHistoryEntry>[], trainings: <PlayerTrainingEntry>[]);
+      bucket.matches.add(entry);
+      buckets[currentEquipmentId] = bucket;
+    }
+    for (final entry in filteredTrainings) {
+      final currentEquipmentId = entry.equipmentId;
+      if (currentEquipmentId == null ||
+          (equipmentId != null && currentEquipmentId != equipmentId)) {
+        continue;
+      }
+      final bucket = buckets[currentEquipmentId] ??
+          (matches: <PlayerMatchHistoryEntry>[], trainings: <PlayerTrainingEntry>[]);
+      bucket.trainings.add(entry);
+      buckets[currentEquipmentId] = bucket;
+    }
+
+    final performances = <PlayerEquipmentPerformance>[];
+    for (final bucket in buckets.entries) {
+      final setup = setupsById[bucket.key];
+      final firstMatchName = bucket.value.matches.isEmpty
+          ? null
+          : bucket.value.matches.first.equipmentName;
+      final firstTrainingName = bucket.value.trainings.isEmpty
+          ? null
+          : bucket.value.trainings.first.equipmentName;
+      final name = setup?.name ?? firstMatchName ?? firstTrainingName ?? 'Equipment';
+      final stats = _buildX01StatsFromEntries(bucket.value.matches);
+      performances.add(
+        PlayerEquipmentPerformance(
+          equipmentId: bucket.key,
+          equipmentName: name,
+          matchCount: bucket.value.matches.length,
+          trainingCount: bucket.value.trainings.length,
+          stats: stats,
+          winCount: bucket.value.matches.where((entry) => entry.won).length,
+        ),
+      );
+    }
+    performances.sort((left, right) => right.matchCount.compareTo(left.matchCount));
+    return performances;
   }
 }

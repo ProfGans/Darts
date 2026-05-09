@@ -65,15 +65,23 @@ class TournamentEngine {
     for (var index = 0; index < warmupScores.length; index += 1) {
       final score = warmupScores[index];
       for (var dartsLeft = 1; dartsLeft <= 3; dartsLeft += 1) {
-        for (final profile in uniqueProfiles) {
-          _simulator.botEngine.decideAim(
-            profile: profile,
-            score: score,
-            dartsRemaining: dartsLeft,
-          );
+        for (final checkoutRequirement in CheckoutRequirement.values) {
+          for (final profile in uniqueProfiles) {
+            _simulator.botEngine.decideAim(
+              profile: profile,
+              score: score,
+              dartsRemaining: dartsLeft,
+              checkoutRequirement: checkoutRequirement,
+            );
+          }
         }
       }
-      _simulator.botEngine.findPreferredLeaveTarget(score);
+      for (final checkoutRequirement in CheckoutRequirement.values) {
+        _simulator.botEngine.findPreferredLeaveTarget(
+          score,
+          checkoutRequirement: checkoutRequirement,
+        );
+      }
       for (final checkoutRequirement in CheckoutRequirement.values) {
         _simulator.warmCheckoutOpportunityCache(
           score: score,

@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:isolate';
+
+import 'package:flutter/foundation.dart';
 
 import 'local_store.dart';
 
@@ -33,7 +36,10 @@ class AppStorage {
   }
 
   Future<void> writeJson(String key, Object value) async {
-    await _store.write(key, jsonEncode(value));
+    final encoded = kIsWeb
+        ? jsonEncode(value)
+        : await Isolate.run<String>(() => jsonEncode(value));
+    await _store.write(key, encoded);
   }
 
   Future<void> delete(String key) => _store.delete(key);

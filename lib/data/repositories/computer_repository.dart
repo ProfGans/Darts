@@ -12,10 +12,12 @@ import '../../presentation/match/bob27_result_models.dart';
 import '../../presentation/match/cricket_result_models.dart';
 import '../../presentation/match/match_result_models.dart';
 import '../../domain/x01/x01_match_simulator.dart';
+import '../models/app_settings.dart';
 import '../models/generated_name_catalog.dart';
 import '../models/nationality_catalog.dart';
 import '../models/computer_player.dart';
 import '../background/simulation_service.dart';
+import '../simulation/theo_resolution_lookup.dart';
 import 'settings_repository.dart';
 import '../storage/app_storage.dart';
 
@@ -29,6 +31,56 @@ class ComputerSkillResolution {
   final int skill;
   final int finishingSkill;
   final double theoreticalAverage;
+}
+
+class ComputerPlayerDraft {
+  const ComputerPlayerDraft({
+    required this.name,
+    required this.targetTheoreticalAverage,
+    this.skill,
+    this.finishingSkill,
+    this.age,
+    this.birthDate,
+    this.nationality,
+    this.tags = const <String>[],
+    this.source = ComputerPlayerSource.manual,
+  });
+
+  final String name;
+  final double targetTheoreticalAverage;
+  final int? skill;
+  final int? finishingSkill;
+  final int? age;
+  final DateTime? birthDate;
+  final String? nationality;
+  final List<String> tags;
+  final ComputerPlayerSource source;
+}
+
+class BulkComputerPlayerEdit {
+  const BulkComputerPlayerEdit({
+    required this.ids,
+    this.nationality,
+    this.clearNationality = false,
+    this.minimumAge,
+    this.maximumAge,
+    this.clearAge = false,
+    this.addTags = const <String>[],
+    this.removeTags = const <String>[],
+    this.isFavorite,
+    this.isProtected,
+  });
+
+  final Iterable<String> ids;
+  final String? nationality;
+  final bool clearNationality;
+  final int? minimumAge;
+  final int? maximumAge;
+  final bool clearAge;
+  final List<String> addTags;
+  final List<String> removeTags;
+  final bool? isFavorite;
+  final bool? isProtected;
 }
 
 class _SkillResolutionCandidate {
@@ -139,6 +191,7 @@ class ComputerRepository extends ChangeNotifier {
   static const int _manualTheoReferenceMatchCount = 24;
 
   final BotEngine _botEngine = BotEngine(recordPerformanceLogs: false);
+  final BotEngine _lookupBotEngine = BotEngine(recordPerformanceLogs: false);
   late final X01MatchSimulator _theoreticalMatchSimulator = X01MatchSimulator(
     matchEngine: X01MatchEngine(),
     botEngine: _botEngine,
@@ -150,6 +203,9 @@ class ComputerRepository extends ChangeNotifier {
   final List<_RepositorySnapshot> _undoStack = <_RepositorySnapshot>[];
   final Map<String, ComputerSkillResolution> _resolutionCache =
       <String, ComputerSkillResolution>{};
+  final Map<String, TheoLookupResolution> _lookupResolutionCache =
+      <String, TheoLookupResolution>{};
+  final Map<String, double> _lookupAverageCache = <String, double>{};
   final Map<String, _TheoAverageCacheEntry> _theoreticalAverageCache =
       <String, _TheoAverageCacheEntry>{};
   int _changeToken = 0;
@@ -187,12 +243,7 @@ class ComputerRepository extends ChangeNotifier {
         : (storedJson ?? bundledJson);
     if (json == null) {
       _seedDefaults();
-      _tagDefinitions
-        ..clear()
-        ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
-      _nationalityDefinitions
-        ..clear()
-        ..addAll(_mergeNationalityDefinitions(_nationalityDefinitions, _players));
+      _resyncDefinitions();
       _sortPlayers();
       notifyListeners();
       await _persist();
@@ -509,17 +560,33 @@ class ComputerRepository extends ChangeNotifier {
     List<String> tags = const <String>[],
     ComputerPlayerSource source = ComputerPlayerSource.manual,
   }) {
+    addPlayerDraft(
+      ComputerPlayerDraft(
+        name: name,
+        targetTheoreticalAverage: targetTheoreticalAverage,
+        skill: skill,
+        finishingSkill: finishingSkill,
+        age: age,
+        birthDate: birthDate,
+        nationality: nationality,
+        tags: tags,
+        source: source,
+      ),
+    );
+  }
+
+  void addPlayerDraft(ComputerPlayerDraft draft) {
     _captureSnapshot();
-    final trimmed = name.trim();
+    final trimmed = draft.name.trim();
     if (trimmed.isEmpty) {
       return;
     }
 
     final now = DateTime.now();
     final resolution =
-        resolveSkillsForTheoreticalAverageQuick(targetTheoreticalAverage);
-    final normalizedSkill = skill?.clamp(1, 1000).toInt();
-    final normalizedFinishingSkill = finishingSkill?.clamp(1, 1000).toInt();
+        resolveSkillsForTheoreticalAverageQuick(draft.targetTheoreticalAverage);
+    final normalizedSkill = draft.skill?.clamp(1, 1000).toInt();
+    final normalizedFinishingSkill = draft.finishingSkill?.clamp(1, 1000).toInt();
     final resolvedSkill = normalizedSkill ?? resolution.skill;
     final resolvedFinishingSkill =
         normalizedFinishingSkill ?? resolution.finishingSkill;
@@ -530,50 +597,12 @@ class ComputerRepository extends ChangeNotifier {
                 finishingSkill: resolvedFinishingSkill,
               )
             : resolution.theoreticalAverage;
-    final normalizedNationality = _normalizeNationality(nationality);
-    final normalizedTags = _normalizeTags(tags);
-    _tagDefinitions
-      ..clear()
-      ..addAll(
-        _mergeTagDefinitions(_tagDefinitions, <ComputerPlayer>[
-          ComputerPlayer(
-            id: '',
-            name: trimmed,
-            skill: resolvedSkill,
-            finishingSkill: resolvedFinishingSkill,
-            theoreticalAverage: resolvedTheo,
-            createdAt: now,
-            updatedAt: now,
-            lastModifiedReason: 'manual_create',
-            source: source,
-            age: age ?? _deriveAgeFromBirthDate(birthDate),
-            birthDate: birthDate,
-            nationality: normalizedNationality,
-            tags: normalizedTags,
-          ),
-        ]),
-      );
-    _nationalityDefinitions
-      ..clear()
-      ..addAll(
-        _mergeNationalityDefinitions(_nationalityDefinitions, <ComputerPlayer>[
-          ComputerPlayer(
-            id: '',
-            name: trimmed,
-            skill: resolvedSkill,
-            finishingSkill: resolvedFinishingSkill,
-            theoreticalAverage: resolvedTheo,
-            createdAt: now,
-            updatedAt: now,
-            lastModifiedReason: 'manual_create',
-            source: source,
-            age: age ?? _deriveAgeFromBirthDate(birthDate),
-            birthDate: birthDate,
-            nationality: normalizedNationality,
-            tags: normalizedTags,
-          ),
-        ]),
-      );
+    final normalizedNationality = _normalizeNationality(draft.nationality);
+    final normalizedTags = _normalizeTags(draft.tags);
+    final normalizedBirthData = _normalizeBirthData(
+      age: draft.age,
+      birthDate: draft.birthDate,
+    );
     _players.add(
       ComputerPlayer(
         id: 'computer-${DateTime.now().microsecondsSinceEpoch}-${trimmed.length}',
@@ -584,13 +613,14 @@ class ComputerRepository extends ChangeNotifier {
         createdAt: now,
         updatedAt: now,
         lastModifiedReason: 'manual_create',
-        source: source,
-        age: age ?? _deriveAgeFromBirthDate(birthDate),
-        birthDate: birthDate,
+        source: draft.source,
+        age: normalizedBirthData.age,
+        birthDate: normalizedBirthData.birthDate,
         nationality: normalizedNationality,
         tags: normalizedTags,
       ),
     );
+    _resyncDefinitions();
     _sortPlayers();
     notifyListeners();
     unawaited(_persist());
@@ -637,6 +667,10 @@ class ComputerRepository extends ChangeNotifier {
           explicitAgeRange ?? _suggestAgeRangeForAverage(targetAverage);
       final age = _randomFromRange(ageRange, random);
       final birthDate = _randomBirthDateForAge(age, random);
+      final normalizedBirthData = _normalizeBirthData(
+        age: age,
+        birthDate: birthDate,
+      );
       final normalizedTags = _normalizeTags(
         <String>[
           ...tags,
@@ -666,8 +700,8 @@ class ComputerRepository extends ChangeNotifier {
           updatedAt: now,
           lastModifiedReason: 'bulk_create',
           source: ComputerPlayerSource.bulk,
-          age: age,
-          birthDate: birthDate,
+          age: normalizedBirthData.age,
+          birthDate: normalizedBirthData.birthDate,
           nationality: nationality,
           tags: normalizedTags,
         ),
@@ -675,12 +709,7 @@ class ComputerRepository extends ChangeNotifier {
     }
 
     _players.addAll(nextPlayers);
-    _tagDefinitions
-      ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
-    _nationalityDefinitions
-      ..clear()
-      ..addAll(_mergeNationalityDefinitions(_nationalityDefinitions, _players));
+    _resyncDefinitions();
     _sortPlayers();
     notifyListeners();
     unawaited(_persist());
@@ -709,17 +738,10 @@ class ComputerRepository extends ChangeNotifier {
     }
 
     final normalizedPlayers = _normalizePlayers(nextPlayers);
-    _tagDefinitions
-      ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, normalizedPlayers));
-    _nationalityDefinitions
-      ..clear()
-      ..addAll(
-        _mergeNationalityDefinitions(_nationalityDefinitions, normalizedPlayers),
-      );
     _players
       ..clear()
       ..addAll(normalizedPlayers);
+    _resyncDefinitions();
     _sortPlayers();
     notifyListeners();
     await _persist();
@@ -761,6 +783,10 @@ class ComputerRepository extends ChangeNotifier {
             : resolution.theoreticalAverage;
     final normalizedNationality = _normalizeNationality(nationality);
     final normalizedTags = _normalizeTags(tags);
+    final normalizedBirthData = _normalizeBirthData(
+      age: age,
+      birthDate: birthDate,
+    );
     _players[index] = _players[index].copyWith(
       name: name.trim(),
       skill: resolvedSkill,
@@ -771,20 +797,15 @@ class ComputerRepository extends ChangeNotifier {
       source: source ?? _players[index].source,
       isFavorite: isFavorite ?? _players[index].isFavorite,
       isProtected: isProtected ?? _players[index].isProtected,
-      age: age ?? _deriveAgeFromBirthDate(birthDate),
-      clearAge: age == null && birthDate == null,
-      birthDate: birthDate,
-      clearBirthDate: age == null && birthDate == null,
+      age: normalizedBirthData.age,
+      clearAge: normalizedBirthData.age == null,
+      birthDate: normalizedBirthData.birthDate,
+      clearBirthDate: normalizedBirthData.birthDate == null,
       nationality: normalizedNationality,
       clearNationality: normalizedNationality == null,
       tags: normalizedTags,
     );
-    _tagDefinitions
-      ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
-    _nationalityDefinitions
-      ..clear()
-      ..addAll(_mergeNationalityDefinitions(_nationalityDefinitions, _players));
+    _resyncDefinitions();
     _sortPlayers();
     notifyListeners();
     unawaited(_persist());
@@ -801,6 +822,7 @@ class ComputerRepository extends ChangeNotifier {
       return;
     }
     _tagDefinitions.add(normalizedName);
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -810,12 +832,6 @@ class ComputerRepository extends ChangeNotifier {
     final normalizedTag = _normalizeText(tag);
     if (normalizedTag == null || _players.isEmpty) {
       return;
-    }
-
-    if (_tagDefinitions.every(
-      (entry) => entry.toLowerCase() != normalizedTag.toLowerCase(),
-    )) {
-      _tagDefinitions.add(normalizedTag);
     }
 
     for (var index = 0; index < _players.length; index += 1) {
@@ -833,9 +849,8 @@ class ComputerRepository extends ChangeNotifier {
       );
     }
 
-    _tagDefinitions
-      ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
+    _tagDefinitions.add(normalizedTag);
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -851,6 +866,7 @@ class ComputerRepository extends ChangeNotifier {
       return;
     }
     _nationalityDefinitions.add(normalizedName);
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -859,10 +875,15 @@ class ComputerRepository extends ChangeNotifier {
     double targetTheoreticalAverage,
   ) {
     final target = targetTheoreticalAverage.clamp(0, 180).toDouble();
-    final cacheKey = target.toStringAsFixed(4);
+    final cacheKey = _resolutionCacheKey('exact', target);
     final cached = _resolutionCache[cacheKey];
     if (cached != null) {
       return cached;
+    }
+    final lookupResolution = _resolveSkillsFromLookupGrid(target);
+    if (lookupResolution != null) {
+      _resolutionCache[cacheKey] = lookupResolution;
+      return lookupResolution;
     }
     final bestEqual = _findBestEqualCandidate(target);
     final bestSplit = _findBestSplitCandidate(target, fallback: bestEqual);
@@ -879,10 +900,15 @@ class ComputerRepository extends ChangeNotifier {
     double targetTheoreticalAverage,
   ) {
     final target = targetTheoreticalAverage.clamp(0, 180).toDouble();
-    final cacheKey = 'quick:${target.toStringAsFixed(4)}';
+    final cacheKey = _resolutionCacheKey('quick', target);
     final cached = _resolutionCache[cacheKey];
     if (cached != null) {
       return cached;
+    }
+    final lookupResolution = _resolveSkillsFromLookupGrid(target);
+    if (lookupResolution != null) {
+      _resolutionCache[cacheKey] = lookupResolution;
+      return lookupResolution;
     }
     if (_players.isEmpty) {
       return resolveSkillsForTheoreticalAverage(target);
@@ -948,6 +974,88 @@ class ComputerRepository extends ChangeNotifier {
     );
     _resolutionCache[cacheKey] = resolution;
     return resolution;
+  }
+
+  ComputerSkillResolution? _resolveSkillsFromLookupGrid(double targetAverage) {
+    final settings = SettingsRepository.instance.settings;
+    final effectiveRadius =
+        SettingsRepository.effectiveRadiusPercentForDisplay(
+      settings.radiusCalibrationPercent,
+    );
+    final effectiveSpread =
+        SettingsRepository.effectiveSpreadPercentForDisplay(
+      settings.simulationSpreadPercent,
+    );
+    final minSupportedEffectiveRadius =
+        SettingsRepository.effectiveRadiusPercentForDisplay(90);
+    final maxSupportedEffectiveRadius =
+        SettingsRepository.effectiveRadiusPercentForDisplay(110);
+    final supportedEffectiveSpread =
+        SettingsRepository.effectiveSpreadPercentForDisplay(
+      AppSettings.defaultSimulationSpreadPercent,
+    );
+    if (!TheoResolutionLookup.usesSupportedGrid(
+      targetAverage: targetAverage,
+      effectiveRadiusCalibrationPercent: effectiveRadius,
+      effectiveSimulationSpreadPercent: effectiveSpread,
+      minSupportedEffectiveRadiusCalibrationPercent:
+          minSupportedEffectiveRadius,
+      maxSupportedEffectiveRadiusCalibrationPercent:
+          maxSupportedEffectiveRadius,
+      fixedSupportedEffectiveSimulationSpreadPercent: supportedEffectiveSpread,
+    )) {
+      return null;
+    }
+    final resolution = TheoResolutionLookup.resolve(
+      targetAverage: targetAverage,
+      effectiveRadiusCalibrationPercent: effectiveRadius,
+      effectiveSimulationSpreadPercent: effectiveSpread,
+      minSupportedEffectiveRadiusCalibrationPercent:
+          minSupportedEffectiveRadius,
+      maxSupportedEffectiveRadiusCalibrationPercent:
+          maxSupportedEffectiveRadius,
+      fixedSupportedEffectiveSimulationSpreadPercent: supportedEffectiveSpread,
+      estimateAverage: (skill, finishingSkill) {
+        final cacheKey = [
+          skill,
+          finishingSkill,
+          effectiveRadius,
+          effectiveSpread,
+        ].join(':');
+        final cached = _lookupAverageCache[cacheKey];
+        if (cached != null) {
+          return cached;
+        }
+        final profile = BotProfile(
+          skill: skill,
+          finishingSkill: finishingSkill,
+          radiusCalibrationPercent: effectiveRadius,
+          simulationSpreadPercent: effectiveSpread,
+        );
+          final average = _lookupBotEngine
+              .estimateFallbackThreeDartAverage(profile)
+              .clamp(0, 180)
+              .toDouble();
+        _lookupAverageCache[cacheKey] = average;
+        return average;
+      },
+      cache: _lookupResolutionCache,
+    );
+    return ComputerSkillResolution(
+      skill: resolution.skill,
+      finishingSkill: resolution.finishingSkill,
+      theoreticalAverage: resolution.theoreticalAverage,
+    );
+  }
+
+  String _resolutionCacheKey(String prefix, double targetAverage) {
+    final settings = SettingsRepository.instance.settings;
+    return [
+      prefix,
+      targetAverage.toStringAsFixed(4),
+      settings.radiusCalibrationPercent,
+      settings.simulationSpreadPercent,
+    ].join('|');
   }
 
   Future<void> refreshTheoreticalAverages({
@@ -1139,6 +1247,7 @@ class ComputerRepository extends ChangeNotifier {
   void deletePlayer(String id) {
     _captureSnapshot();
     _players.removeWhere((player) => player.id == id && !player.isProtected);
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -1152,6 +1261,7 @@ class ComputerRepository extends ChangeNotifier {
     _players.removeWhere(
       (player) => idSet.contains(player.id) && !player.isProtected,
     );
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -1198,18 +1308,37 @@ class ComputerRepository extends ChangeNotifier {
     bool? isFavorite,
     bool? isProtected,
   }) {
+    bulkUpdatePlayersWithEdit(
+      BulkComputerPlayerEdit(
+        ids: ids,
+        nationality: nationality,
+        clearNationality: clearNationality,
+        minimumAge: minimumAge,
+        maximumAge: maximumAge,
+        clearAge: clearAge,
+        addTags: addTags,
+        removeTags: removeTags,
+        isFavorite: isFavorite,
+        isProtected: isProtected,
+      ),
+    );
+  }
+
+  void bulkUpdatePlayersWithEdit(BulkComputerPlayerEdit edit) {
     _captureSnapshot();
-    final idSet = ids.toSet();
+    final idSet = edit.ids.toSet();
     if (idSet.isEmpty) {
       return;
     }
 
-    final normalizedNationality = clearNationality
+    final normalizedNationality = edit.clearNationality
         ? null
-        : _normalizeNationality(nationality);
-    final normalizedAddTags = _normalizeTags(addTags);
-    final normalizedRemoveTags = _normalizeTags(removeTags);
-    final ageRange = clearAge ? null : _resolveOptionalRange(minimumAge, maximumAge);
+        : _normalizeNationality(edit.nationality);
+    final normalizedAddTags = _normalizeTags(edit.addTags);
+    final normalizedRemoveTags = _normalizeTags(edit.removeTags);
+    final ageRange = edit.clearAge
+        ? null
+        : _resolveOptionalRange(edit.minimumAge, edit.maximumAge);
     final random = Random();
 
     for (var index = 0; index < _players.length; index += 1) {
@@ -1232,32 +1361,41 @@ class ComputerRepository extends ChangeNotifier {
         nextTags.add(tag);
       }
 
-      final nextAge = clearAge
+      final nextAge = edit.clearAge
           ? null
           : ageRange == null
-              ? player.age
+              ? player.effectiveAge
               : _randomFromRange(ageRange, random);
+      final nextBirthData = edit.clearAge
+          ? (age: null as int?, birthDate: null as DateTime?)
+          : ageRange == null
+              ? _normalizeBirthData(
+                  age: player.age,
+                  birthDate: player.birthDate,
+                )
+              : _birthDataForAge(
+                  age: nextAge,
+                  random: random,
+                );
 
       _players[index] = player.copyWith(
-        nationality: clearNationality ? null : normalizedNationality ?? player.nationality,
-        clearNationality: clearNationality,
-        age: nextAge,
-        clearAge: clearAge,
+        nationality: edit.clearNationality
+            ? null
+            : normalizedNationality ?? player.nationality,
+        clearNationality: edit.clearNationality,
+        age: nextBirthData.age,
+        clearAge: nextBirthData.age == null,
+        birthDate: nextBirthData.birthDate,
+        clearBirthDate: nextBirthData.birthDate == null,
         tags: nextTags,
-        isFavorite: isFavorite ?? player.isFavorite,
-        isProtected: isProtected ?? player.isProtected,
+        isFavorite: edit.isFavorite ?? player.isFavorite,
+        isProtected: edit.isProtected ?? player.isProtected,
         updatedAt: DateTime.now(),
         lastModifiedReason: 'bulk_edit',
-        );
-        _scheduleTheoreticalAverageCachePersist();
-      }
+      );
+    }
 
-    _tagDefinitions
-      ..clear()
-      ..addAll(_mergeTagDefinitions(_tagDefinitions, _players));
-    _nationalityDefinitions
-      ..clear()
-      ..addAll(_mergeNationalityDefinitions(_nationalityDefinitions, _players));
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -1265,6 +1403,7 @@ class ComputerRepository extends ChangeNotifier {
   void clearPlayers() {
     _captureSnapshot();
     _players.clear();
+    _resyncDefinitions();
     notifyListeners();
     unawaited(_persist());
   }
@@ -1822,6 +1961,15 @@ class ComputerRepository extends ChangeNotifier {
     return const JsonEncoder.withIndent('  ').convert(_createStoragePayload());
   }
 
+  Future<String> exportAsJsonStringInBackground() async {
+    final handle = SimulationService.instance.startJob<String>(
+      taskType: 'export_computer_players_json',
+      initialLabel: 'Computer-Spieler werden exportiert',
+      payload: _createStoragePayload().cast<String, Object?>(),
+    );
+    return handle.result;
+  }
+
   String exportAsCsvString() {
     final rows = <List<String>>[
       <String>[
@@ -1870,6 +2018,17 @@ class ComputerRepository extends ChangeNotifier {
     return rows.map(_toCsvRow).join('\n');
   }
 
+  Future<String> exportAsCsvStringInBackground() async {
+    final handle = SimulationService.instance.startJob<String>(
+      taskType: 'export_computer_players_csv',
+      initialLabel: 'Computer-Spieler werden exportiert',
+      payload: <String, Object?>{
+        'players': _players.map((entry) => entry.toJson()).toList(),
+      },
+    );
+    return handle.result;
+  }
+
   Future<void> importFromJsonString(
     String raw, {
     bool replaceExisting = false,
@@ -1885,6 +2044,26 @@ class ComputerRepository extends ChangeNotifier {
           ),
         )
         .toList();
+    await importPlayers(players, replaceExisting: replaceExisting);
+  }
+
+  Future<void> importFromJsonStringInBackground(
+    String raw, {
+    bool replaceExisting = false,
+  }) async {
+    final handle = SimulationService.instance.startJob<Map<String, Object?>>(
+      taskType: 'import_computer_players_json',
+      initialLabel: 'Computer-Spieler werden importiert',
+      payload: <String, Object?>{
+        'raw': raw,
+      },
+    );
+    final result = await handle.result;
+    final players =
+        (result['players'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => ComputerPlayer.fromJson(entry.cast<String, dynamic>()))
+            .toList();
     await importPlayers(players, replaceExisting: replaceExisting);
   }
 
@@ -1948,6 +2127,26 @@ class ComputerRepository extends ChangeNotifier {
         ),
       );
     }
+    await importPlayers(players, replaceExisting: replaceExisting);
+  }
+
+  Future<void> importFromCsvStringInBackground(
+    String raw, {
+    bool replaceExisting = false,
+  }) async {
+    final handle = SimulationService.instance.startJob<Map<String, Object?>>(
+      taskType: 'import_computer_players_csv',
+      initialLabel: 'Computer-Spieler werden importiert',
+      payload: <String, Object?>{
+        'raw': raw,
+      },
+    );
+    final result = await handle.result;
+    final players =
+        (result['players'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => ComputerPlayer.fromJson(entry.cast<String, dynamic>()))
+            .toList();
     await importPlayers(players, replaceExisting: replaceExisting);
   }
 
@@ -2027,6 +2226,35 @@ class ComputerRepository extends ChangeNotifier {
       years -= 1;
     }
     return years < 0 ? null : years;
+  }
+
+  ({int? age, DateTime? birthDate}) _normalizeBirthData({
+    int? age,
+    DateTime? birthDate,
+  }) {
+    if (birthDate != null) {
+      final normalizedBirthDate = DateTime(
+        birthDate.year,
+        birthDate.month,
+        birthDate.day,
+      );
+      return (
+        age: _deriveAgeFromBirthDate(normalizedBirthDate),
+        birthDate: normalizedBirthDate,
+      );
+    }
+    return (age: age, birthDate: null);
+  }
+
+  ({int? age, DateTime? birthDate}) _birthDataForAge({
+    required int? age,
+    required Random random,
+  }) {
+    if (age == null) {
+      return (age: null, birthDate: null);
+    }
+    final birthDate = _randomBirthDateForAge(age, random);
+    return _normalizeBirthData(age: age, birthDate: birthDate);
   }
 
   DateTime _randomBirthDateForAge(int age, Random random) {
@@ -2252,9 +2480,28 @@ class ComputerRepository extends ChangeNotifier {
     return merged;
   }
 
+  void _resyncDefinitions() {
+    final existingTags = List<String>.from(_tagDefinitions);
+    final existingNationalities = List<String>.from(_nationalityDefinitions);
+    _tagDefinitions
+      ..clear()
+      ..addAll(_mergeTagDefinitions(existingTags, _players));
+    _nationalityDefinitions
+      ..clear()
+      ..addAll(_mergeNationalityDefinitions(existingNationalities, _players));
+  }
+
   ComputerPlayer _normalizePlayer(ComputerPlayer player) {
+    final normalizedBirthData = _normalizeBirthData(
+      age: player.age,
+      birthDate: player.birthDate,
+    );
     return player.copyWith(
       source: player.source,
+      age: normalizedBirthData.age,
+      clearAge: normalizedBirthData.age == null,
+      birthDate: normalizedBirthData.birthDate,
+      clearBirthDate: normalizedBirthData.birthDate == null,
       nationality: _normalizeNationality(player.nationality),
       clearNationality: _normalizeNationality(player.nationality) == null,
       tags: _normalizeTags(player.tags),

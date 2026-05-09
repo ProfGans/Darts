@@ -64,6 +64,48 @@ class _HeadToHeadSummary {
   double get winRate => matches <= 0 ? 0 : (wins / matches) * 100;
 }
 
+class _ManualPlayerFormData {
+  const _ManualPlayerFormData({
+    required this.name,
+    required this.targetAverage,
+    required this.birthDate,
+    this.skill,
+    this.finishingSkill,
+  });
+
+  final String name;
+  final double targetAverage;
+  final int? skill;
+  final int? finishingSkill;
+  final DateTime? birthDate;
+}
+
+class _BulkCreationFormData {
+  const _BulkCreationFormData({
+    required this.count,
+    required this.minimumAverage,
+    required this.maximumAverage,
+    this.minimumAge,
+    this.maximumAge,
+  });
+
+  final int count;
+  final double minimumAverage;
+  final double maximumAverage;
+  final int? minimumAge;
+  final int? maximumAge;
+}
+
+class _BulkEditAgeRangeData {
+  const _BulkEditAgeRangeData({
+    this.minimumAge,
+    this.maximumAge,
+  });
+
+  final int? minimumAge;
+  final int? maximumAge;
+}
+
 class ComputerDatabaseScreen extends StatefulWidget {
   const ComputerDatabaseScreen({super.key});
 
@@ -348,30 +390,23 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   }
 
   void _submit() {
-    if (!_validateManualInputs()) {
-      return;
-    }
-    final name = _nameController.text.trim();
-    final targetAverage = _parseDouble(_theoreticalAverageController.text);
-    final customSkill = int.tryParse(_skillController.text.trim());
-    final customFinishingSkill = int.tryParse(
-      _finishingSkillController.text.trim(),
-    );
-    final birthDate = _parseBirthDate(_birthDateController.text);
-    if (name.isEmpty || (!_useCustomSkills && targetAverage == null)) {
+    final formData = _readManualFormData();
+    if (formData == null) {
       return;
     }
 
     if (_editingId == null) {
-      _repository.addPlayer(
-        name: name,
-        targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
-        skill: _useCustomSkills ? customSkill : null,
-        finishingSkill: _useCustomSkills ? customFinishingSkill : null,
-        birthDate: birthDate,
-        nationality: _selectedNationality,
-        tags: List<String>.from(_draftTags),
-        source: ComputerPlayerSource.manual,
+      _repository.addPlayerDraft(
+        ComputerPlayerDraft(
+          name: formData.name,
+          targetTheoreticalAverage: formData.targetAverage,
+          skill: _useCustomSkills ? formData.skill : null,
+          finishingSkill: _useCustomSkills ? formData.finishingSkill : null,
+          birthDate: formData.birthDate,
+          nationality: _selectedNationality,
+          tags: List<String>.from(_draftTags),
+          source: ComputerPlayerSource.manual,
+        ),
       );
     } else {
       final existing = _repository.players.firstWhere(
@@ -379,11 +414,11 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       );
       _repository.updatePlayer(
         id: _editingId!,
-        name: name,
-        targetTheoreticalAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
-        skill: _useCustomSkills ? customSkill : null,
-        finishingSkill: _useCustomSkills ? customFinishingSkill : null,
-        birthDate: birthDate,
+        name: formData.name,
+        targetTheoreticalAverage: formData.targetAverage,
+        skill: _useCustomSkills ? formData.skill : null,
+        finishingSkill: _useCustomSkills ? formData.finishingSkill : null,
+        birthDate: formData.birthDate,
         nationality: _selectedNationality,
         tags: List<String>.from(_draftTags),
         source: existing.source,
@@ -438,25 +473,17 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   }
 
   void _createBulkPlayers() {
-    if (!_validateBulkInputs()) {
+    final formData = _readBulkCreationFormData();
+    if (formData == null) {
       return;
     }
-    final count = int.tryParse(_bulkCountController.text.trim());
-    final minAverage = _parseDouble(_bulkMinAverageController.text);
-    final maxAverage = _parseDouble(_bulkMaxAverageController.text);
-    final minAge = int.tryParse(_bulkMinAgeController.text.trim());
-    final maxAge = int.tryParse(_bulkMaxAgeController.text.trim());
-    if (count == null || minAverage == null || maxAverage == null) {
-      return;
-    }
-
     _repository.addPlayersBulk(
       namePrefix: _bulkPrefixController.text,
-      count: count,
-      minimumAverage: minAverage,
-      maximumAverage: maxAverage,
-      minimumAge: minAge,
-      maximumAge: maxAge,
+      count: formData.count,
+      minimumAverage: formData.minimumAverage,
+      maximumAverage: formData.maximumAverage,
+      minimumAge: formData.minimumAge,
+      maximumAge: formData.maximumAge,
       nationalities: List<String>.from(_bulkNationalities),
       tags: List<String>.from(_bulkTags),
     );
@@ -479,23 +506,27 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
       return;
     }
 
-    final minimumAge = int.tryParse(_bulkEditMinAgeController.text.trim());
-    final maximumAge = int.tryParse(_bulkEditMaxAgeController.text.trim());
-    _repository.bulkUpdatePlayers(
-      ids: selectedIds,
-      nationality: _bulkEditNationality,
-      clearNationality: _bulkEditClearNationality,
-      minimumAge: minimumAge,
-      maximumAge: maximumAge,
-      clearAge: _bulkEditClearAge,
-      addTags: _bulkEditAddTags.toList(),
-      removeTags: _bulkEditRemoveTags.toList(),
-      isFavorite: _bulkEditFavoriteChoice == _TriStateChoice.unchanged
-          ? null
-          : _bulkEditFavoriteChoice == _TriStateChoice.yes,
-      isProtected: _bulkEditProtectedChoice == _TriStateChoice.unchanged
-          ? null
-          : _bulkEditProtectedChoice == _TriStateChoice.yes,
+    final ageRange = _readBulkEditAgeRangeData();
+    if (ageRange == null) {
+      return;
+    }
+    _repository.bulkUpdatePlayersWithEdit(
+      BulkComputerPlayerEdit(
+        ids: selectedIds,
+        nationality: _bulkEditNationality,
+        clearNationality: _bulkEditClearNationality,
+        minimumAge: ageRange.minimumAge,
+        maximumAge: ageRange.maximumAge,
+        clearAge: _bulkEditClearAge,
+        addTags: _bulkEditAddTags.toList(),
+        removeTags: _bulkEditRemoveTags.toList(),
+        isFavorite: _bulkEditFavoriteChoice == _TriStateChoice.unchanged
+            ? null
+            : _bulkEditFavoriteChoice == _TriStateChoice.yes,
+        isProtected: _bulkEditProtectedChoice == _TriStateChoice.unchanged
+            ? null
+            : _bulkEditProtectedChoice == _TriStateChoice.yes,
+      ),
     );
 
     setState(() {
@@ -904,7 +935,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     _showMessage('Datei exportiert nach $filePath');
   }
 
-  bool _validateManualInputs() {
+  _ManualPlayerFormData? _readManualFormData() {
     final name = _nameController.text.trim();
     final targetAverage = _parseDouble(_theoreticalAverageController.text);
     final skill = int.tryParse(_skillController.text.trim());
@@ -913,33 +944,39 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     final birthDate = _parseBirthDate(birthDateText);
     if (name.isEmpty) {
       _showMessage('Bitte einen Namen eingeben.');
-      return false;
+      return null;
     }
     if (!_useCustomSkills &&
         (targetAverage == null || targetAverage < 0 || targetAverage > 180)) {
       _showMessage('Theo Average muss zwischen 0 und 180 liegen.');
-      return false;
+      return null;
     }
     if (_useCustomSkills) {
       if (skill == null || skill < 1 || skill > 1000) {
         _showMessage('Skill muss zwischen 1 und 1000 liegen.');
-        return false;
+        return null;
       }
       if (finishingSkill == null ||
           finishingSkill < 1 ||
           finishingSkill > 1000) {
         _showMessage('Finishing Skill muss zwischen 1 und 1000 liegen.');
-        return false;
+        return null;
       }
     }
     if (birthDateText.isNotEmpty && birthDate == null) {
       _showMessage('Geburtsdatum bitte als TT.MM.JJJJ oder JJJJ-MM-TT eingeben.');
-      return false;
+      return null;
     }
-    return true;
+    return _ManualPlayerFormData(
+      name: name,
+      targetAverage: (targetAverage ?? 0).clamp(0, 180).toDouble(),
+      skill: skill,
+      finishingSkill: finishingSkill,
+      birthDate: birthDate,
+    );
   }
 
-  bool _validateBulkInputs() {
+  _BulkCreationFormData? _readBulkCreationFormData() {
     final count = int.tryParse(_bulkCountController.text.trim());
     final minAverage = _parseDouble(_bulkMinAverageController.text);
     final maxAverage = _parseDouble(_bulkMaxAverageController.text);
@@ -947,7 +984,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     final maxAge = int.tryParse(_bulkMaxAgeController.text.trim());
     if (count == null || count < 1 || count > 500) {
       _showMessage('Anzahl muss zwischen 1 und 500 liegen.');
-      return false;
+      return null;
     }
     if (minAverage == null ||
         maxAverage == null ||
@@ -956,17 +993,40 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         maxAverage < 0 ||
         maxAverage > 180) {
       _showMessage('Theo Average muss zwischen 0 und 180 liegen.');
-      return false;
+      return null;
     }
     if (minAge != null && (minAge < 10 || minAge > 100)) {
       _showMessage('Minimum Alter muss zwischen 10 und 100 liegen.');
-      return false;
+      return null;
     }
     if (maxAge != null && (maxAge < 10 || maxAge > 100)) {
       _showMessage('Maximum Alter muss zwischen 10 und 100 liegen.');
-      return false;
+      return null;
     }
-    return true;
+    return _BulkCreationFormData(
+      count: count,
+      minimumAverage: minAverage,
+      maximumAverage: maxAverage,
+      minimumAge: minAge,
+      maximumAge: maxAge,
+    );
+  }
+
+  _BulkEditAgeRangeData? _readBulkEditAgeRangeData() {
+    final minimumAge = int.tryParse(_bulkEditMinAgeController.text.trim());
+    final maximumAge = int.tryParse(_bulkEditMaxAgeController.text.trim());
+    if (minimumAge != null && (minimumAge < 10 || minimumAge > 100)) {
+      _showMessage('Bulk-Minimum-Alter muss zwischen 10 und 100 liegen.');
+      return null;
+    }
+    if (maximumAge != null && (maximumAge < 10 || maximumAge > 100)) {
+      _showMessage('Bulk-Maximum-Alter muss zwischen 10 und 100 liegen.');
+      return null;
+    }
+    return _BulkEditAgeRangeData(
+      minimumAge: minimumAge,
+      maximumAge: maximumAge,
+    );
   }
 
   Set<String> _visibleSelection(Iterable<ComputerPlayer> visiblePlayers) {
@@ -998,6 +1058,25 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
         );
       },
     );
+  }
+
+  Future<void> _showExportDialogFromBackground({
+    required String title,
+    required Future<String> Function() loader,
+  }) async {
+    final content = await loader();
+    if (!mounted) {
+      return;
+    }
+    await _showExportDialog(title: title, content: content);
+  }
+
+  Future<void> _exportToFileFromBackground({
+    required String format,
+    required Future<String> Function() loader,
+  }) async {
+    final content = await loader();
+    await _exportToFile(format: format, content: content);
   }
 
   Future<void> _showImportDialog({required bool json}) async {
@@ -1046,12 +1125,12 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                     final navigator = Navigator.of(context);
                     try {
                       if (json) {
-                        await _repository.importFromJsonString(
+                        await _repository.importFromJsonStringInBackground(
                           controller.text,
                           replaceExisting: replaceExisting,
                         );
                       } else {
-                        await _repository.importFromCsvString(
+                        await _repository.importFromCsvStringInBackground(
                           controller.text,
                           replaceExisting: replaceExisting,
                         );
@@ -2439,30 +2518,30 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                   child: const Text('Undo'),
                 ),
                 OutlinedButton(
-                  onPressed: () => _showExportDialog(
+                  onPressed: () => _showExportDialogFromBackground(
                     title: 'JSON Export',
-                    content: _repository.exportAsJsonString(),
+                    loader: _repository.exportAsJsonStringInBackground,
                   ),
                   child: const Text('JSON exportieren'),
                 ),
                 OutlinedButton(
-                  onPressed: () => _exportToFile(
+                  onPressed: () => _exportToFileFromBackground(
                     format: 'json',
-                    content: _repository.exportAsJsonString(),
+                    loader: _repository.exportAsJsonStringInBackground,
                   ),
                   child: const Text('JSON als Datei'),
                 ),
                 OutlinedButton(
-                  onPressed: () => _showExportDialog(
+                  onPressed: () => _showExportDialogFromBackground(
                     title: 'CSV Export',
-                    content: _repository.exportAsCsvString(),
+                    loader: _repository.exportAsCsvStringInBackground,
                   ),
                   child: const Text('CSV exportieren'),
                 ),
                 OutlinedButton(
-                  onPressed: () => _exportToFile(
+                  onPressed: () => _exportToFileFromBackground(
                     format: 'csv',
-                    content: _repository.exportAsCsvString(),
+                    loader: _repository.exportAsCsvStringInBackground,
                   ),
                   child: const Text('CSV als Datei'),
                 ),

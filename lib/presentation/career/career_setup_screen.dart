@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../app/routes.dart';
+import '../../data/background/simulation_service.dart';
 import '../../data/models/computer_player.dart';
 import '../../data/models/generated_name_catalog.dart';
 import '../../data/models/player_profile.dart';
@@ -10,6 +11,7 @@ import '../../data/repositories/career_repository.dart';
 import '../../data/repositories/career_template_repository.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../data/repositories/tournament_repository.dart';
 import '../../domain/career/career_models.dart';
 import '../../domain/career/career_template.dart';
@@ -147,24 +149,32 @@ class _SimpleQuickTournamentDraft {
   final _SimpleQuickTourTypeConfig config;
 }
 
-class _SimpleQuickTournamentAddPage extends StatefulWidget {
-  const _SimpleQuickTournamentAddPage({
+class _SimpleQuickTournamentEditorPage extends StatefulWidget {
+  const _SimpleQuickTournamentEditorPage({
     required this.addableBlueprints,
     required this.host,
     required this.rosterSize,
+    this.initialBlueprintId,
+    this.initialConfig,
+    this.pageTitle = 'Quick-Turnier',
+    this.submitLabel = 'Speichern',
   });
 
   final List<_SimpleQuickTourBlueprint> addableBlueprints;
   final _CareerSetupScreenState host;
   final int rosterSize;
+  final String? initialBlueprintId;
+  final _SimpleQuickTourTypeConfig? initialConfig;
+  final String pageTitle;
+  final String submitLabel;
 
   @override
-  State<_SimpleQuickTournamentAddPage> createState() =>
-      _SimpleQuickTournamentAddPageState();
+  State<_SimpleQuickTournamentEditorPage> createState() =>
+      _SimpleQuickTournamentEditorPageState();
 }
 
-class _SimpleQuickTournamentAddPageState
-    extends State<_SimpleQuickTournamentAddPage> {
+class _SimpleQuickTournamentEditorPageState
+    extends State<_SimpleQuickTournamentEditorPage> {
   late final TextEditingController _nameController;
   late final TextEditingController _countController;
   late final TextEditingController _fieldSizeController;
@@ -181,9 +191,13 @@ class _SimpleQuickTournamentAddPageState
     _countController = TextEditingController();
     _fieldSizeController = TextEditingController();
     _prizePoolController = TextEditingController();
-    _selectedBlueprintId = widget.addableBlueprints.first.id;
-    _selectedPreset = CareerTournamentPrizeSplitPreset.proTour;
-    _syncDraftWithBlueprint(resetName: true);
+    _selectedBlueprintId = widget.addableBlueprints.any(
+            (blueprint) => blueprint.id == widget.initialBlueprintId)
+        ? widget.initialBlueprintId!
+        : widget.addableBlueprints.first.id;
+    _selectedPreset = widget.initialConfig?.prizeSplitPreset ??
+        CareerTournamentPrizeSplitPreset.proTour;
+    _syncDraftWithBlueprint(resetName: false);
   }
 
   @override
@@ -211,6 +225,7 @@ class _SimpleQuickTournamentAddPageState
 
   void _syncDraftWithBlueprint({required bool resetName}) {
     final blueprint = _selectedBlueprint;
+    final initialConfig = widget.initialConfig;
     final fieldSize = widget.host._quickFieldSizeForBlueprint(
       blueprint: blueprint,
       rosterSize: widget.rosterSize,
@@ -225,33 +240,34 @@ class _SimpleQuickTournamentAddPageState
             requestedQualifierCount: blueprint.playoffQualifierCount,
           )
         : blueprint.playoffQualifierCount;
+    final effectiveFieldSize = initialConfig?.fieldSizeOverride ?? fieldSize;
+    final effectivePrizePool = initialConfig?.prizePoolOverride ?? prizePool;
+    final effectivePreset =
+        initialConfig?.prizeSplitPreset ?? _selectedPreset;
     _countController.text =
-        '${widget.host._defaultSimpleQuickCountForBlueprint(blueprint.id)}';
-    _fieldSizeController.text = '$fieldSize';
-    _prizePoolController.text = '$prizePool';
-    _selectedPreset = CareerTournamentPrizeSplitPreset.proTour;
-    _knockoutPrizeValues = widget.host._defaultQuickKnockoutPrizeValues(
-      preset: _selectedPreset,
-      prizePool: prizePool,
-      stageCount: widget.host._quickKnockoutStageCount(
-        blueprint: blueprint,
-        fieldSize: fieldSize,
-        playoffQualifierCount: playoffQualifierCount,
-      ),
-      format: blueprint.format,
+        '${initialConfig?.count ?? widget.host._defaultSimpleQuickCountForBlueprint(blueprint.id)}';
+    _fieldSizeController.text = '$effectiveFieldSize';
+    _prizePoolController.text = '$effectivePrizePool';
+    _selectedPreset = effectivePreset;
+    _knockoutPrizeValues = widget.host._effectiveQuickKnockoutPrizeValues(
+      blueprint: blueprint,
+      config: initialConfig,
+      fieldSize: effectiveFieldSize,
+      prizePool: effectivePrizePool,
+      playoffQualifierCount: blueprint.format == TournamentFormat.leaguePlayoff
+          ? widget.host._quickPlayoffQualifierCountForFieldSize(
+              fieldSize: effectiveFieldSize,
+              requestedQualifierCount: blueprint.playoffQualifierCount,
+            )
+          : blueprint.playoffQualifierCount,
     );
-    _leaguePrizeValues = widget.host._defaultQuickLeaguePrizeValues(
-      preset: _selectedPreset,
-      prizePool: prizePool,
-      placeCount: widget.host._quickLeaguePrizePlaceCount(
-        blueprint: blueprint,
-        fieldSize: fieldSize,
-      ),
-      format: blueprint.format,
+    _leaguePrizeValues = widget.host._effectiveQuickLeaguePrizeValues(
+      blueprint: blueprint,
+      config: initialConfig,
+      fieldSize: effectiveFieldSize,
+      prizePool: effectivePrizePool,
     );
-    if (resetName) {
-      _nameController.clear();
-    }
+    _nameController.text = resetName ? '' : (initialConfig?.customName ?? '');
   }
 
   void _applyPreset() {
@@ -282,6 +298,21 @@ class _SimpleQuickTournamentAddPageState
     });
   }
 
+  @override
+  void didUpdateWidget(covariant _SimpleQuickTournamentEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialBlueprintId != widget.initialBlueprintId ||
+        oldWidget.initialConfig != widget.initialConfig) {
+      _selectedBlueprintId = widget.addableBlueprints.any(
+              (blueprint) => blueprint.id == widget.initialBlueprintId)
+          ? widget.initialBlueprintId!
+          : widget.addableBlueprints.first.id;
+      _selectedPreset = widget.initialConfig?.prizeSplitPreset ??
+          CareerTournamentPrizeSplitPreset.proTour;
+      _syncDraftWithBlueprint(resetName: false);
+    }
+  }
+
   _SimpleQuickTourTypeConfig _buildConfig() {
     return _SimpleQuickTourTypeConfig(
       count: max(0, int.tryParse(_countController.text.trim()) ?? 0),
@@ -306,7 +337,7 @@ class _SimpleQuickTournamentAddPageState
     );
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Quick-Turnier'),
+        title: Text(widget.pageTitle),
       ),
       body: SafeArea(
         child: ListView(
@@ -565,7 +596,7 @@ class _SimpleQuickTournamentAddPageState
                   ),
                 );
               },
-              child: const Text('Hinzufuegen'),
+              child: Text(widget.submitLabel),
             ),
           ],
         ),
@@ -1044,16 +1075,14 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                     ),
                   ),
                 ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedTemplateId = value;
-                    _simpleTemplateTrainingOverrides.clear();
-                    _selectedTrainingPoolTagName = null;
-                    _trainingMinAverageController.clear();
-                    _trainingMaxAverageController.clear();
-                  });
-                },
-              ),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTemplateId = value;
+                      _simpleTemplateTrainingOverrides.clear();
+                      _selectedTrainingPoolTagName = null;
+                    });
+                  },
+                ),
               if (_selectedTemplateId != null) ...<Widget>[
                 const SizedBox(height: 12),
                 _buildTemplatePoolSelector(context),
@@ -3598,19 +3627,17 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                     ),
                   ),
                 ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedTemplateId = value;
-                    if (value != null) {
-                      _simpleQuickTournamentGenerationEnabled = false;
-                    }
-                    _simpleTemplateTrainingOverrides.clear();
-                    _selectedTrainingPoolTagName = null;
-                    _trainingMinAverageController.clear();
-                    _trainingMaxAverageController.clear();
-                  });
-                },
-              ),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTemplateId = value;
+                      if (value != null) {
+                        _simpleQuickTournamentGenerationEnabled = false;
+                      }
+                      _simpleTemplateTrainingOverrides.clear();
+                      _selectedTrainingPoolTagName = null;
+                    });
+                  },
+                ),
             ],
           ],
         ),
@@ -3637,7 +3664,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       context,
       title: 'Quick-Turniererstellung',
       subtitle:
-          'Lege im einfachen Modus fest, wie die Quick-Tour aufgebaut wird: Anzahl, Teilnehmerfelder und Preisgelder je Tour-Baustein.',
+          'Baue hier deine eigene Quick-Tour aus frei hinzugefuegten Turnierbausteinen auf.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -3648,17 +3675,15 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               if (!value && _selectedTemplateId == null) {
                 return;
               }
-              setState(() {
-                _simpleQuickTournamentGenerationEnabled = value;
-                if (value) {
-                  _selectedTemplateId = null;
-                }
-                _simpleTemplateTrainingOverrides.clear();
-                _selectedTrainingPoolTagName = null;
-                _trainingMinAverageController.clear();
-                _trainingMaxAverageController.clear();
-              });
-            },
+                setState(() {
+                  _simpleQuickTournamentGenerationEnabled = value;
+                  if (value) {
+                    _selectedTemplateId = null;
+                  }
+                  _simpleTemplateTrainingOverrides.clear();
+                  _selectedTrainingPoolTagName = null;
+                });
+              },
             title: const Text('Quick-Turniermix aktivieren'),
             subtitle: const Text(
               'Erzeugt fuer die einfache Karriere ein eigenstaendiges Tour-Geruest statt Turniere aus einer Vorlage zu remixen.',
@@ -3668,595 +3693,420 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
             padding: const EdgeInsets.only(top: 8),
             child: _simpleQuickTournamentGenerationEnabled
                 ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Quick-Erstellung ist aktiv. Die Detailkonfiguration der Tour-Bausteine wird gerade schrittweise wieder eingeblendet.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF556372),
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Aktueller Ziel-Kader: $rosterSize Spieler',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Formate',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: TournamentFormat.values.map((format) {
-                      final selected = selectedFormats.contains(format);
-                      return FilterChip(
-                        label: Text(_tournamentFormatLabel(format)),
-                        selected: selected,
-                        onSelected: (_) {
-                          setState(() {
-                            if (selected) {
-                              if (_simpleQuickFormats.length > 1) {
-                                _simpleQuickFormats.remove(format);
-                              }
-                            } else {
-                              _simpleQuickFormats.add(format);
-                            }
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Modi',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      FilterChip(
-                        label: const Text('Turnierserien'),
-                        selected: _simpleQuickIncludeSeries,
-                        onSelected: (value) {
-                          if (!value && !_simpleQuickIncludeStandalone) {
-                            return;
-                          }
-                          setState(() => _simpleQuickIncludeSeries = value);
-                        },
-                      ),
-                      FilterChip(
-                        label: const Text('Einzelturniere'),
-                        selected: _simpleQuickIncludeStandalone,
-                        onSelected: (value) {
-                          if (!value && !_simpleQuickIncludeSeries) {
-                            return;
-                          }
-                          setState(() => _simpleQuickIncludeStandalone = value);
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Bausteine hinzufuegen',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Material(
-                        color: addableBlueprints.isEmpty
-                            ? Theme.of(context).colorScheme.surfaceContainerHighest
-                            : Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(999),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(999),
-                          onTap: addableBlueprints.isEmpty
-                              ? null
-                              : () => _openSimpleQuickTournamentComposer(
-                                    addableBlueprints,
-                                    rosterSize: rosterSize,
-                                  ),
-                          child: const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Icon(Icons.add_rounded),
-                          ),
-                        ),
+                      Text(
+                        'Aktueller Ziel-Kader: $rosterSize Spieler',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            addableBlueprints.isEmpty
-                                ? 'Mit den aktuellen Filtern sind keine weiteren Turnierarten verfuegbar.'
-                                : 'Fuege ueber das Plus selbst Bausteine mit Name und Turnierart hinzu.',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: const Color(0xFF556372),
-                                    ),
-                          ),
-                        ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Formate',
+                        style: Theme.of(context).textTheme.titleSmall,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Ausgewaehlte Tour-Bausteine',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  if (selectedBlueprints.isEmpty)
-                    const Text(
-                      'Fuege zuerst selbst Tour-Bausteine hinzu. Erst diese Auswahl bildet deine Quick-Tour.',
-                    )
-                  else
-                    Column(
-                      children: selectedBlueprints.map((blueprint) {
-                        final config =
-                            _simpleQuickTourConfigs[blueprint.id] ??
-                            _SimpleQuickTourTypeConfig(
-                              count: _defaultSimpleQuickCountForBlueprint(
-                                blueprint.id,
-                              ),
-                            );
-                        final customDisplayName = config.customName?.trim();
-                        final displayName =
-                            customDisplayName != null &&
-                                    customDisplayName.isNotEmpty
-                                ? customDisplayName
-                                : blueprint.categoryName;
-                        final effectiveFieldSize =
-                            config.fieldSizeOverride ??
-                            _quickFieldSizeForBlueprint(
-                              blueprint: blueprint,
-                              rosterSize: rosterSize,
-                            );
-                        final effectivePrizePool =
-                            config.prizePoolOverride ??
-                            _quickPrizePoolForFieldSize(
-                              blueprint: blueprint,
-                              fieldSize: effectiveFieldSize,
-                            );
-                        final effectivePlayoffQualifierCount =
-                            blueprint.format == TournamentFormat.leaguePlayoff
-                                ? _quickPlayoffQualifierCountForFieldSize(
-                                    fieldSize: effectiveFieldSize,
-                                    requestedQualifierCount:
-                                        blueprint.playoffQualifierCount,
-                                  )
-                                : blueprint.playoffQualifierCount;
-                        final effectiveKnockoutPrizeValues =
-                            _effectiveQuickKnockoutPrizeValues(
-                          blueprint: blueprint,
-                          config: config,
-                          fieldSize: effectiveFieldSize,
-                          prizePool: effectivePrizePool,
-                          playoffQualifierCount: effectivePlayoffQualifierCount,
-                        );
-                        final effectiveLeaguePrizeValues =
-                            _effectiveQuickLeaguePrizeValues(
-                          blueprint: blueprint,
-                          config: config,
-                          fieldSize: effectiveFieldSize,
-                          prizePool: effectivePrizePool,
-                        );
-                          return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Row(
-                                children: <Widget>[
-                                  Icon(
-                                    blueprint.isSeries
-                                        ? Icons.view_week_outlined
-                                        : Icons.emoji_events_outlined,
-                                    size: 18,
-                                    color: const Color(0xFF556372),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(displayName),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Baustein entfernen',
-                                    onPressed: () {
-                                      setState(() {
-                                        _simpleQuickSelectedBlueprintIds.remove(
-                                          blueprint.id,
-                                        );
-                                      });
-                                    },
-                                    icon: const Icon(Icons.close_rounded),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: <Widget>[
-                                  Expanded(
-                                      child: TextFormField(
-                                        key: ValueKey<String>(
-                                        'quick-count-lite-${blueprint.id}',
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                      initialValue: '${config.count}',
-                                      onChanged: (value) {
-                                        final parsed =
-                                            int.tryParse(value.trim()) ?? 0;
-                                        setState(() {
-                                          _simpleQuickTourConfigs[blueprint.id] =
-                                              config.copyWith(
-                                            count: parsed < 0 ? 0 : parsed,
-                                          );
-                                        });
-                                      },
-                                      decoration: const InputDecoration(
-                                        labelText: 'Anzahl',
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                      child: TextFormField(
-                                        key: ValueKey<String>(
-                                        'quick-field-lite-${blueprint.id}',
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                      initialValue: '$effectiveFieldSize',
-                                      onChanged: (value) {
-                                        final parsed = int.tryParse(value.trim());
-                                        setState(() {
-                                          _simpleQuickTourConfigs[blueprint.id] =
-                                              parsed == null
-                                                  ? config.copyWith(
-                                                      clearFieldSizeOverride: true,
-                                                    )
-                                                  : config.copyWith(
-                                                      fieldSizeOverride: parsed,
-                                                    );
-                                        });
-                                      },
-                                      decoration: const InputDecoration(
-                                        labelText: 'Teilnehmerfeld',
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                      child: TextFormField(
-                                        key: ValueKey<String>(
-                                        'quick-prize-lite-${blueprint.id}',
-                                      ),
-                                      keyboardType: TextInputType.number,
-                                      initialValue: '$effectivePrizePool',
-                                      onChanged: (value) {
-                                        final parsed = int.tryParse(value.trim());
-                                        setState(() {
-                                          _simpleQuickTourConfigs[blueprint.id] =
-                                              parsed == null
-                                                  ? config.copyWith(
-                                                      clearPrizePoolOverride: true,
-                                                    )
-                                                  : config.copyWith(
-                                                      prizePoolOverride: parsed,
-                                                    );
-                                        });
-                                      },
-                                      decoration: const InputDecoration(
-                                        labelText: 'Preisgeld',
-                                      ),
-                                    ),
-                              ),
-                            ],
-                          ),
-                              const SizedBox(height: 8),
-                              DropdownButtonFormField<CareerTournamentPrizeSplitPreset>(
-                                key: ValueKey<String>(
-                                  'quick-prize-preset-lite-${blueprint.id}',
-                                ),
-                                initialValue: config.prizeSplitPreset,
-                                decoration: const InputDecoration(
-                                  labelText: 'Preisgeld-Share',
-                                ),
-                                items: CareerTournamentPrizeSplitPreset.values
-                                    .map(
-                                      (preset) => DropdownMenuItem<
-                                          CareerTournamentPrizeSplitPreset>(
-                                        value: preset,
-                                        child: Text(preset.label),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (value) {
-                                  if (value == null) {
-                                    return;
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: TournamentFormat.values.map((format) {
+                          final selected = selectedFormats.contains(format);
+                          return FilterChip(
+                            label: Text(_tournamentFormatLabel(format)),
+                            selected: selected,
+                            onSelected: (_) {
+                              setState(() {
+                                if (selected) {
+                                  if (_simpleQuickFormats.length > 1) {
+                                    _simpleQuickFormats.remove(format);
                                   }
-                                  setState(() {
-                                    _simpleQuickTourConfigs[blueprint.id] =
-                                        config.copyWith(
-                                      prizeSplitPreset: value,
-                                    );
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    final refreshedConfig =
-                                        _simpleQuickTourConfigs[blueprint.id] ??
-                                        config;
-                                    final refreshedFieldSize =
-                                        refreshedConfig.fieldSizeOverride ??
-                                        _quickFieldSizeForBlueprint(
-                                          blueprint: blueprint,
-                                          rosterSize: rosterSize,
-                                        );
-                                    final refreshedPrizePool =
-                                        refreshedConfig.prizePoolOverride ??
-                                        _quickPrizePoolForFieldSize(
-                                          blueprint: blueprint,
-                                          fieldSize: refreshedFieldSize,
-                                        );
-                                    final refreshedPlayoffQualifierCount =
-                                        blueprint.format ==
-                                                TournamentFormat.leaguePlayoff
-                                            ? _quickPlayoffQualifierCountForFieldSize(
-                                                fieldSize: refreshedFieldSize,
-                                                requestedQualifierCount:
-                                                    blueprint.playoffQualifierCount,
-                                              )
-                                            : blueprint.playoffQualifierCount;
-                                    setState(() {
-                                      _simpleQuickTourConfigs[blueprint.id] =
-                                          refreshedConfig.copyWith(
-                                        knockoutPrizeValues:
-                                            _defaultQuickKnockoutPrizeValues(
-                                          preset: refreshedConfig.prizeSplitPreset,
-                                          prizePool: refreshedPrizePool,
-                                          stageCount: _quickKnockoutStageCount(
-                                            blueprint: blueprint,
-                                            fieldSize: refreshedFieldSize,
-                                            playoffQualifierCount:
-                                                refreshedPlayoffQualifierCount,
-                                          ),
-                                          format: blueprint.format,
-                                        ),
-                                        leaguePositionPrizeValues:
-                                            _defaultQuickLeaguePrizeValues(
-                                          preset: refreshedConfig.prizeSplitPreset,
-                                          prizePool: refreshedPrizePool,
-                                          placeCount:
-                                              _quickLeaguePrizePlaceCount(
-                                            blueprint: blueprint,
-                                            fieldSize: refreshedFieldSize,
-                                          ),
-                                          format: blueprint.format,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  child: const Text('Preset anwenden'),
-                                ),
-                              ),
-                              if (effectiveKnockoutPrizeValues.isNotEmpty) ...<Widget>[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'KO-Auszahlungen',
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 12,
-                                  runSpacing: 12,
-                                  children: List<Widget>.generate(
-                                    effectiveKnockoutPrizeValues.length,
-                                    (index) => SizedBox(
-                                      width: 210,
-                                      child: Column(
-                                        children: <Widget>[
-                                          TextFormField(
-                                            key: ValueKey<String>(
-                                              'quick-knockout-lite-${blueprint.id}-$index',
-                                            ),
-                                            keyboardType: TextInputType.number,
-                                            initialValue:
-                                                '${effectiveKnockoutPrizeValues[index]}',
-                                            onChanged: (value) {
-                                              final parsed =
-                                                  int.tryParse(value.trim()) ?? 0;
-                                              final nextValues = List<int>.from(
-                                                effectiveKnockoutPrizeValues,
-                                              );
-                                              nextValues[index] =
-                                                  parsed < 0 ? 0 : parsed;
-                                              setState(() {
-                                                _simpleQuickTourConfigs[
-                                                        blueprint.id] =
-                                                    config.copyWith(
-                                                  knockoutPrizeValues: nextValues,
-                                                );
-                                              });
-                                            },
-                                            decoration: InputDecoration(
-                                              labelText: _quickKnockoutPrizeLabel(
-                                                index,
-                                                effectiveKnockoutPrizeValues.length,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          TextFormField(
-                                            key: ValueKey<String>(
-                                              'quick-knockout-share-${blueprint.id}-$index',
-                                            ),
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                              decimal: true,
-                                            ),
-                                            initialValue:
-                                                _quickKnockoutSharePercent(
-                                              values: effectiveKnockoutPrizeValues,
-                                              index: index,
-                                              format: blueprint.format,
-                                            ).toStringAsFixed(1),
-                                            onChanged: (value) {
-                                              final parsed = double.tryParse(
-                                                value.trim().replaceAll(',', '.'),
-                                              );
-                                              if (parsed == null) {
-                                                return;
-                                              }
-                                              final nextValues =
-                                                  _quickKnockoutValuesWithSharePercent(
-                                                values: effectiveKnockoutPrizeValues,
-                                                index: index,
-                                                sharePercent: parsed,
-                                                prizePool: effectivePrizePool,
-                                                format: blueprint.format,
-                                              );
-                                              setState(() {
-                                                _simpleQuickTourConfigs[
-                                                        blueprint.id] =
-                                                    config.copyWith(
-                                                  knockoutPrizeValues: nextValues,
-                                                );
-                                              });
-                                            },
-                                            decoration: const InputDecoration(
-                                              labelText: 'Share %',
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              if (effectiveLeaguePrizeValues.isNotEmpty) ...<Widget>[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Liga-Auszahlungen',
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 12,
-                                  runSpacing: 12,
-                                  children: List<Widget>.generate(
-                                    effectiveLeaguePrizeValues.length,
-                                    (index) => SizedBox(
-                                      width: 180,
-                                      child: Column(
-                                        children: <Widget>[
-                                          TextFormField(
-                                            key: ValueKey<String>(
-                                              'quick-league-lite-${blueprint.id}-$index',
-                                            ),
-                                            keyboardType: TextInputType.number,
-                                            initialValue:
-                                                '${effectiveLeaguePrizeValues[index]}',
-                                            onChanged: (value) {
-                                              final parsed =
-                                                  int.tryParse(value.trim()) ?? 0;
-                                              final nextValues = List<int>.from(
-                                                effectiveLeaguePrizeValues,
-                                              );
-                                              nextValues[index] =
-                                                  parsed < 0 ? 0 : parsed;
-                                              setState(() {
-                                                _simpleQuickTourConfigs[
-                                                        blueprint.id] =
-                                                    config.copyWith(
-                                                  leaguePositionPrizeValues:
-                                                      nextValues,
-                                                );
-                                              });
-                                            },
-                                            decoration: InputDecoration(
-                                              labelText: '${index + 1}. Platz',
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          TextFormField(
-                                            key: ValueKey<String>(
-                                              'quick-league-share-${blueprint.id}-$index',
-                                            ),
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                              decimal: true,
-                                            ),
-                                            initialValue: _quickLeagueSharePercent(
-                                              values: effectiveLeaguePrizeValues,
-                                              index: index,
-                                            ).toStringAsFixed(1),
-                                            onChanged: (value) {
-                                              final parsed = double.tryParse(
-                                                value.trim().replaceAll(',', '.'),
-                                              );
-                                              if (parsed == null) {
-                                                return;
-                                              }
-                                              final nextValues =
-                                                  _quickLeagueValuesWithSharePercent(
-                                                values: effectiveLeaguePrizeValues,
-                                                index: index,
-                                                sharePercent: parsed,
-                                                prizePool: effectivePrizePool,
-                                                format: blueprint.format,
-                                              );
-                                              setState(() {
-                                                _simpleQuickTourConfigs[
-                                                        blueprint.id] =
-                                                    config.copyWith(
-                                                  leaguePositionPrizeValues:
-                                                      nextValues,
-                                                );
-                                              });
-                                            },
-                                            decoration: const InputDecoration(
-                                              labelText: 'Share %',
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                                } else {
+                                  _simpleQuickFormats.add(format);
+                                }
+                              });
+                            },
                           );
                         }).toList(),
                       ),
-                  const SizedBox(height: 6),
-                  Text(
-                    template == null
-                        ? 'Ohne Vorlage wird eine eigenstaendige Quick-Tour aufgebaut.'
-                        : 'Mit Vorlage bleibt Quick deaktiviert, bis du die Vorlage abwaehlst.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF556372),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Modi',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          FilterChip(
+                            label: const Text('Turnierserien'),
+                            selected: _simpleQuickIncludeSeries,
+                            onSelected: (value) {
+                              if (!value && !_simpleQuickIncludeStandalone) {
+                                return;
+                              }
+                              setState(() => _simpleQuickIncludeSeries = value);
+                            },
+                          ),
+                          FilterChip(
+                            label: const Text('Einzelturniere'),
+                            selected: _simpleQuickIncludeStandalone,
+                            onSelected: (value) {
+                              if (!value && !_simpleQuickIncludeSeries) {
+                                return;
+                              }
+                              setState(
+                                () => _simpleQuickIncludeStandalone = value,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Bausteine',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Material(
+                            color: addableBlueprints.isEmpty
+                                ? Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                : Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(999),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: addableBlueprints.isEmpty
+                                  ? null
+                                  : () => _openSimpleQuickTournamentComposer(
+                                        addableBlueprints,
+                                        rosterSize: rosterSize,
+                                      ),
+                              child: const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: Icon(Icons.add_rounded),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                addableBlueprints.isEmpty
+                                    ? 'Mit den aktuellen Filtern sind keine weiteren Turnierarten verfuegbar.'
+                                    : 'Fuege neue Turniere hinzu und bearbeite sie anschliessend immer ueber dieselbe Quick-Turnier-Seite.',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: const Color(0xFF556372),
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Ausgewaehlte Tour-Bausteine',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      if (selectedBlueprints.isEmpty)
+                        const Text(
+                          'Fuege zuerst Tour-Bausteine hinzu. Die komplette Konfiguration erfolgt dann in der Quick-Turnier-Seite.',
+                        )
+                      else
+                        _buildSimpleQuickSelectedBlueprintList(
+                          context,
+                          selectedBlueprints: selectedBlueprints,
+                          rosterSize: rosterSize,
                         ),
-                  ),
-                ],
-              )
+                      const SizedBox(height: 6),
+                      Text(
+                        template == null
+                            ? 'Ohne Vorlage wird eine eigenstaendige Quick-Tour aufgebaut.'
+                            : 'Mit Vorlage bleibt Quick deaktiviert, bis du die Vorlage abwaehlst.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFF556372),
+                            ),
+                      ),
+                    ],
+                  )
                 : Text(
                     template == null
                         ? 'Quick-Erstellung ist aus. Waehle eine Vorlage oder aktiviere die Quick-Erstellung fuer eine eigenstaendige Tour.'
                         : 'Es ist eine Vorlage aktiv. Fuer die Quick-Erstellung wird die Vorlage automatisch abgewaehlt.',
                   ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSimpleQuickSelectedBlueprintList(
+    BuildContext context, {
+    required List<_SimpleQuickTourBlueprint> selectedBlueprints,
+    required int rosterSize,
+  }) {
+    return Column(
+      children: selectedBlueprints
+          .map(
+            (blueprint) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildSimpleQuickSelectedBlueprintCard(
+                context,
+                blueprint: blueprint,
+                rosterSize: rosterSize,
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildSimpleQuickSelectedBlueprintCard(
+    BuildContext context, {
+    required _SimpleQuickTourBlueprint blueprint,
+    required int rosterSize,
+  }) {
+    final config = _simpleQuickTourConfigs[blueprint.id] ??
+        _SimpleQuickTourTypeConfig(
+          count: _defaultSimpleQuickCountForBlueprint(blueprint.id),
+        );
+    final effectiveFieldSize = config.fieldSizeOverride ??
+        _quickFieldSizeForBlueprint(
+          blueprint: blueprint,
+          rosterSize: rosterSize,
+        );
+    final effectivePrizePool = config.prizePoolOverride ??
+        _quickPrizePoolForFieldSize(
+          blueprint: blueprint,
+          fieldSize: effectiveFieldSize,
+        );
+    final displayName =
+        (config.customName?.trim().isNotEmpty ?? false)
+            ? config.customName!.trim()
+            : blueprint.categoryName;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        displayName,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        blueprint.isSeries
+                            ? 'Serienformat'
+                            : 'Einzelturnier',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFF556372),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE9F4F3),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(_tournamentFormatLabel(blueprint.format)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: <Widget>[
+                _buildQuickSummaryChip('Anzahl', '${config.count}'),
+                _buildQuickSummaryChip(
+                  'Teilnehmerfeld',
+                  '$effectiveFieldSize',
+                ),
+                _buildQuickSummaryChip('Preisgeld', '$effectivePrizePool'),
+                _buildQuickSummaryChip(
+                  'Share',
+                  config.prizeSplitPreset.label,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: () => _editSimpleQuickTournamentBlueprint(
+                    blueprint,
+                    rosterSize: rosterSize,
+                  ),
+                  icon: const Icon(Icons.edit_rounded),
+                  label: const Text('Bearbeiten'),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _simpleQuickSelectedBlueprintIds.remove(blueprint.id);
+                      _simpleQuickTourConfigs.remove(blueprint.id);
+                    });
+                  },
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  label: const Text('Entfernen'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickSummaryChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F7F8),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text('$label: $value'),
+    );
+  }
+
+  Widget _buildSimpleCreationIntroCard(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Einfache Karriere',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Starte entweder mit einer Vorlage oder mit einer frei aufgebauten Quick-Tour. Fuer Spezialfaelle kannst du darunter jederzeit in die komplexe Erstellung wechseln.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGlobalTrainingModeCard(BuildContext context) {
+    final selectedTemplate = _selectedTemplate();
+    return _buildWizardSectionCard(
+      context,
+      title: 'Trainingsmodus',
+      subtitle:
+          'Dieser Schritt liegt bewusst ueber allen Editoren, weil er den Start-Kader und damit die spaetere Karrierequalitaet festlegt.',
+      child: _buildSimpleTrainingModeSection(selectedTemplate),
+    );
+  }
+
+  Widget _buildSimpleStartSection(
+    BuildContext context, {
+    required CareerTemplate? selectedTemplate,
+    required CareerTemplate? effectiveTemplate,
+    required int selectedPoolCount,
+    required int generatedCount,
+    required int targetRosterSize,
+    required bool canCreate,
+  }) {
+    final summary = selectedTemplate == null
+        ? (_simpleQuickTournamentGenerationEnabled
+            ? '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'} ${effectiveTemplate == null ? 'Noch keine Quick-Tour aktiv.' : '${effectiveTemplate.calendar.length} Quick-Tour-Eintraege sind vorbereitet.'}'
+            : 'Waehle zuerst eine Vorlage oder aktiviere die Quick-Erstellung.')
+        : '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'}';
+    return _buildWizardSectionCard(
+      context,
+      title: 'Start',
+      subtitle:
+          'Hier pruefst du den aktuellen Stand und startest die Karriere-Erstellung.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            summary,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF556372),
+                ),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: canCreate ? _createSimpleCareerFromTemplate : null,
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: const Text('Einfache Karriere erstellen'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdvancedCreationSection(
+    BuildContext context, {
+    required List<CareerDefinition> careers,
+    required CareerDefinition? activeCareer,
+    required List<CareerTemplate> templates,
+    required List<PlayerProfile> players,
+  }) {
+    return _buildWizardSectionCard(
+      context,
+      title: 'Komplexe Erstellung',
+      subtitle:
+          'Wenn Vorlage oder Quick nicht reichen, kannst du hier in den vollstaendigen Karriere-Editor wechseln.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _showAdvancedCreation,
+            onChanged: (value) {
+              setState(() => _showAdvancedCreation = value);
+            },
+            title: const Text('Komplexe Erstellung einblenden'),
+            subtitle: const Text(
+              'Zeigt die komplette manuelle Karriere-Erstellung mit Kader, Ranglisten, Regeln und Kalender.',
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (!_showAdvancedCreation)
+            const Text(
+              'Vorlage, Trainingsmodus und Quick-Tour reichen fuer die meisten Karrieren. Den kompletten Editor brauchst du nur fuer eigene Sonderregeln oder sehr freie Tour-Strukturen.',
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _buildCareerCard(
+                context,
+                careers: careers,
+                activeCareer: activeCareer,
+                templates: templates,
+                players: players,
+              ),
+            ),
         ],
       ),
     );
@@ -4275,24 +4125,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Einfache Karriere',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Im einfachen Modus nutzt du entweder eine Vorlage oder die Quick-Erstellung. Beides gleichzeitig ist nicht aktiv.',
-                ),
-              ],
-            ),
-          ),
-        ),
+        _buildSimpleCreationIntroCard(context),
         const SizedBox(height: 16),
         _buildTemplateSelectionCard(context),
         const SizedBox(height: 16),
@@ -4301,14 +4134,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         _buildTemplatePoolSelector(
           context,
           labelText: 'Karriere-Kader',
-        ),
-        const SizedBox(height: 16),
-        _buildWizardSectionCard(
-          context,
-          title: 'Trainingsmodus',
-          subtitle:
-              'Passe die Average-Spanne direkt vor dem Karrierestart fuer den aktuellen Start-Kader an.',
-          child: _buildSimpleTrainingModeSection(selectedTemplate),
         ),
         const SizedBox(height: 16),
         _buildWizardSectionCard(
@@ -4340,32 +4165,14 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        _buildWizardSectionCard(
+        _buildSimpleStartSection(
           context,
-          title: 'Start',
-          subtitle:
-              'Quick-Tour ist wieder sichtbar. Weitere Bloecke werden schrittweise wieder eingeblendet.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                selectedTemplate == null
-                    ? (_simpleQuickTournamentGenerationEnabled
-                        ? '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount moegliche Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'} ${effectiveTemplate == null ? '' : '${effectiveTemplate.calendar.length} Quick-Tour-Eintraege sind vorbereitet.'}'
-                        : 'Waehle zuerst eine Vorlage oder aktiviere die Quick-Erstellung.')
-                    : '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount moegliche Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF556372),
-                    ),
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: canCreate ? _createSimpleCareerFromTemplate : null,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Einfache Karriere erstellen'),
-              ),
-            ],
-          ),
+          selectedTemplate: selectedTemplate,
+          effectiveTemplate: effectiveTemplate,
+          selectedPoolCount: selectedPoolCount,
+          generatedCount: generatedCount,
+          targetRosterSize: targetRosterSize,
+          canCreate: canCreate,
         ),
       ],
     );
@@ -4381,362 +4188,18 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
+        _buildGlobalTrainingModeCard(context),
+        const SizedBox(height: 16),
         _buildSimpleCreationCard(context),
         const SizedBox(height: 16),
-        _buildWizardSectionCard(
+        _buildAdvancedCreationSection(
           context,
-          title: 'Komplexe Erstellung',
-          subtitle:
-              'Wenn Vorlage oder Quick nicht reichen, kannst du hier in den vollstaendigen Karriere-Editor wechseln.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _showAdvancedCreation,
-                onChanged: (value) {
-                  setState(() => _showAdvancedCreation = value);
-                },
-                title: const Text('Komplexe Erstellung einblenden'),
-                subtitle: const Text(
-                  'Zeigt die komplette manuelle Karriere-Erstellung mit Kader, Ranglisten, Regeln und Kalender.',
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (!_showAdvancedCreation)
-                const Text(
-                  'Starte oben mit Vorlage oder Quick-Tour. Nur fuer Spezialfaelle brauchst du den vollstaendigen Editor direkt am Anfang.',
-                )
-              else
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    children: <Widget>[
-                      _buildCareerCard(
-                        context,
-                        careers: careers,
-                        activeCareer: activeCareer,
-                        templates: templates,
-                        players: players,
-                      ),
-                      const SizedBox(height: 16),
-                      const Card(
-                        child: Padding(
-                          padding: EdgeInsets.all(18),
-                          child: Text(
-                            'Die komplexe Erstellung bleibt verfuegbar, ist aber jetzt bewusst der zweite Schritt nach Vorlage oder Quick.',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
+          careers: careers,
+          activeCareer: activeCareer,
+          templates: templates,
+          players: players,
         ),
       ],
-    );
-  }
-
-  Widget _buildSimpleQuickTourTypeCard(
-    BuildContext context, {
-    required _SimpleQuickTourBlueprint blueprint,
-    required _SimpleQuickTourTypeConfig config,
-    required int effectiveFieldSize,
-    required int effectivePrizePool,
-  }) {
-    final effectivePlayoffQualifierCount =
-        blueprint.format == TournamentFormat.leaguePlayoff
-            ? _quickPlayoffQualifierCountForFieldSize(
-                fieldSize: effectiveFieldSize,
-                requestedQualifierCount: blueprint.playoffQualifierCount,
-              )
-            : blueprint.playoffQualifierCount;
-    final effectiveKnockoutPrizeValues = _effectiveQuickKnockoutPrizeValues(
-      blueprint: blueprint,
-      config: config,
-      fieldSize: effectiveFieldSize,
-      prizePool: effectivePrizePool,
-      playoffQualifierCount: effectivePlayoffQualifierCount,
-    );
-    final effectiveLeaguePrizeValues = _effectiveQuickLeaguePrizeValues(
-      blueprint: blueprint,
-      config: config,
-      fieldSize: effectiveFieldSize,
-      prizePool: effectivePrizePool,
-    );
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    blueprint.categoryName,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE9F4F3),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(_tournamentFormatLabel(blueprint.format)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              blueprint.isSeries
-                  ? 'Serienformat mit mehreren Kalendereintraegen pro Event.'
-                  : 'Einzelturnier der Tour.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF556372),
-                  ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey<String>('quick-count-${blueprint.id}-${config.count}'),
-                    keyboardType: TextInputType.number,
-                    initialValue: '${config.count}',
-                    onChanged: (value) {
-                      final parsed = int.tryParse(value.trim()) ?? 0;
-                      setState(() {
-                        _simpleQuickTourConfigs[blueprint.id] = config.copyWith(
-                          count: parsed < 0 ? 0 : parsed,
-                        );
-                      });
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Anzahl',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey<String>(
-                      'quick-field-${blueprint.id}-${config.fieldSizeOverride ?? effectiveFieldSize}',
-                    ),
-                    keyboardType: TextInputType.number,
-                    initialValue: '$effectiveFieldSize',
-                    onChanged: (value) {
-                      final parsed = int.tryParse(value.trim());
-                      setState(() {
-                        _simpleQuickTourConfigs[blueprint.id] = parsed == null
-                            ? config.copyWith(clearFieldSizeOverride: true)
-                            : config.copyWith(fieldSizeOverride: parsed);
-                      });
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Teilnehmerfeld',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    key: ValueKey<String>(
-                      'quick-prize-${blueprint.id}-${config.prizePoolOverride ?? effectivePrizePool}',
-                    ),
-                    keyboardType: TextInputType.number,
-                    initialValue: '$effectivePrizePool',
-                    onChanged: (value) {
-                      final parsed = int.tryParse(value.trim());
-                      setState(() {
-                        _simpleQuickTourConfigs[blueprint.id] = parsed == null
-                            ? config.copyWith(clearPrizePoolOverride: true)
-                            : config.copyWith(prizePoolOverride: parsed);
-                      });
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Preisgeld',
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: DropdownButtonFormField<CareerTournamentPrizeSplitPreset>(
-                    key: ValueKey<String>(
-                      'quick-prize-preset-${blueprint.id}-${config.prizeSplitPreset.name}',
-                    ),
-                    initialValue: config.prizeSplitPreset,
-                    decoration: const InputDecoration(
-                      labelText: 'Preisgeld-Share',
-                    ),
-                    items: CareerTournamentPrizeSplitPreset.values
-                        .map(
-                          (preset) =>
-                              DropdownMenuItem<CareerTournamentPrizeSplitPreset>(
-                            value: preset,
-                            child: Text(preset.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _simpleQuickTourConfigs[blueprint.id] = config.copyWith(
-                          prizeSplitPreset: value,
-                          knockoutPrizeValues: _defaultQuickKnockoutPrizeValues(
-                            preset: value,
-                            prizePool: effectivePrizePool,
-                            stageCount: _quickKnockoutStageCount(
-                              blueprint: blueprint,
-                              fieldSize: effectiveFieldSize,
-                              playoffQualifierCount:
-                                  effectivePlayoffQualifierCount,
-                            ),
-                            format: blueprint.format,
-                          ),
-                          leaguePositionPrizeValues:
-                              _defaultQuickLeaguePrizeValues(
-                            preset: value,
-                            prizePool: effectivePrizePool,
-                            placeCount: _quickLeaguePrizePlaceCount(
-                              blueprint: blueprint,
-                              fieldSize: effectiveFieldSize,
-                            ),
-                            format: blueprint.format,
-                          ),
-                        );
-                      });
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: () {
-                    setState(() {
-                      _simpleQuickTourConfigs[blueprint.id] = config.copyWith(
-                        knockoutPrizeValues: _defaultQuickKnockoutPrizeValues(
-                          preset: config.prizeSplitPreset,
-                          prizePool: effectivePrizePool,
-                          stageCount: _quickKnockoutStageCount(
-                            blueprint: blueprint,
-                            fieldSize: effectiveFieldSize,
-                            playoffQualifierCount:
-                                effectivePlayoffQualifierCount,
-                          ),
-                          format: blueprint.format,
-                        ),
-                        leaguePositionPrizeValues:
-                            _defaultQuickLeaguePrizeValues(
-                          preset: config.prizeSplitPreset,
-                          prizePool: effectivePrizePool,
-                          placeCount: _quickLeaguePrizePlaceCount(
-                            blueprint: blueprint,
-                            fieldSize: effectiveFieldSize,
-                          ),
-                          format: blueprint.format,
-                        ),
-                      );
-                    });
-                  },
-                  child: const Text('Preset anwenden'),
-                ),
-              ],
-            ),
-            if (effectiveKnockoutPrizeValues.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(
-                'KO-Auszahlungen',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: List<Widget>.generate(
-                  effectiveKnockoutPrizeValues.length,
-                  (index) => SizedBox(
-                    width: 210,
-                    child: TextFormField(
-                      key: ValueKey<String>(
-                        'quick-knockout-${blueprint.id}-$index-${effectiveKnockoutPrizeValues[index]}',
-                      ),
-                      keyboardType: TextInputType.number,
-                      initialValue: '${effectiveKnockoutPrizeValues[index]}',
-                      onChanged: (value) {
-                        final parsed = int.tryParse(value.trim()) ?? 0;
-                        final nextValues =
-                            List<int>.from(effectiveKnockoutPrizeValues);
-                        nextValues[index] = parsed < 0 ? 0 : parsed;
-                        setState(() {
-                          _simpleQuickTourConfigs[blueprint.id] = config.copyWith(
-                            knockoutPrizeValues: nextValues,
-                          );
-                        });
-                      },
-                      decoration: InputDecoration(
-                        labelText: _quickKnockoutPrizeLabel(
-                          index,
-                          effectiveKnockoutPrizeValues.length,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            if (effectiveLeaguePrizeValues.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              Text(
-                'Liga-Auszahlungen',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: List<Widget>.generate(
-                  effectiveLeaguePrizeValues.length,
-                  (index) => SizedBox(
-                    width: 180,
-                    child: TextFormField(
-                      key: ValueKey<String>(
-                        'quick-league-${blueprint.id}-$index-${effectiveLeaguePrizeValues[index]}',
-                      ),
-                      keyboardType: TextInputType.number,
-                      initialValue: '${effectiveLeaguePrizeValues[index]}',
-                      onChanged: (value) {
-                        final parsed = int.tryParse(value.trim()) ?? 0;
-                        final nextValues =
-                            List<int>.from(effectiveLeaguePrizeValues);
-                        nextValues[index] = parsed < 0 ? 0 : parsed;
-                        setState(() {
-                          _simpleQuickTourConfigs[blueprint.id] = config.copyWith(
-                            leaguePositionPrizeValues: nextValues,
-                          );
-                        });
-                      },
-                      decoration: InputDecoration(
-                        labelText: '${index + 1}. Platz',
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 
@@ -6575,6 +6038,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     final currentMin = sortedPlayers.first.average;
     final currentMax = sortedPlayers.last.average;
     final updatedPlayers = <CareerDatabasePlayer>[];
+    final resolutionCache = <double, ComputerSkillResolution>{};
 
     for (var index = 0; index < sortedPlayers.length; index += 1) {
       final player = sortedPlayers[index];
@@ -6589,8 +6053,14 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       final targetAverage = (targetMin + ((targetMax - targetMin) * progress))
           .clamp(0, 180)
           .toDouble();
-      final resolution = _computerRepository
-          .resolveSkillsForTheoreticalAverageQuick(targetAverage);
+      final normalizedTargetAverage =
+          ((targetAverage * 10).round() / 10).clamp(0, 180).toDouble();
+      final resolution = resolutionCache.putIfAbsent(
+        normalizedTargetAverage,
+        () => _computerRepository.resolveSkillsForTheoreticalAverageQuick(
+          normalizedTargetAverage,
+        ),
+      );
       updatedPlayers.add(
         player.copyWith(
           average: resolution.theoreticalAverage,
@@ -6601,7 +6071,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
 
       final processedCount = index + 1;
       if (mounted &&
-          (processedCount == sortedPlayers.length || processedCount % 8 == 0)) {
+          (processedCount == sortedPlayers.length || processedCount % 4 == 0)) {
         setState(() {
           final prefix =
               progressPrefix ?? 'Trainingsmodus wird angewendet...';
@@ -6609,11 +6079,126 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               '$prefix ($processedCount/${sortedPlayers.length} Spieler)';
           _busyProgress = processedCount / sortedPlayers.length;
         });
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(const Duration(milliseconds: 1));
       }
     }
 
     return updatedPlayers;
+  }
+
+  Future<List<CareerDatabasePlayer>> _resolveTrainingModePlayers(
+    List<CareerDatabasePlayer> poolPlayers, {
+    required double targetMin,
+    required double targetMax,
+    String? progressPrefix,
+  }) async {
+    if (poolPlayers.isEmpty) {
+      return const <CareerDatabasePlayer>[];
+    }
+
+    final sortedPlayers = List<CareerDatabasePlayer>.from(poolPlayers)
+      ..sort((left, right) => left.average.compareTo(right.average));
+    final currentMin = sortedPlayers.first.average;
+    final currentMax = sortedPlayers.last.average;
+    final settingsProfile = SettingsRepository.instance.createBotProfile(
+      skill: 700,
+      finishingSkill: 700,
+    );
+    final payloadPlayers = <Map<String, Object?>>[];
+    for (var index = 0; index < sortedPlayers.length; index += 1) {
+      final player = sortedPlayers[index];
+      final double progress;
+      if (sortedPlayers.length == 1) {
+        progress = 0.5;
+      } else if ((currentMax - currentMin).abs() < 0.0001) {
+        progress = index / (sortedPlayers.length - 1);
+      } else {
+        progress = (player.average - currentMin) / (currentMax - currentMin);
+      }
+      final targetAverage = (targetMin + ((targetMax - targetMin) * progress))
+          .clamp(0, 180)
+          .toDouble();
+      payloadPlayers.add(<String, Object?>{
+        'id': player.databasePlayerId,
+        'targetAverage': ((targetAverage * 10).round() / 10).toDouble(),
+      });
+    }
+
+    try {
+      final handle = SimulationService.instance.startPersistentJob<List<Object?>>(
+        taskType: 'resolve_training_pool',
+        initialLabel: progressPrefix ?? 'Trainingsmodus wird angewendet...',
+        payload: <String, Object?>{
+          'players': payloadPlayers,
+          'radiusCalibrationPercent': settingsProfile.radiusCalibrationPercent,
+          'simulationSpreadPercent': settingsProfile.simulationSpreadPercent,
+          'matchCount': 8,
+        },
+      );
+
+      void updateTrainingProgress() {
+        if (!mounted) {
+          return;
+        }
+        final nextLabel = handle.label;
+        final nextProgress = handle.progress;
+        final currentProgress = _busyProgress;
+        final progressChanged = nextProgress == null ||
+            currentProgress == null ||
+            (nextProgress - currentProgress).abs() >= 0.02 ||
+            nextProgress >= 1.0;
+        if (!progressChanged) {
+          return;
+        }
+        setState(() {
+          _busyMessage = nextLabel;
+          _busyProgress = nextProgress;
+        });
+      }
+
+      handle.addListener(updateTrainingProgress);
+      late final List<Object?> result;
+      try {
+        result = await handle.result;
+      } finally {
+        handle.removeListener(updateTrainingProgress);
+      }
+
+      final resolutionsById = <String, Map<String, Object?>>{};
+      for (final entry in result) {
+        if (entry is Map) {
+          final map = entry.cast<String, Object?>();
+          final id = map['id'] as String?;
+          if (id != null && id.isNotEmpty) {
+            resolutionsById[id] = map;
+          }
+        }
+      }
+
+      return sortedPlayers.map((player) {
+        final resolution = resolutionsById[player.databasePlayerId];
+        if (resolution == null) {
+          return player;
+        }
+        return player.copyWith(
+          average: ((resolution['theoreticalAverage'] as num?)?.toDouble() ??
+                  player.average)
+              .clamp(0, 180)
+              .toDouble(),
+          skill: (resolution['skill'] as num?)?.toInt() ?? player.skill,
+          finishingSkill:
+              (resolution['finishingSkill'] as num?)?.toInt() ??
+                  player.finishingSkill,
+        );
+      }).toList();
+    } catch (_) {
+      return _resolveTrainingModePlayersLocally(
+        poolPlayers,
+        targetMin: targetMin,
+        targetMax: targetMax,
+        progressPrefix: progressPrefix,
+      );
+    }
   }
 
   Future<void> _applyTrainingModeToPool(CareerDefinition career) async {
@@ -6639,7 +6224,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     await _runBusyAction(
       message: '$busyMessage (0/${poolPlayers.length} Spieler)',
       action: () async {
-        final updatedPlayers = await _resolveTrainingModePlayersLocally(
+        final updatedPlayers = await _resolveTrainingModePlayers(
           poolPlayers,
           targetMin: targetMin,
           targetMax: targetMax,
@@ -6676,7 +6261,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     await _runBusyAction(
       message: '$busyMessage (0/${poolPlayers.length} Spieler)',
       action: () async {
-        final updatedPlayers = await _resolveTrainingModePlayersLocally(
+        final updatedPlayers = await _resolveTrainingModePlayers(
           poolPlayers,
           targetMin: targetMin,
           targetMax: targetMax,
@@ -6721,16 +6306,23 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   }
 
   Future<void> _createSimpleCareerFromTemplate() async {
-    final effectiveTemplate = _effectiveSimpleCreationTemplate();
-    if (effectiveTemplate == null) {
+    final selectedTemplate = _selectedTemplate();
+    final quickModeActive =
+        selectedTemplate == null && _simpleQuickTournamentGenerationEnabled;
+    if (selectedTemplate == null && !quickModeActive) {
       return;
     }
-    final templateDatabasePlayers = _buildSimpleCreationRoster(
-      _selectedTemplate(),
-    );
+    final selectedPoolCount = _simpleCreationTargetRosterCount(selectedTemplate);
     final shouldContinue = await _confirmTemplateCreation(
-      effectiveTemplate,
-      templateDatabasePlayers.length,
+      templateName: selectedTemplate?.name ?? 'Quick Tour',
+      tournamentCount: selectedTemplate?.calendar.length ??
+          _estimateSimpleQuickCalendarItemCount(
+            rosterSize: selectedPoolCount,
+          ),
+      rankingCount: selectedTemplate?.rankings.length ??
+          _buildSimpleQuickTourRankings().length,
+      selectedPoolCount: selectedPoolCount,
+      isQuickTourTemplate: quickModeActive,
     );
     if (!shouldContinue || !mounted) {
       return;
@@ -6741,6 +6333,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       message: 'Einfache Karriere wird erstellt...',
       action: () async {
         await Future<void>.delayed(Duration.zero);
+        final effectiveTemplate = selectedTemplate ??
+            _templateForSimpleCreation(_buildNeutralSimpleTemplate());
+        final templateDatabasePlayers = _buildSimpleCreationRoster(
+          selectedTemplate,
+        );
         _repository.createCareerFromTemplate(
           name: '',
           template: effectiveTemplate,
@@ -6760,6 +6357,50 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       return;
     }
     Navigator.of(context).pushReplacementNamed(AppRoutes.careerDetail);
+  }
+
+  int _simpleCreationTargetRosterCount(CareerTemplate? template) {
+    final selectedPlayers = _templateCreationPoolPlayers(template);
+    return _effectiveSimpleTargetRosterSize(selectedPlayers.length);
+  }
+
+  int _estimateSimpleQuickCalendarItemCount({
+    required int rosterSize,
+  }) {
+    _ensureSimpleQuickTourConfigs();
+    var total = 0;
+    for (final blueprint in _selectedSimpleQuickTourBlueprints()) {
+      final count = _simpleQuickTourConfigs[blueprint.id]?.count ?? 0;
+      if (count <= 0) {
+        continue;
+      }
+      if (!blueprint.isSeries) {
+        total += count;
+        continue;
+      }
+      final effectiveFieldSize = _simpleQuickTourConfigs[blueprint.id]
+              ?.fieldSizeOverride ??
+          _quickFieldSizeForBlueprint(
+            blueprint: blueprint,
+            rosterSize: rosterSize,
+          );
+      final effectivePlayoffQualifierCount =
+          blueprint.format == TournamentFormat.leaguePlayoff
+              ? _quickPlayoffQualifierCountForFieldSize(
+                  fieldSize: effectiveFieldSize,
+                  requestedQualifierCount: blueprint.playoffQualifierCount,
+                )
+              : blueprint.playoffQualifierCount;
+      final leagueMatchdays = _leagueMatchdayCount(
+        fieldSize: effectiveFieldSize,
+        repeats: blueprint.roundRobinRepeats,
+      );
+      final playoffRounds = blueprint.format == TournamentFormat.leaguePlayoff
+          ? _playoffRoundCount(effectivePlayoffQualifierCount)
+          : 0;
+      total += count * (leagueMatchdays + playoffRounds);
+    }
+    return total;
   }
 
   CareerTemplate? _effectiveSimpleCreationTemplate() {
@@ -6911,8 +6552,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         _templateCreationPoolPlayers(resolvedTemplate);
 
     final shouldContinue = await _confirmTemplateCreation(
-      resolvedTemplate,
-      templateDatabasePlayers.length,
+      templateName: resolvedTemplate.name,
+      tournamentCount: resolvedTemplate.calendar.length,
+      rankingCount: resolvedTemplate.rankings.length,
+      selectedPoolCount: templateDatabasePlayers.length,
+      isQuickTourTemplate: false,
     );
     if (!shouldContinue || !mounted) {
       return;
@@ -6949,11 +6593,13 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     );
   }
 
-  Future<bool> _confirmTemplateCreation(
-    CareerTemplate template,
-    int selectedPoolCount,
-  ) async {
-    final isQuickTourTemplate = template.id.startsWith('quick-tour-');
+  Future<bool> _confirmTemplateCreation({
+    required String templateName,
+    required int tournamentCount,
+    required int rankingCount,
+    required int selectedPoolCount,
+    required bool isQuickTourTemplate,
+  }) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -6964,10 +6610,10 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           content: Text(
             isQuickTourTemplate
                 ? 'Es wird ein neues Quick-Tour-Geruest als Karriere angelegt.\n\n'
-                    '$selectedPoolCount Spieler aus dem aktuell gewaehlten Karriere-Pool, ${template.calendar.length} Turniere und ${template.rankings.length} Ranglisten werden automatisch aufgebaut.\n\n'
+                    '$selectedPoolCount Spieler aus dem aktuell gewaehlten Karriere-Pool, $tournamentCount Turniere und $rankingCount Ranglisten werden automatisch aufgebaut.\n\n'
                     'Die Saison ist nicht aus einer Vorlagen-Saison kopiert, sondern als eigenstaendige Tour zusammengestellt.'
-                : 'Die Vorlage "${template.name}" wird als neue Karriere angelegt.\n\n'
-                    '$selectedPoolCount Spieler aus dem aktuell gewaehlten Karriere-Pool, ${template.calendar.length} Turniere und ${template.rankings.length} Ranglisten werden uebernommen.\n\n'
+                : 'Die Vorlage "$templateName" wird als neue Karriere angelegt.\n\n'
+                    '$selectedPoolCount Spieler aus dem aktuell gewaehlten Karriere-Pool, $tournamentCount Turniere und $rankingCount Ranglisten werden uebernommen.\n\n'
                     'Je nach Vorlagengroesse kann das kurz dauern.',
           ),
           actions: <Widget>[
@@ -7390,10 +7036,12 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     }
     final result = await Navigator.of(context).push<_SimpleQuickTournamentDraft>(
       MaterialPageRoute<_SimpleQuickTournamentDraft>(
-        builder: (_) => _SimpleQuickTournamentAddPage(
+        builder: (_) => _SimpleQuickTournamentEditorPage(
           addableBlueprints: addableBlueprints,
           host: this,
           rosterSize: rosterSize,
+          pageTitle: 'Quick-Turnier hinzufuegen',
+          submitLabel: 'Hinzufuegen',
         ),
       ),
     );
@@ -7408,6 +7056,36 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     setState(() {
       _simpleQuickSelectedBlueprintIds.add(selectedBlueprintId);
       _simpleQuickTourConfigs[selectedBlueprintId] = result.config;
+    });
+  }
+
+  Future<void> _editSimpleQuickTournamentBlueprint(
+    _SimpleQuickTourBlueprint blueprint, {
+    required int rosterSize,
+  }) async {
+    final currentConfig =
+        _simpleQuickTourConfigs[blueprint.id] ??
+        _SimpleQuickTourTypeConfig(
+          count: _defaultSimpleQuickCountForBlueprint(blueprint.id),
+        );
+    final result = await Navigator.of(context).push<_SimpleQuickTournamentDraft>(
+      MaterialPageRoute<_SimpleQuickTournamentDraft>(
+        builder: (_) => _SimpleQuickTournamentEditorPage(
+          addableBlueprints: <_SimpleQuickTourBlueprint>[blueprint],
+          host: this,
+          rosterSize: rosterSize,
+          initialBlueprintId: blueprint.id,
+          initialConfig: currentConfig,
+          pageTitle: 'Quick-Turnier bearbeiten',
+          submitLabel: 'Uebernehmen',
+        ),
+      ),
+    );
+    if (result == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _simpleQuickTourConfigs[blueprint.id] = result.config;
     });
   }
 

@@ -1,19 +1,29 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../data/background/simulation_service.dart';
+import '../../data/voice/speech_input_service.dart';
+import '../../data/voice/speech_recognition_snapshot.dart';
+import '../../data/voice/speech_output_service.dart';
+import '../../data/voice/voice_phrase_log_repository.dart';
 import '../../data/models/player_profile.dart';
+import '../../data/repositories/checkout_route_repository.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../data/repositories/tournament_repository.dart';
 import '../../domain/bot/bot_engine.dart';
+import '../../domain/board/board_camera_models.dart';
 import '../../domain/tournament/tournament_models.dart';
+import '../../domain/voice/spoken_match_command.dart';
+import '../../domain/voice/spoken_match_parser.dart';
 import '../../domain/x01/checkout_planner.dart';
 import '../../domain/x01/x01_match_engine.dart';
 import '../../domain/x01/x01_match_simulator.dart';
 import '../../domain/x01/x01_models.dart';
+import '../camera/board_camera_screen.dart';
 import 'game_mode_models.dart';
 import 'match_end_screen.dart';
 import 'match_result_models.dart';
@@ -412,12 +422,17 @@ class _MatchScreenState extends State<MatchScreen> {
   static const int _suggestionSetupPreference = 85;
   static const int _suggestionOuterBullPreference = 50;
   static const int _suggestionBullPreference = 50;
+  static const double _voiceHighConfidenceThreshold = 0.72;
+  static const double _voiceMinimumConfidenceThreshold = 0.45;
 
   late final BotEngine _botEngine;
   late final X01MatchEngine _matchEngine;
   late final X01MatchSimulator _matchSimulator;
   late final CheckoutPlanner _checkoutPlanner;
+  late final SpeechInputService _speechInputService;
+  late final SpeechOutputService _speechOutputService;
   late List<_ParticipantRuntime> _participants;
+  final SpokenMatchParser _spokenMatchParser = const SpokenMatchParser();
 
   int _currentTurnIndex = 0;
   int _starterIndex = 0;
@@ -438,8 +453,22 @@ class _MatchScreenState extends State<MatchScreen> {
   bool _isBullOffActive = false;
   int _bullOffRound = 1;
   int _bullOffTurnIndex = 0;
-  List<String> _bullOffOrder = <String>[];
+  List<String> _bullOffOrder = <String>[]; 
   Map<String, _BullOffResult> _bullOffResults = <String, _BullOffResult>{};
+  VoiceSessionPhase _voicePhase = VoiceSessionPhase.idle;
+  bool _voiceSessionEnabled = false;
+  bool _voiceInitializing = false;
+  bool _voiceHandlingResult = false;
+  bool _voiceSuppressAutoRestart = false;
+  bool _voiceConfirmationListeningHot = false;
+  String _voiceStatusLabel = 'Sprachmodus aus';
+  String _voiceTranscript = '';
+  double? _voiceLastConfidence;
+  List<String> _voiceLastAlternatives = const <String>[];
+  String? _voiceLocaleId;
+  String? _voiceErrorMessage;
+  SpokenMatchCommand? _pendingVoiceCommand;
+  Timer? _voiceRestartTimer;
 
   @override
   void initState() {
@@ -452,6 +481,8 @@ class _MatchScreenState extends State<MatchScreen> {
     );
     SimulationService.instance.applyToX01MatchSimulator(_matchSimulator);
     _checkoutPlanner = CheckoutPlanner();
+    _speechInputService = SpeechInputService();
+    _speechOutputService = SpeechOutputService();
     _participants = widget.session.participants
         .map(
           (participant) => _ParticipantRuntime(
@@ -477,7 +508,18 @@ class _MatchScreenState extends State<MatchScreen> {
     _resetLeg(initial: true);
   }
 
+  @override
+  void dispose() {
+    _voiceRestartTimer?.cancel();
+    unawaited(_speechInputService.cancel());
+    unawaited(_speechOutputService.stop());
+    super.dispose();
+  }
+
   bool get _isHumanTurn => !_matchFinished && _currentParticipant.config.isHuman;
+
+  bool get _hasHumanParticipant =>
+      _participants.any((participant) => participant.config.isHuman);
 
   _ParticipantRuntime get _currentParticipant => _participants[_currentTurnIndex];
 
@@ -494,6 +536,730 @@ class _MatchScreenState extends State<MatchScreen> {
       return null;
     }
     return _participants[index];
+  }
+
+  Future<void> _toggleVoiceSession() async {
+    if (_voiceSessionEnabled) {
+      await _stopVoiceSession();
+      return;
+    }
+    await _startVoiceSession();
+  }
+
+  Future<void> _startVoiceSession() async {
+    if (_voiceInitializing || _matchFinished) {
+      return;
+    }
+    if (!_hasHumanParticipant) {
+      _showInfo('Sprachmodus ist nur fuer menschliche Spieler verfuegbar.');
+      return;
+    }
+    if (!_speechInputService.supportsSpeechRecognition ||
+        !_speechOutputService.supportsTextToSpeech) {
+      _showInfo(
+        'Sprachmodus ist auf dieser Plattform aktuell nicht verfuegbar.',
+      );
+      return;
+    }
+
+    setState(() {
+      _voiceInitializing = true;
+      _voiceErrorMessage = null;
+      _voiceStatusLabel = 'Sprachmodus wird vorbereitet';
+    });
+
+    try {
+      final initialized = await _speechInputService.initialize(
+        onStatus: _handleVoiceStatusChanged,
+        onError: _handleVoiceError,
+      );
+      if (!initialized || !_speechInputService.isAvailable) {
+        throw StateError('Spracherkennung ist auf diesem Geraet nicht verfuegbar.');
+      }
+      _voiceLocaleId ??= await _speechInputService.preferredGermanLocaleId();
+      await _speechOutputService.initialize();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceSessionEnabled = true;
+        _voiceInitializing = false;
+      });
+      await _syncVoiceSessionWithGameState(forceRestart: true);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceSessionEnabled = false;
+        _voiceInitializing = false;
+        _voicePhase = VoiceSessionPhase.error;
+        _voiceErrorMessage = error.toString();
+        _voiceStatusLabel = 'Sprachmodus konnte nicht gestartet werden';
+      });
+      _showInfo('Sprachmodus konnte nicht gestartet werden.');
+    }
+  }
+
+  Future<void> _stopVoiceSession() async {
+    _voiceRestartTimer?.cancel();
+    _voiceSuppressAutoRestart = true;
+    await _speechInputService.cancel();
+    await _speechOutputService.stop();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voiceSessionEnabled = false;
+      _voiceInitializing = false;
+      _voiceHandlingResult = false;
+      _voiceConfirmationListeningHot = false;
+      _voicePhase = VoiceSessionPhase.idle;
+      _voiceStatusLabel = 'Sprachmodus aus';
+      _voiceTranscript = '';
+      _voiceErrorMessage = null;
+      _pendingVoiceCommand = null;
+    });
+    _voiceSuppressAutoRestart = false;
+  }
+
+  Future<void> _syncVoiceSessionWithGameState({
+    bool forceRestart = false,
+  }) async {
+    if (!_voiceSessionEnabled) {
+      return;
+    }
+    if (_matchFinished || !_hasHumanParticipant) {
+      await _stopVoiceSession();
+      return;
+    }
+    if (_isBullOffActive) {
+      final bullOffParticipant = _currentBullOffParticipant;
+      if (bullOffParticipant == null) {
+        await _pauseVoiceSession('Sprachmodus wartet auf das Ausbullen');
+        return;
+      }
+      if (!bullOffParticipant.config.isHuman) {
+        await _pauseVoiceSession('Sprachmodus wartet auf den Computerwurf');
+        return;
+      }
+      if (_voicePhase == VoiceSessionPhase.confirmingCommand &&
+          _pendingVoiceCommand != null &&
+          !forceRestart) {
+        return;
+      }
+      await _startCommandListening(forceRestart: forceRestart);
+      return;
+    }
+    if (!_isHumanTurn) {
+      await _pauseVoiceSession('Sprachmodus wartet auf deinen Zug');
+      return;
+    }
+    if (_voicePhase == VoiceSessionPhase.confirmingCommand &&
+        _pendingVoiceCommand != null &&
+        !forceRestart) {
+      return;
+    }
+    await _startCommandListening(forceRestart: forceRestart);
+  }
+
+  Future<void> _pauseVoiceSession(String label) async {
+    _voiceRestartTimer?.cancel();
+    _voiceSuppressAutoRestart = true;
+    await _speechInputService.stop();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voicePhase = VoiceSessionPhase.paused;
+      _voiceStatusLabel = label;
+    });
+    _voiceSuppressAutoRestart = false;
+  }
+
+  Future<void> _startCommandListening({
+    bool forceRestart = false,
+  }) async {
+    if (!_voiceSessionEnabled) {
+      return;
+    }
+    if (!_isBullOffActive && !_isHumanTurn) {
+      return;
+    }
+    if (_isBullOffActive &&
+        (_currentBullOffParticipant == null ||
+            !_currentBullOffParticipant!.config.isHuman)) {
+      return;
+    }
+    if (_speechInputService.isListening && !forceRestart) {
+      return;
+    }
+    _voiceRestartTimer?.cancel();
+    _voiceSuppressAutoRestart = true;
+    await _speechInputService.stop();
+    _voiceSuppressAutoRestart = false;
+    await _speechInputService.listen(
+      profile: SpeechInputListenProfile.command,
+      localeId: _voiceLocaleId,
+      onResult: (result) {
+        if (result.isFinal) {
+          _voiceHandlingResult = true;
+        }
+        unawaited(_handleVoiceRecognitionResult(result));
+      },
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voiceConfirmationListeningHot = false;
+      _voicePhase = VoiceSessionPhase.listeningForCommand;
+      _voiceStatusLabel = _isBullOffActive
+          ? 'Sag Bull, Single Bull oder Outside'
+          : 'Sag einen Wert, Bust, kein Score oder Check';
+      _voiceTranscript = '';
+      _voiceLastConfidence = null;
+      _voiceLastAlternatives = const <String>[];
+      _voiceErrorMessage = null;
+    });
+  }
+
+  Future<void> _startConfirmationListening() async {
+    if (!_voiceSessionEnabled || _pendingVoiceCommand == null) {
+      return;
+    }
+    if (!_isBullOffActive && !_isHumanTurn) {
+      return;
+    }
+    if (_isBullOffActive &&
+        (_currentBullOffParticipant == null ||
+            !_currentBullOffParticipant!.config.isHuman)) {
+      return;
+    }
+    _voiceRestartTimer?.cancel();
+    _voiceConfirmationListeningHot = true;
+    if (!_speechInputService.isListening) {
+      _voiceSuppressAutoRestart = true;
+      await _speechInputService.stop();
+      _voiceSuppressAutoRestart = false;
+      await _speechInputService.listen(
+        profile: SpeechInputListenProfile.confirmation,
+        localeId: _voiceLocaleId,
+        onResult: (result) {
+          if (result.isFinal) {
+            _voiceHandlingResult = true;
+          }
+          unawaited(_handleVoiceRecognitionResult(result));
+        },
+      );
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voicePhase = VoiceSessionPhase.confirmingCommand;
+      _voiceStatusLabel = 'Sag ja, nein, nochmal oder abbrechen';
+      _voiceTranscript = '';
+      _voiceLastConfidence = null;
+      _voiceLastAlternatives = const <String>[];
+    });
+  }
+
+  Future<void> _handleVoiceRecognitionResult(
+    SpeechRecognitionSnapshot result,
+  ) async {
+    if (!mounted || !_voiceSessionEnabled) {
+      return;
+    }
+    setState(() {
+      _voiceTranscript = result.primaryText;
+      _voiceLastConfidence = result.confidence;
+      _voiceLastAlternatives = result.alternatives;
+      _voiceErrorMessage = null;
+    });
+    if (!result.isFinal) {
+      return;
+    }
+    try {
+      if (_voicePhase == VoiceSessionPhase.confirmingCommand) {
+        await _handleVoiceConfirmation(result);
+      } else {
+        await _handleVoiceCommand(result);
+      }
+    } finally {
+      _voiceHandlingResult = false;
+    }
+  }
+
+  Future<void> _handleVoiceCommand(SpeechRecognitionSnapshot result) async {
+    late final SpokenParseResult<SpokenMatchCommand> parseResult;
+    if (_isBullOffActive) {
+      final bullOffResult = _spokenMatchParser.parseBullOffCommandResult(
+        result.primaryText,
+        alternatives: result.alternatives,
+      );
+      parseResult = bullOffResult.isMatched
+          ? SpokenParseResult<SpokenMatchCommand>.matched(
+              bullOffResult.value!,
+              normalizedInput: bullOffResult.normalizedInput,
+            )
+              : bullOffResult.isAmbiguous
+                  ? SpokenParseResult<SpokenMatchCommand>.ambiguous(
+                  alternatives: bullOffResult.alternatives
+                      .cast<SpokenMatchCommand>(),
+                  normalizedInput: bullOffResult.normalizedInput,
+                )
+              : SpokenParseResult<SpokenMatchCommand>.unrecognized(
+                  normalizedInput: bullOffResult.normalizedInput,
+                );
+    } else {
+      parseResult = _spokenMatchParser.parseCommandResult(
+        result.primaryText,
+        alternatives: result.alternatives,
+      );
+    }
+
+    if (parseResult.isAmbiguous) {
+      await _logVoicePhrase(
+        status: 'ambiguous',
+        snapshot: result,
+        notes: _voiceAlternativesPrompt(
+          parseResult.alternatives
+              .map((entry) => (entry as dynamic).summaryLabel.toString())
+              .toList(growable: false),
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceStatusLabel = _voiceAlternativesPrompt(
+          parseResult.alternatives
+              .map((entry) => (entry as dynamic).summaryLabel.toString())
+              .toList(growable: false),
+        );
+        _voiceErrorMessage = 'Mehrdeutig';
+      });
+      _scheduleVoiceRestart(forConfirmation: false);
+      return;
+    }
+
+    if (!parseResult.isMatched) {
+      await _logVoicePhrase(
+        status: 'unrecognized',
+        snapshot: result,
+        notes: _commandRetryPrompt(),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceStatusLabel = _commandRetryPrompt();
+        _voiceErrorMessage = 'Nicht erkannt';
+      });
+      _scheduleVoiceRestart(forConfirmation: false);
+      return;
+    }
+
+    final command = parseResult.value!;
+    final confidence = result.confidence;
+    if (confidence != null && confidence < _voiceMinimumConfidenceThreshold) {
+      await _logVoicePhrase(
+        status: 'low_confidence',
+        snapshot: result,
+        notes: 'Niedrige Sicherheit fuer ${command.summaryLabel}',
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceStatusLabel =
+            'Nicht sicher genug fuer ${command.summaryLabel}. Bitte wiederholen.';
+        _voiceErrorMessage = 'Unsicher';
+      });
+      _scheduleVoiceRestart(forConfirmation: false);
+      return;
+    }
+
+    if ((confidence == null || confidence < _voiceHighConfidenceThreshold) &&
+        result.alternatives.isNotEmpty) {
+      final alternativeParseResult = _isBullOffActive
+          ? _spokenMatchParser.parseBullOffCommandResult(
+              result.alternatives.first,
+            )
+          : _spokenMatchParser.parseCommandResult(
+              result.alternatives.first,
+            );
+      final alternativeValue = alternativeParseResult.value;
+      final alternativeLabel = alternativeValue == null
+          ? null
+          : (alternativeValue as dynamic).summaryLabel.toString();
+      if (alternativeLabel != null && alternativeLabel != command.summaryLabel) {
+        final prompt =
+            'Ich habe ${command.summaryLabel} verstanden. Oder vielleicht $alternativeLabel. Bitte wiederholen.';
+        await _logVoicePhrase(
+          status: 'clarify',
+          snapshot: result,
+          notes: prompt,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _voiceStatusLabel = prompt;
+          _voiceErrorMessage = 'Unsicher';
+        });
+        _scheduleVoiceRestart(forConfirmation: false);
+        return;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+    await _playVoiceCueRecognized();
+    setState(() {
+      _pendingVoiceCommand = command;
+      _voicePhase = VoiceSessionPhase.confirmingCommand;
+      _voiceStatusLabel =
+          'Erkannt: ${command.summaryLabel}. Bitte mit ja oder nein bestaetigen.';
+      _voiceTranscript = result.primaryText;
+    });
+    await _startConfirmationListening();
+  }
+
+  Future<void> _handleVoiceConfirmation(
+    SpeechRecognitionSnapshot result,
+  ) async {
+    _voiceConfirmationListeningHot = false;
+    final parseResult = _spokenMatchParser.parseConfirmationResult(
+      result.primaryText,
+      alternatives: result.alternatives,
+    );
+    if (parseResult.isAmbiguous) {
+      await _logVoicePhrase(
+        status: 'confirmation_ambiguous',
+        snapshot: result,
+        notes: 'Mehrdeutige Bestaetigung',
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceStatusLabel = 'Bitte nur ja, nein, nochmal oder abbrechen sagen.';
+      });
+      _scheduleVoiceRestart(forConfirmation: true);
+      return;
+    }
+
+    final confirmation = parseResult.value;
+    if (confirmation == null) {
+      await _logVoicePhrase(
+        status: 'confirmation_unrecognized',
+        snapshot: result,
+        notes: 'Bestaetigung nicht erkannt',
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceStatusLabel =
+            'Bitte nur ja, nein, nochmal oder abbrechen sagen.';
+      });
+      _scheduleVoiceRestart(forConfirmation: true);
+      return;
+    }
+
+    switch (confirmation) {
+      case SpokenConfirmation.yes:
+        await _playVoiceCueConfirmed();
+        await _applyPendingVoiceCommand();
+        return;
+      case SpokenConfirmation.no:
+      case SpokenConfirmation.retry:
+        await _playVoiceCueRetry();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _pendingVoiceCommand = null;
+          _voiceStatusLabel = 'Okay, bitte erneut ansagen.';
+          _voiceTranscript = '';
+        });
+        _scheduleVoiceRestart(forConfirmation: false);
+        return;
+      case SpokenConfirmation.cancel:
+        await _playVoiceCueRetry();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _pendingVoiceCommand = null;
+          _voiceStatusLabel = 'Eingabe abgebrochen.';
+          _voiceTranscript = '';
+        });
+        _scheduleVoiceRestart(forConfirmation: false);
+        return;
+    }
+  }
+
+  String _commandRetryPrompt() {
+    return _isBullOffActive
+        ? 'Nicht verstanden. Bitte Bull, Single Bull oder Outside sagen.'
+        : 'Nicht verstanden. Bitte Wert, Bust, kein Score oder Check sagen.';
+  }
+
+  String _voiceAlternativesPrompt(List<String> labels) {
+    if (labels.isEmpty) {
+      return _commandRetryPrompt();
+    }
+    if (labels.length == 1) {
+      return 'Ich habe ${labels.first} verstanden. Bitte wiederholen.';
+    }
+    return 'Ich habe ${labels.first} oder ${labels[1]} verstanden. Bitte wiederholen.';
+  }
+
+  String _voiceModeName() {
+    if (_voicePhase == VoiceSessionPhase.confirmingCommand) {
+      return 'confirmation';
+    }
+    return _isBullOffActive ? 'bull_off_command' : 'match_command';
+  }
+
+  Future<void> _logVoicePhrase({
+    required String status,
+    required SpeechRecognitionSnapshot snapshot,
+    required String notes,
+  }) {
+    return VoicePhraseLogRepository.instance.append(
+      VoicePhraseLogEntry(
+        timestampIso: DateTime.now().toIso8601String(),
+        mode: _voiceModeName(),
+        status: status,
+        transcript: snapshot.primaryText,
+        alternatives: snapshot.alternatives,
+        confidence: snapshot.confidence,
+        notes: notes,
+      ),
+    );
+  }
+
+  Future<void> _playVoiceCueRecognized() async {
+    try {
+      await SystemSound.play(SystemSoundType.click);
+      await HapticFeedback.selectionClick();
+    } catch (_) {
+      // Best-effort feedback only.
+    }
+  }
+
+  Future<void> _playVoiceCueConfirmed() async {
+    try {
+      await SystemSound.play(SystemSoundType.click);
+      await HapticFeedback.lightImpact();
+    } catch (_) {
+      // Best-effort feedback only.
+    }
+  }
+
+  Future<void> _playVoiceCueRetry() async {
+    try {
+      await HapticFeedback.vibrate();
+    } catch (_) {
+      // Best-effort feedback only.
+    }
+  }
+
+  Future<void> _applyPendingVoiceCommand() async {
+    final command = _pendingVoiceCommand;
+    if (command == null) {
+      _scheduleVoiceRestart(forConfirmation: false);
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voicePhase = VoiceSessionPhase.applyingCommand;
+      _voiceStatusLabel = 'Wird uebernommen: ${command.summaryLabel}';
+    });
+
+    switch (command) {
+      case SpokenBullOffCommand():
+        final participant = _currentBullOffParticipant;
+        if (participant == null || !participant.config.isHuman) {
+          _showInfo('Gerade ist kein menschlicher Bullwurf aktiv.');
+          break;
+        }
+        final result = switch (command.kind) {
+          SpokenBullOffKind.bull => _BullOffResult.bull,
+          SpokenBullOffKind.singleBull => _BullOffResult.singleBull,
+          SpokenBullOffKind.outside => _BullOffResult.outside,
+        };
+        _submitBullOffResult(
+          participantId: participant.config.id,
+          result: result,
+        );
+        break;
+      case SpokenVisitCommand():
+        switch (command.kind) {
+          case SpokenVisitKind.score:
+          case SpokenVisitKind.noScore:
+            await _submitHumanScoreValue(valueOverride: command.score ?? 0);
+            break;
+          case SpokenVisitKind.bust:
+            _submitVoiceBust();
+            break;
+        }
+        break;
+      case SpokenCheckoutCommand():
+        if (_isCheckoutHotkeyAvailable) {
+          await _triggerCheckoutHotkey();
+        } else {
+          _showInfo('Aktuell ist kein Checkout moeglich.');
+        }
+        break;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _pendingVoiceCommand = null;
+      _voiceTranscript = '';
+    });
+    await _syncVoiceSessionWithGameState(forceRestart: true);
+  }
+
+  void _submitVoiceBust() {
+    if (!_isHumanTurn || _matchFinished) {
+      return;
+    }
+    final participant = _currentParticipant;
+    final visitResult = VisitResult(
+      throws: const <DartThrowResult>[],
+      scoredPoints: 0,
+      didBust: true,
+      remainingScore: participant.score,
+      openedLeg: participant.hasOpenedLeg,
+    );
+    _applyVisit(
+      participant: participant,
+      visitResult: visitResult,
+      throws: const <DartThrowResult>[],
+      startScore: participant.score,
+      manualDescription: 'Bust per Sprache',
+      manualDartsUsed: 3,
+    );
+  }
+
+  Future<void> _speakAndContinue(
+    String prompt, {
+    required bool forConfirmation,
+  }) async {
+    _voiceRestartTimer?.cancel();
+    _voiceSuppressAutoRestart = true;
+    await _speechInputService.stop();
+    if (!mounted || !_voiceSessionEnabled) {
+      _voiceSuppressAutoRestart = false;
+      return;
+    }
+    setState(() {
+      _voicePhase = VoiceSessionPhase.paused;
+      _voiceStatusLabel = prompt;
+    });
+    await _speechOutputService.speak(prompt);
+    _voiceSuppressAutoRestart = false;
+    if (forConfirmation) {
+      await _startConfirmationListening();
+    } else {
+      await _startCommandListening(forceRestart: true);
+    }
+  }
+
+  void _scheduleVoiceRestart({
+    required bool forConfirmation,
+  }) {
+    if (!_voiceSessionEnabled) {
+      return;
+    }
+    _voiceRestartTimer?.cancel();
+    _voiceRestartTimer = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted || !_voiceSessionEnabled) {
+        return;
+      }
+      if (forConfirmation) {
+        unawaited(_startConfirmationListening());
+      } else {
+        unawaited(_startCommandListening(forceRestart: true));
+      }
+    });
+  }
+
+  void _handleVoiceStatusChanged(String status) {
+    if (!mounted || !_voiceSessionEnabled) {
+      return;
+    }
+    final normalized = status.toLowerCase();
+    if (_voiceSuppressAutoRestart || _voiceHandlingResult) {
+      return;
+    }
+    if (_voiceConfirmationListeningHot &&
+        _voicePhase == VoiceSessionPhase.confirmingCommand) {
+      return;
+    }
+    if (normalized.contains('notlistening') || normalized.contains('done')) {
+      _scheduleVoiceRestart(
+        forConfirmation: _voicePhase == VoiceSessionPhase.confirmingCommand,
+      );
+    }
+  }
+
+  void _handleVoiceError(String errorMessage) {
+    if (!mounted || !_voiceSessionEnabled) {
+      return;
+    }
+    if (_isRecoverableVoiceError(errorMessage)) {
+      setState(() {
+        _voiceErrorMessage = null;
+        _voicePhase = _pendingVoiceCommand != null
+            ? VoiceSessionPhase.confirmingCommand
+            : VoiceSessionPhase.listeningForCommand;
+        _voiceStatusLabel = _pendingVoiceCommand != null
+            ? 'Bitte bestaetige mit ja oder nein'
+            : (_isBullOffActive
+                ? 'Nichts gehoert. Bitte Bull, Single Bull oder Outside sagen.'
+                : 'Nichts gehoert. Bitte nochmal ansagen.');
+      });
+      if (!_voiceSuppressAutoRestart) {
+        if (_pendingVoiceCommand != null) {
+          _voiceConfirmationListeningHot = true;
+        }
+        _scheduleVoiceRestart(
+          forConfirmation: _pendingVoiceCommand != null,
+        );
+      }
+      return;
+    }
+    setState(() {
+      _voiceErrorMessage = errorMessage;
+      _voicePhase = VoiceSessionPhase.error;
+      _voiceStatusLabel = 'Sprachmodus braucht einen neuen Versuch';
+    });
+    if (!_voiceSuppressAutoRestart) {
+      _scheduleVoiceRestart(
+        forConfirmation: _pendingVoiceCommand != null,
+      );
+    }
+  }
+
+  bool _isRecoverableVoiceError(String errorMessage) {
+    final normalized = errorMessage.toLowerCase();
+    return normalized.contains('error_speech_timeout') ||
+        normalized.contains('speech timeout') ||
+        normalized.contains('error_no_match') ||
+        normalized.contains('no match') ||
+        normalized.contains('error_no_match_found');
   }
 
   void _resetLeg({bool initial = false}) {
@@ -525,6 +1291,7 @@ class _MatchScreenState extends State<MatchScreen> {
         _runBotTurn();
       });
     }
+    unawaited(_syncVoiceSessionWithGameState(forceRestart: true));
   }
 
   void _advanceTurn() {
@@ -552,6 +1319,7 @@ class _MatchScreenState extends State<MatchScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _continueBullOffIfNeeded();
     });
+    unawaited(_syncVoiceSessionWithGameState(forceRestart: true));
   }
 
   void _continueBullOffIfNeeded() {
@@ -1045,6 +1813,7 @@ class _MatchScreenState extends State<MatchScreen> {
     if (!_matchFinished && !visitEndedLeg && !_currentParticipant.config.isHuman) {
       _runBotTurn();
     }
+    unawaited(_syncVoiceSessionWithGameState(forceRestart: true));
   }
 
   void _finishLeg({required String winnerId}) {
@@ -1265,6 +2034,7 @@ class _MatchScreenState extends State<MatchScreen> {
 
       _matchFinished = true;
       _status = '${winner.config.name} gewinnt das Match.';
+      unawaited(_stopVoiceSession());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) {
           return;
@@ -1369,6 +2139,80 @@ class _MatchScreenState extends State<MatchScreen> {
     });
   }
 
+  Future<void> _openBoardCamera() async {
+    if (_matchFinished) {
+      return;
+    }
+    if (!_hasHumanParticipant) {
+      _showInfo('Die Board-Kamera ist nur fuer menschliche Spieler gedacht.');
+      return;
+    }
+    if (!_isBullOffActive && !_isHumanTurn) {
+      _showInfo('Die Board-Kamera steht nur im aktuellen menschlichen Zug bereit.');
+      return;
+    }
+    if (_isBullOffActive &&
+        (_currentBullOffParticipant == null ||
+            !_currentBullOffParticipant!.config.isHuman)) {
+      _showInfo('Gerade ist kein menschlicher Bull-Off-Wurf aktiv.');
+      return;
+    }
+
+    final suggestion = await Navigator.of(context).push<BoardCameraHitSuggestion>(
+      MaterialPageRoute<BoardCameraHitSuggestion>(
+        builder: (_) => BoardCameraScreen(isBullOff: _isBullOffActive),
+      ),
+    );
+    if (!mounted || suggestion == null) {
+      return;
+    }
+    _applyBoardCameraSuggestion(suggestion);
+  }
+
+  void _applyBoardCameraSuggestion(BoardCameraHitSuggestion suggestion) {
+    if (_isBullOffActive) {
+      final participant = _currentBullOffParticipant;
+      if (participant == null || !participant.config.isHuman) {
+        _showInfo('Gerade ist kein menschlicher Bull-Off-Wurf aktiv.');
+        return;
+      }
+
+      final throwResult = suggestion.throwResult;
+      final bullOffResult = throwResult.isBull
+          ? _BullOffResult.bull
+          : throwResult.label == '25'
+              ? _BullOffResult.singleBull
+              : _BullOffResult.outside;
+      SystemSound.play(SystemSoundType.click);
+      HapticFeedback.mediumImpact();
+      _submitBullOffResult(
+        participantId: participant.config.id,
+        result: bullOffResult,
+      );
+      return;
+    }
+
+    if (!_isHumanTurn) {
+      _showInfo('Die Board-Kamera kann nur im menschlichen Zug uebernommen werden.');
+      return;
+    }
+
+    final currentValue = int.tryParse(_currentInput.isEmpty ? '0' : _currentInput) ?? 0;
+    final nextValue = currentValue + suggestion.throwResult.scoredPoints;
+    if (nextValue > 180) {
+      _showInfo('Die erkannte Aufnahme wuerde ueber 180 liegen.');
+      return;
+    }
+
+    setState(() {
+      _currentInput = '$nextValue';
+      _status =
+          'Kamera erkannt: ${suggestion.throwResult.label} (${suggestion.throwResult.scoredPoints}). Aufnahme aktuell $nextValue.';
+    });
+    SystemSound.play(SystemSoundType.click);
+    HapticFeedback.mediumImpact();
+  }
+
   bool get _canUndo => _undoStack.isNotEmpty && !_isBullOffActive;
 
   void _pushUndoSnapshot() {
@@ -1433,6 +2277,7 @@ class _MatchScreenState extends State<MatchScreen> {
       _bullOffOrder = List<String>.from(snapshot.bullOffOrder);
       _bullOffResults = Map<String, _BullOffResult>.from(snapshot.bullOffResults);
     });
+    unawaited(_syncVoiceSessionWithGameState(forceRestart: true));
   }
 
   void _showInfo(String message) {
@@ -1804,8 +2649,8 @@ class _MatchScreenState extends State<MatchScreen> {
     if (participant.score == 1 &&
         widget.session.matchConfig.checkoutRequirement ==
             CheckoutRequirement.singleOut) {
-      final visitResult = VisitResult(
-        throws: const <DartThrowResult>[],
+      const visitResult = VisitResult(
+        throws: <DartThrowResult>[],
         scoredPoints: 1,
         didBust: false,
         remainingScore: 0,
@@ -2204,6 +3049,31 @@ class _MatchScreenState extends State<MatchScreen> {
           ),
         ),
         const SizedBox(width: 8),
+        IconButton.filledTonal(
+          tooltip: _voiceSessionEnabled ? 'Sprachmodus beenden' : 'Sprachmodus starten',
+          onPressed: (_matchFinished || !_hasHumanParticipant)
+              ? null
+              : () {
+                  unawaited(_toggleVoiceSession());
+                },
+          icon: Icon(
+            _voiceSessionEnabled ? Icons.mic_rounded : Icons.mic_none_rounded,
+            color: _voiceSessionEnabled ? const Color(0xFF0B7A57) : null,
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filledTonal(
+          tooltip: _isBullOffActive
+              ? 'Bull-Off per Kamera erkennen'
+              : 'Treffer per Kamera erkennen',
+          onPressed: (_matchFinished || !_hasHumanParticipant)
+              ? null
+              : () {
+                  unawaited(_openBoardCamera());
+                },
+          icon: const Icon(Icons.center_focus_strong_rounded),
+        ),
+        const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -2264,6 +3134,8 @@ class _MatchScreenState extends State<MatchScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          _buildVoiceStatusBanner(compact: compact),
+          SizedBox(height: compact ? 10 : 12),
           Expanded(
             child: _buildKeypadGrid(compact: compact),
           ),
@@ -2366,7 +3238,9 @@ class _MatchScreenState extends State<MatchScreen> {
       return _routeSuggestionCache[cacheKey] = '$routeText -> Finish';
     }
 
-    if (participant.score > 230) {
+    if (participant.score > 230 &&
+        widget.session.matchConfig.checkoutRequirement !=
+            CheckoutRequirement.doubleOut) {
       final setupOption = _bestSetupSuggestionRoute(
         score: participant.score,
         dartsLeft: 3,
@@ -2380,14 +3254,20 @@ class _MatchScreenState extends State<MatchScreen> {
     }
 
     final continuation = finishRoute == null
-        ? _checkoutPlanner.bestContinuationPlan(
-            score: participant.score,
-            dartsLeft: 3,
-            checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
-            playStyle: _suggestionPlayStyle,
-            outerBullPreference: _suggestionOuterBullPreference,
-            bullPreference: _suggestionBullPreference,
-          )
+        ? (CheckoutRouteRepository.instance.bestContinuationPlan(
+              score: participant.score,
+              dartsLeft: 3,
+              checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+              playStyle: _suggestionPlayStyle,
+            ) ??
+            _checkoutPlanner.bestContinuationPlan(
+              score: participant.score,
+              dartsLeft: 3,
+              checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+              playStyle: _suggestionPlayStyle,
+              outerBullPreference: _suggestionOuterBullPreference,
+              bullPreference: _suggestionBullPreference,
+            ))
         : null;
 
     final route = finishRoute ?? continuation?.throws;
@@ -2557,10 +3437,115 @@ class _MatchScreenState extends State<MatchScreen> {
     );
   }
 
+  Widget _buildVoiceStatusBanner({
+    required bool compact,
+  }) {
+    final active = _voiceSessionEnabled;
+    final background = active
+        ? const Color(0xFFF2F8F5)
+        : const Color(0xFFF4F7FA);
+    final border = active
+        ? const Color(0xFFD2EBDD)
+        : const Color(0xFFD9E3EC);
+    final foreground = active
+        ? const Color(0xFF15563E)
+        : const Color(0xFF4D6176);
+    final transcript = _voiceTranscript.trim();
+    final confidenceText = _voiceLastConfidence == null
+        ? ''
+        : ' (${(_voiceLastConfidence! * 100).round()}%)';
+    final alternativeText = _voiceLastAlternatives.isEmpty
+        ? ''
+        : ' Alt: ${_voiceLastAlternatives.take(2).join(' | ')}';
+    final heardText = transcript.isEmpty ? 'Noch nichts erkannt' : transcript;
+    final pendingSummary = _pendingVoiceCommand?.summaryLabel;
+    final detail = _voiceErrorMessage?.trim().isNotEmpty == true
+        ? _voiceErrorMessage!.trim()
+        : transcript.isNotEmpty
+            ? 'Gehort: $heardText$confidenceText$alternativeText'
+            : active
+                ? (_isBullOffActive
+                    ? 'Sag Bull, Single Bull oder Outside.'
+                    : 'Sag einen Wert, Bust, kein Score oder Check.')
+                : 'Starte den Sprachmodus ueber das Mikrofon oben rechts.';
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 10 : 12,
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            active ? Icons.mic_rounded : Icons.mic_off_rounded,
+            color: foreground,
+            size: compact ? 18 : 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  _voiceStatusLabel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 3),
+                if (pendingSummary != null && pendingSummary.isNotEmpty) ...<Widget>[
+                  Text(
+                    'Erkannt: $pendingSummary',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 3),
+                ],
+                Text(
+                  detail,
+                  maxLines: compact ? 2 : 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: foreground.withOpacity(0.88),
+                        height: 1.25,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<DartThrowResult>? _bestCheckoutSuggestionRoute({
     required int score,
     required int dartsLeft,
   }) {
+    final bundledRoute = CheckoutRouteRepository.instance.bestFinishRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      playStyle: _suggestionPlayStyle,
+    );
+    if (bundledRoute != null && bundledRoute.isNotEmpty) {
+      return bundledRoute;
+    }
+
     final finishes = _checkoutPlanner.allCheckoutRoutes(
       score: score,
       dartsLeft: dartsLeft,
@@ -2595,6 +3580,43 @@ class _MatchScreenState extends State<MatchScreen> {
     required int score,
     required int dartsLeft,
   }) {
+    final bundledRoute = CheckoutRouteRepository.instance.bestSetupRoute(
+      score: score,
+      dartsLeft: dartsLeft,
+      checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+      playStyle: _suggestionPlayStyle,
+    );
+    if (bundledRoute != null && bundledRoute.isNotEmpty) {
+      final remainingScore =
+          score -
+          bundledRoute.fold<int>(0, (sum, entry) => sum + entry.scoredPoints);
+      return CheckoutSetupLeaveOption(
+        setupRoute: bundledRoute,
+        remainingScore: remainingScore,
+        finishRoute: _checkoutPlanner.bestFinishRoute(
+              score: remainingScore,
+              dartsLeft: 3,
+              checkoutRequirement: widget.session.matchConfig.checkoutRequirement,
+              playStyle: _suggestionPlayStyle,
+              outerBullPreference: _suggestionOuterBullPreference,
+              bullPreference: _suggestionBullPreference,
+            ) ??
+            const <DartThrowResult>[],
+        score: 0,
+        breakdown: const CheckoutSetupScoreBreakdown(
+          setupPathScore: 0,
+          routeGuidance: 0,
+          leaveQuality: 0,
+          missPenalty: 0,
+          totalScore: 0,
+          setupPathDetails: <String>[],
+          routeGuidanceDetails: <String>[],
+          leaveQualityDetails: <String>[],
+          missPenaltyDetails: <String>[],
+        ),
+      );
+    }
+
     final options = _checkoutPlanner.setupLeaveOptions(
       startScore: score,
       dartsLeft: dartsLeft,

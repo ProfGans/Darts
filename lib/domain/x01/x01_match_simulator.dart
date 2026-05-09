@@ -1055,6 +1055,7 @@ class X01MatchSimulator {
               profile: player.profile,
               score: legState.score,
               dartsLeft: 4 - dart,
+              checkoutRequirement: checkoutRequirement,
               random: random,
             )
           : botEngine.simulateTargetThrow(

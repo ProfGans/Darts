@@ -117,18 +117,8 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
       _showMessage('Alter bitte zwischen 10 und 100 eingeben.');
       return;
     }
-    final preferences = PlayerProfilePreferences(
-      preferredView: 'overview',
-      defaultTrainingMode: 'X01',
-      defaultMatchMode: 'X01',
-      accentColor: '#1565C0',
-      displayName: _displayNameController.text.trim().isEmpty
-          ? null
-          : _displayNameController.text.trim(),
-      avatarEmoji: '?',
-      avatarColor: '#1565C0',
-      favoriteFormats: const <String>[],
-    );
+    final trimmedDisplayName = _displayNameController.text.trim();
+    final displayName = trimmedDisplayName.isEmpty ? null : trimmedDisplayName;
 
     if (_editingId == null) {
       _repository.createPlayer(
@@ -140,7 +130,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
         tags: const <String>[],
         notes: _notesController.text,
         source: _selectedSource,
-        preferences: preferences,
+        preferences: PlayerProfilePreferences(displayName: displayName),
       );
     } else {
       final existing = _repository.playerById(_editingId!);
@@ -159,7 +149,10 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
         source: _selectedSource,
         isFavorite: existing.isFavorite,
         isProtected: existing.isProtected,
-        preferences: preferences,
+        preferences: existing.preferences.copyWith(
+          displayName: displayName,
+          clearDisplayName: displayName == null,
+        ),
       );
     }
     _clearForm();
@@ -167,8 +160,8 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
 
   Future<void> _exportProfiles({required bool json}) async {
     final content = json
-        ? _repository.exportAsJsonString()
-        : _repository.exportAsCsvString();
+        ? await _repository.exportAsJsonStringInBackground()
+        : await _repository.exportAsCsvStringInBackground();
     final path = await _fileExportService.exportTextFile(
       folderName: 'exports',
       fileName:
@@ -221,12 +214,12 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
               onPressed: () async {
                 try {
                   if (json) {
-                    await _repository.importFromJsonString(
+                    await _repository.importFromJsonStringInBackground(
                       _importController.text,
                       replaceExisting: replaceExisting,
                     );
                   } else {
-                    await _repository.importFromCsvString(
+                    await _repository.importFromCsvStringInBackground(
                       _importController.text,
                       replaceExisting: replaceExisting,
                     );
@@ -613,9 +606,50 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
   String _selectedEquipmentId = '';
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
+  PlayerProfileAnalytics? _analytics;
+  bool _analyticsLoading = true;
+  int _analyticsRequestId = 0;
 
   bool get _suppressAccessibilityUpdates =>
       defaultTargetPlatform == TargetPlatform.windows;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshAnalytics();
+  }
+
+  Future<void> _refreshAnalytics() async {
+    final requestId = ++_analyticsRequestId;
+    final currentPlayer = _repository.playerById(widget.player.id) ?? widget.player;
+    setState(() {
+      _analyticsLoading = true;
+    });
+    try {
+      final analytics = await _repository.buildAnalyticsInBackground(
+        currentPlayer,
+        range: _selectedRange,
+        equipmentId: _selectedEquipmentId.isEmpty ? null : _selectedEquipmentId,
+        startDate: _selectedStartDate,
+        endDate: _selectedEndDate,
+      );
+      if (!mounted || requestId != _analyticsRequestId) {
+        return;
+      }
+      setState(() {
+        _analytics = analytics;
+        _analyticsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _analyticsRequestId) {
+        return;
+      }
+      setState(() {
+        _analytics = null;
+        _analyticsLoading = false;
+      });
+    }
+  }
 
   Future<void> _pickRangeDate({required bool isStart}) async {
     final now = DateTime.now();
@@ -646,6 +680,7 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
         }
       }
     });
+    _refreshAnalytics();
   }
 
   String _rangeLabel() {
@@ -672,14 +707,7 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
     };
     final selectedSetupId =
         _selectedEquipmentId.isEmpty ? null : _selectedEquipmentId;
-    final analytics = _repository.buildAnalytics(
-      currentPlayer,
-      range: _selectedRange,
-      equipmentId: selectedSetupId,
-      startDate: _selectedStartDate,
-      endDate: _selectedEndDate,
-    );
-    final filteredStats = analytics.filtered.stats;
+    final analytics = _analytics;
     String activeEquipmentName = '-';
     for (final setup in currentPlayer.equipmentSetups) {
       if (setup.id == currentPlayer.activeEquipmentId) {
@@ -755,6 +783,7 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
                       return;
                     }
                     setState(() => _selectedRange = value);
+                    _refreshAnalytics();
                   },
                 ),
                 const SizedBox(height: 12),
@@ -775,6 +804,7 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
                   ],
                   onChanged: (value) {
                     setState(() => _selectedEquipmentId = value ?? '');
+                    _refreshAnalytics();
                   },
                 ),
                 const SizedBox(height: 12),
@@ -804,10 +834,13 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
                       onPressed:
                           _selectedStartDate == null && _selectedEndDate == null
                           ? null
-                          : () => setState(() {
-                              _selectedStartDate = null;
-                              _selectedEndDate = null;
-                            }),
+                          : () {
+                              setState(() {
+                                _selectedStartDate = null;
+                                _selectedEndDate = null;
+                              });
+                              _refreshAnalytics();
+                            },
                       child: const Text('Range zuruecksetzen'),
                     ),
                   ],
@@ -816,19 +849,34 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
             ),
           ),
           const SizedBox(height: 16),
+          if (_analyticsLoading)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            )
+          else if (analytics == null)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Statistiken konnten nicht berechnet werden.'),
+              ),
+            )
+          else ...<Widget>[
           _SectionCard(
             title: 'Kernwerte',
             child: Wrap(
               spacing: 12,
               runSpacing: 12,
               children: <Widget>[
-                _StatChip('Avg', filteredStats.average.toStringAsFixed(1)),
-                _StatChip('First 9', filteredStats.firstNineAverage.toStringAsFixed(1)),
-                _StatChip('Checkout %', '${filteredStats.checkoutQuote.toStringAsFixed(1)} %'),
-                _StatChip('Doppel %', '${filteredStats.doubleQuote.toStringAsFixed(1)} %'),
-                _StatChip('180er', '${filteredStats.scores180}'),
-                _StatChip('Best Finish', '${filteredStats.highestFinish}'),
-                _StatChip('100+ Finishes', '${filteredStats.hundredPlusCheckouts}'),
+                _StatChip('Avg', analytics.filtered.stats.average.toStringAsFixed(1)),
+                _StatChip('First 9', analytics.filtered.stats.firstNineAverage.toStringAsFixed(1)),
+                _StatChip('Checkout %', '${analytics.filtered.stats.checkoutQuote.toStringAsFixed(1)} %'),
+                _StatChip('Doppel %', '${analytics.filtered.stats.doubleQuote.toStringAsFixed(1)} %'),
+                _StatChip('180er', '${analytics.filtered.stats.scores180}'),
+                _StatChip('Best Finish', '${analytics.filtered.stats.highestFinish}'),
+                _StatChip('100+ Finishes', '${analytics.filtered.stats.hundredPlusCheckouts}'),
                 _StatChip('Matches', '${analytics.filtered.matchCount}'),
                 _StatChip('Trainings', '${analytics.filteredTrainingCount}'),
                 _StatChip('Zeitraum', _selectedRange.label),
@@ -883,18 +931,18 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
               spacing: 12,
               runSpacing: 12,
               children: <Widget>[
-                _StatChip('1-Dart', '${filteredStats.checkoutQuote1Dart.toStringAsFixed(1)} %'),
-                _StatChip('2-Dart', '${filteredStats.checkoutQuote2Dart.toStringAsFixed(1)} %'),
-                _StatChip('3-Dart', '${filteredStats.checkoutQuote3Dart.toStringAsFixed(1)} %'),
-                _StatChip('Bull', '${filteredStats.bullCheckouts}/${filteredStats.bullCheckoutAttempts}'),
-                _StatChip('100+', '${filteredStats.scores100Plus}'),
-                _StatChip('140+', '${filteredStats.scores140Plus}'),
-                _StatChip('171+', '${filteredStats.scores171Plus}'),
+                _StatChip('1-Dart', '${analytics.filtered.stats.checkoutQuote1Dart.toStringAsFixed(1)} %'),
+                _StatChip('2-Dart', '${analytics.filtered.stats.checkoutQuote2Dart.toStringAsFixed(1)} %'),
+                _StatChip('3-Dart', '${analytics.filtered.stats.checkoutQuote3Dart.toStringAsFixed(1)} %'),
+                _StatChip('Bull', '${analytics.filtered.stats.bullCheckouts}/${analytics.filtered.stats.bullCheckoutAttempts}'),
+                _StatChip('100+', '${analytics.filtered.stats.scores100Plus}'),
+                _StatChip('140+', '${analytics.filtered.stats.scores140Plus}'),
+                _StatChip('171+', '${analytics.filtered.stats.scores171Plus}'),
                 _StatChip(
                   '180s pro Leg',
-                  filteredStats.legsPlayed <= 0
+                  analytics.filtered.stats.legsPlayed <= 0
                       ? '0.00'
-                      : (filteredStats.scores180 / filteredStats.legsPlayed).toStringAsFixed(2),
+                      : (analytics.filtered.stats.scores180 / analytics.filtered.stats.legsPlayed).toStringAsFixed(2),
                 ),
               ],
             ),
@@ -995,6 +1043,7 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
               ],
             ),
           ),
+          ],
           ],
         ),
       ),

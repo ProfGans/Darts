@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:isolate';
 import 'dart:math';
 
@@ -6,6 +7,11 @@ import 'package:flutter/foundation.dart';
 
 import '../storage/app_storage.dart';
 import '../debug/app_debug.dart';
+import '../models/computer_player.dart';
+import '../models/player_profile.dart';
+import '../repositories/player_repository.dart';
+import '../repositories/settings_repository.dart';
+import '../simulation/theo_resolution_lookup.dart';
 import 'simulation_snapshot.dart';
 import '../../domain/bot/bot_engine.dart';
 import '../../domain/tournament/tournament_engine.dart';
@@ -684,6 +690,60 @@ void _backgroundTaskEntry(_BackgroundTaskRequest request) {
         });
       });
       return;
+    case 'export_player_profiles_json':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runPlayerProfilesJsonExport(payload: request.payload),
+      });
+      return;
+    case 'export_player_profiles_csv':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runPlayerProfilesCsvExport(payload: request.payload),
+      });
+      return;
+    case 'import_player_profiles_json':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runPlayerProfilesJsonImport(payload: request.payload),
+      });
+      return;
+    case 'import_player_profiles_csv':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runPlayerProfilesCsvImport(payload: request.payload),
+      });
+      return;
+    case 'build_player_analytics':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runPlayerAnalyticsBuild(payload: request.payload),
+      });
+      return;
+    case 'export_computer_players_json':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runComputerPlayersJsonExport(payload: request.payload),
+      });
+      return;
+    case 'export_computer_players_csv':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runComputerPlayersCsvExport(payload: request.payload),
+      });
+      return;
+    case 'import_computer_players_json':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runComputerPlayersJsonImport(payload: request.payload),
+      });
+      return;
+    case 'import_computer_players_csv':
+      request.sendPort.send(<String, Object?>{
+        'type': 'result',
+        'value': _runComputerPlayersCsvImport(payload: request.payload),
+      });
+      return;
   }
 
   throw UnsupportedError(
@@ -777,7 +837,6 @@ Future<Object?> _runPersistentWorkerTask({
       return _runTrainingPoolResolutionWithSimulator(
         payload: payload,
         sendPort: sendPort,
-        simulator: state.theoSimulator,
       );
     case 'simulate_tournament':
       return _runTournamentSimulationWithEngine(
@@ -1010,22 +1069,15 @@ Future<List<Object?>> _runTrainingPoolResolution({
   required Map<String, Object?> payload,
   required SendPort sendPort,
 }) async {
-  final simulator = X01MatchSimulator(
-    matchEngine: X01MatchEngine(),
-    botEngine: BotEngine(recordPerformanceLogs: false),
-    recordPerformanceLogs: false,
-  );
   return _runTrainingPoolResolutionWithSimulator(
     payload: payload,
     sendPort: sendPort,
-    simulator: simulator,
   );
 }
 
 Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
   required Map<String, Object?> payload,
   required SendPort sendPort,
-  required X01MatchSimulator simulator,
 }) async {
   final entries =
       ((payload['players'] as List?) ?? const <Object?>[]).whereType<Map>().toList();
@@ -1044,7 +1096,6 @@ Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
     final targetAverage =
         ((entry['targetAverage'] as num?)?.toDouble() ?? 0).clamp(0, 180);
     final resolution = await _resolveTrainingTargetAverageInWorker(
-      simulator: simulator,
       estimatedAverageCache: estimatedAverageCache,
       targetAverage: targetAverage.toDouble(),
       radiusCalibrationPercent: radiusCalibrationPercent,
@@ -1069,180 +1120,63 @@ Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
 }
 
 Future<_TrainingResolutionCandidate> _resolveTrainingTargetAverageInWorker({
-  required X01MatchSimulator simulator,
   required Map<String, double> estimatedAverageCache,
   required double targetAverage,
   required int radiusCalibrationPercent,
   required int simulationSpreadPercent,
   required int matchCount,
 }) async {
-  Future<double> estimateAverage({
-    required int skill,
-    required int finishingSkill,
-  }) async {
-    final cacheKey =
-        '$skill:$finishingSkill:$radiusCalibrationPercent:$simulationSpreadPercent:$matchCount';
-    final cached = estimatedAverageCache[cacheKey];
-    if (cached != null) {
-      return cached;
-    }
-
-    final profile = BotProfile(
-      skill: skill,
-      finishingSkill: finishingSkill,
-      radiusCalibrationPercent: radiusCalibrationPercent,
-      simulationSpreadPercent: simulationSpreadPercent,
-    );
-    final player = SimulatedPlayer(name: 'Training', profile: profile);
-    const config = MatchConfig(
-      startScore: 501,
-      mode: MatchMode.legs,
-      checkoutRequirement: CheckoutRequirement.doubleOut,
-      legsToWin: 8,
-    );
-
-    var totalAverage = 0.0;
-    for (var matchIndex = 0; matchIndex < matchCount; matchIndex += 1) {
-      final result = simulator.simulateAutoMatch(
-        playerA: player,
-        playerB: player,
-        config: config,
-        detailed: false,
-        random: Random(
-          (7919 * (matchIndex + 1)) + (skill * 31) + (finishingSkill * 17),
-        ),
-      );
-      totalAverage += ((result.averageA + result.averageB) / 2)
-          .clamp(0, 180)
-          .toDouble();
-    }
-    final average = (totalAverage / matchCount).clamp(0, 180).toDouble();
-    estimatedAverageCache[cacheKey] = average;
-    return average;
-  }
-
-  Future<_TrainingResolutionCandidate> buildCandidate({
-    required int skill,
-    required int finishingSkill,
-  }) async {
-    final average = await estimateAverage(
-      skill: skill,
-      finishingSkill: finishingSkill,
-    );
-    return _TrainingResolutionCandidate(
-      skill: skill,
-      finishingSkill: finishingSkill,
-      theoreticalAverage: average,
-      error: (average - targetAverage).abs(),
-    );
-  }
-
-  _TrainingResolutionCandidate pickBetter({
-    required _TrainingResolutionCandidate? current,
-    required _TrainingResolutionCandidate next,
-  }) {
-    if (current == null) {
-      return next;
-    }
-    const errorEpsilon = 0.0001;
-    if (next.error + errorEpsilon < current.error) {
-      return next;
-    }
-    if (current.error + errorEpsilon < next.error) {
-      return current;
-    }
-    if (next.gap != current.gap) {
-      return next.gap < current.gap ? next : current;
-    }
-    final nextMaxSkill = max(next.skill, next.finishingSkill);
-    final currentMaxSkill = max(current.skill, current.finishingSkill);
-    if (nextMaxSkill != currentMaxSkill) {
-      return nextMaxSkill < currentMaxSkill ? next : current;
-    }
-    final nextMinSkill = min(next.skill, next.finishingSkill);
-    final currentMinSkill = min(current.skill, current.finishingSkill);
-    if (nextMinSkill != currentMinSkill) {
-      return nextMinSkill < currentMinSkill ? next : current;
-    }
-    if (next.skill != current.skill) {
-      return next.skill < current.skill ? next : current;
-    }
-    if (next.finishingSkill != current.finishingSkill) {
-      return next.finishingSkill < current.finishingSkill ? next : current;
-    }
-    return current;
-  }
-
-  Future<_TrainingResolutionCandidate> searchCandidate({
-    required int minimumValue,
-    required int maximumValue,
-    required Future<_TrainingResolutionCandidate> Function(int value)
-        buildValueCandidate,
-  }) async {
-    var low = minimumValue;
-    var high = maximumValue;
-    _TrainingResolutionCandidate? best;
-
-    while (low <= high) {
-      final middle = (low + high) ~/ 2;
-      final middleCandidate = await buildValueCandidate(middle);
-      best = pickBetter(current: best, next: middleCandidate);
-      if (middleCandidate.theoreticalAverage < targetAverage) {
-        low = middle + 1;
-      } else {
-        high = middle - 1;
+  final fastEstimator = BotEngine(recordPerformanceLogs: false);
+  final lookupCache = <String, TheoLookupResolution>{};
+  final minSupportedEffectiveRadius =
+      SettingsRepository.effectiveRadiusPercentForDisplay(90);
+  final maxSupportedEffectiveRadius =
+      SettingsRepository.effectiveRadiusPercentForDisplay(110);
+  final supportedEffectiveSpread =
+      SettingsRepository.effectiveSpreadPercentForDisplay(100);
+  final resolution = TheoResolutionLookup.resolve(
+    targetAverage: targetAverage,
+    effectiveRadiusCalibrationPercent: radiusCalibrationPercent,
+    effectiveSimulationSpreadPercent: simulationSpreadPercent,
+    minSupportedEffectiveRadiusCalibrationPercent:
+        minSupportedEffectiveRadius,
+    maxSupportedEffectiveRadiusCalibrationPercent:
+        maxSupportedEffectiveRadius,
+    fixedSupportedEffectiveSimulationSpreadPercent: supportedEffectiveSpread,
+    estimateAverage: (skill, finishingSkill) {
+      final cacheKey = [
+        skill,
+        finishingSkill,
+        radiusCalibrationPercent,
+        simulationSpreadPercent,
+        matchCount,
+      ].join(':');
+      final cached = estimatedAverageCache[cacheKey];
+      if (cached != null) {
+        return cached;
       }
-    }
-
-    for (final value in <int>{low, high, low - 1, high + 1}) {
-      if (value < minimumValue || value > maximumValue) {
-        continue;
-      }
-      best = pickBetter(
-        current: best,
-        next: await buildValueCandidate(value),
+      final profile = BotProfile(
+        skill: skill,
+        finishingSkill: finishingSkill,
+        radiusCalibrationPercent: radiusCalibrationPercent,
+        simulationSpreadPercent: simulationSpreadPercent,
       );
-    }
-
-    return best!;
-  }
-
-  final bestEqual = await searchCandidate(
-    minimumValue: 1,
-    maximumValue: 1000,
-    buildValueCandidate: (value) async => buildCandidate(
-      skill: value,
-      finishingSkill: value,
-    ),
+        final average = fastEstimator
+            .estimateFallbackThreeDartAverage(profile)
+            .clamp(0, 180)
+            .toDouble();
+      estimatedAverageCache[cacheKey] = average;
+      return average;
+    },
+    cache: lookupCache,
+    scheduleSupportedGridPrewarm: false,
   );
-
-  final moveUp = targetAverage >= bestEqual.theoreticalAverage;
-  final minimumValue = moveUp ? bestEqual.skill : 1;
-  final maximumValue = moveUp ? 1000 : bestEqual.skill;
-
-  final skillDriven = await searchCandidate(
-    minimumValue: minimumValue,
-    maximumValue: maximumValue,
-    buildValueCandidate: (value) async => buildCandidate(
-      skill: value,
-      finishingSkill: bestEqual.finishingSkill,
-    ),
+  return _TrainingResolutionCandidate(
+    skill: resolution.skill,
+    finishingSkill: resolution.finishingSkill,
+    theoreticalAverage: resolution.theoreticalAverage,
+    error: (resolution.theoreticalAverage - targetAverage).abs(),
   );
-  final finishingDriven = await searchCandidate(
-    minimumValue: minimumValue,
-    maximumValue: maximumValue,
-    buildValueCandidate: (value) async => buildCandidate(
-      skill: bestEqual.skill,
-      finishingSkill: value,
-    ),
-  );
-
-  const improvementEpsilon = 0.01;
-  final bestSplit = pickBetter(current: skillDriven, next: finishingDriven);
-  if (bestSplit.error + improvementEpsilon < bestEqual.error) {
-    return bestSplit;
-  }
-  return bestEqual;
 }
 
 Future<Map<String, Object?>> _runTournamentSimulation({
@@ -1346,6 +1280,386 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
     'completed': workingBracket.isCompleted,
     'stoppedForHumanMatch': stoppedForHumanMatch,
   };
+}
+
+String _runPlayerProfilesJsonExport({
+  required Map<String, Object?> payload,
+}) {
+  return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+    'activePlayerId': payload['activePlayerId'],
+    'tagDefinitions': payload['tagDefinitions'],
+    'players': payload['players'],
+  });
+}
+
+String _runPlayerProfilesCsvExport({
+  required Map<String, Object?> payload,
+}) {
+  final players = (payload['players'] as List<dynamic>? ?? const <dynamic>[])
+      .whereType<Map>()
+      .map((entry) => PlayerProfile.fromJson(entry.cast<String, dynamic>()))
+      .toList();
+  final rows = <List<String>>[
+    <String>[
+      'id',
+      'name',
+      'source',
+      'nationality',
+      'age',
+      'favorite',
+      'protected',
+      'favoriteDouble',
+      'hatedDouble',
+      'tags',
+      'favoriteFormats',
+      'avatarEmoji',
+      'avatarColor',
+      'preferredView',
+      'defaultTrainingMode',
+      'defaultMatchMode',
+      'notes',
+    ],
+    ...players.map((player) => <String>[
+          player.id,
+          player.name,
+          player.source.storageValue,
+          player.nationality ?? '',
+          player.age?.toString() ?? '',
+          player.isFavorite.toString(),
+          player.isProtected.toString(),
+          player.favoriteDouble ?? '',
+          player.hatedDouble ?? '',
+          player.tags.join('|'),
+          player.preferences.favoriteFormats.join('|'),
+          player.preferences.avatarEmoji,
+          player.preferences.avatarColor,
+          player.preferences.preferredView,
+          player.preferences.defaultTrainingMode,
+          player.preferences.defaultMatchMode,
+          player.notes ?? '',
+        ]),
+  ];
+  return rows.map(_toCsvRowBackground).join('\n');
+}
+
+Map<String, Object?> _runPlayerProfilesJsonImport({
+  required Map<String, Object?> payload,
+}) {
+  final raw = payload['raw'] as String? ?? '';
+  final decoded = jsonDecode(raw);
+  if (decoded is! Map) {
+    return const <String, Object?>{
+      'activePlayerId': null,
+      'players': <Object?>[],
+    };
+  }
+  final map = decoded.cast<String, dynamic>();
+  final players =
+      (map['players'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => PlayerProfile.fromJson(entry.cast<String, dynamic>()))
+          .map((entry) => entry.toJson())
+          .toList();
+  return <String, Object?>{
+    'activePlayerId': map['activePlayerId'] as String?,
+    'players': players,
+  };
+}
+
+Map<String, Object?> _runPlayerProfilesCsvImport({
+  required Map<String, Object?> payload,
+}) {
+  final raw = payload['raw'] as String? ?? '';
+  final rows = _parseCsvBackground(raw);
+  if (rows.length <= 1) {
+    return const <String, Object?>{
+      'activePlayerId': null,
+      'players': <Object?>[],
+    };
+  }
+  final header = rows.first;
+  final importedPlayers = <Map<String, Object?>>[];
+  for (final row in rows.skip(1)) {
+    if (row.isEmpty) {
+      continue;
+    }
+    final values = <String, String>{};
+    for (var index = 0; index < header.length && index < row.length; index += 1) {
+      values[header[index]] = row[index];
+    }
+    final now = DateTime.now();
+    importedPlayers.add(
+      PlayerProfile(
+        id: values['id']?.trim().isNotEmpty == true
+            ? values['id']!.trim()
+            : 'player-${DateTime.now().microsecondsSinceEpoch}',
+        name: values['name']?.trim() ?? 'Spieler',
+        createdAt: now,
+        updatedAt: now,
+        lastModifiedReason: 'csv_import',
+        source: PlayerProfileSourceSerialization.fromStorageValue(
+          values['source'],
+        ),
+        isFavorite: values['favorite'] == 'true',
+        isProtected: values['protected'] == 'true',
+        age: int.tryParse(values['age'] ?? ''),
+        nationality: _normalizeNullableTextBackground(values['nationality']),
+        favoriteDouble: _normalizeNullableTextBackground(values['favoriteDouble']),
+        hatedDouble: _normalizeNullableTextBackground(values['hatedDouble']),
+        tags: _normalizeTagListBackground((values['tags'] ?? '').split('|')),
+        notes: _normalizeNullableTextBackground(values['notes']),
+        preferences: PlayerProfilePreferences(
+          preferredView: values['preferredView']?.trim().isEmpty ?? true
+              ? 'overview'
+              : values['preferredView']!.trim(),
+          defaultTrainingMode:
+              values['defaultTrainingMode']?.trim().isEmpty ?? true
+                  ? 'X01'
+                  : values['defaultTrainingMode']!.trim(),
+          defaultMatchMode:
+              values['defaultMatchMode']?.trim().isEmpty ?? true
+                  ? 'X01'
+                  : values['defaultMatchMode']!.trim(),
+          avatarEmoji: values['avatarEmoji']?.trim().isEmpty ?? true
+              ? '?'
+              : values['avatarEmoji']!.trim(),
+          avatarColor: values['avatarColor']?.trim().isEmpty ?? true
+              ? '#1565C0'
+              : values['avatarColor']!.trim(),
+          favoriteFormats: _normalizeTagListBackground(
+            (values['favoriteFormats'] ?? '').split('|'),
+          ),
+        ),
+      ).toJson(),
+    );
+  }
+  return <String, Object?>{
+    'activePlayerId': null,
+    'players': importedPlayers,
+  };
+}
+
+Map<String, Object?> _runPlayerAnalyticsBuild({
+  required Map<String, Object?> payload,
+}) {
+  final playerMap =
+      ((payload['player'] as Map?) ?? const <Object?, Object?>{})
+          .cast<String, dynamic>();
+  final rangeName = payload['range'] as String? ?? PlayerAnalyticsRange.allTime.name;
+  final analytics = buildPlayerProfileAnalytics(
+    player: PlayerProfile.fromJson(playerMap),
+    range: PlayerAnalyticsRange.values.byName(rangeName),
+    equipmentId: payload['equipmentId'] as String?,
+    startDate: DateTime.tryParse(payload['startDate'] as String? ?? ''),
+    endDate: DateTime.tryParse(payload['endDate'] as String? ?? ''),
+  );
+  return analytics.toJson();
+}
+
+String _runComputerPlayersJsonExport({
+  required Map<String, Object?> payload,
+}) {
+  return const JsonEncoder.withIndent('  ').convert(payload);
+}
+
+String _runComputerPlayersCsvExport({
+  required Map<String, Object?> payload,
+}) {
+  final players = (payload['players'] as List<dynamic>? ?? const <dynamic>[])
+      .whereType<Map>()
+      .map((entry) => ComputerPlayer.fromJson(entry.cast<String, dynamic>()))
+      .toList();
+  final rows = <List<String>>[
+    <String>[
+      'id',
+      'name',
+      'source',
+      'isFavorite',
+      'isProtected',
+      'birthDate',
+      'age',
+      'nationality',
+      'tags',
+      'theoreticalAverage',
+      'skill',
+      'finishingSkill',
+      'average',
+      'matchesPlayed',
+      'matchesWon',
+      'createdAt',
+      'updatedAt',
+      'lastModifiedReason',
+    ],
+    ...players.map((player) => <String>[
+          player.id,
+          player.name,
+          player.source.storageValue,
+          player.isFavorite.toString(),
+          player.isProtected.toString(),
+          player.birthDate?.toIso8601String() ?? '',
+          player.age?.toString() ?? '',
+          player.nationality ?? '',
+          player.tags.join('|'),
+          player.theoreticalAverage.toStringAsFixed(2),
+          player.skill.toString(),
+          player.finishingSkill.toString(),
+          player.average.toStringAsFixed(2),
+          player.matchesPlayed.toString(),
+          player.matchesWon.toString(),
+          player.createdAt.toIso8601String(),
+          player.updatedAt.toIso8601String(),
+          player.lastModifiedReason,
+        ]),
+  ];
+  return rows.map(_toCsvRowBackground).join('\n');
+}
+
+Map<String, Object?> _runComputerPlayersJsonImport({
+  required Map<String, Object?> payload,
+}) {
+  final raw = payload['raw'] as String? ?? '';
+  final decoded = jsonDecode(raw);
+  final map = decoded is Map<String, dynamic>
+      ? decoded
+      : (decoded as Map).cast<String, dynamic>();
+  final players =
+      (map['players'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => ComputerPlayer.fromJson(entry.cast<String, dynamic>()))
+          .map((entry) => entry.toJson())
+          .toList();
+  return <String, Object?>{
+    'players': players,
+  };
+}
+
+Map<String, Object?> _runComputerPlayersCsvImport({
+  required Map<String, Object?> payload,
+}) {
+  final raw = payload['raw'] as String? ?? '';
+  final rows = _parseCsvBackground(raw);
+  if (rows.length <= 1) {
+    return const <String, Object?>{'players': <Object?>[]};
+  }
+  final header = rows.first;
+  final players = <Map<String, Object?>>[];
+  for (final row in rows.skip(1)) {
+    if (row.every((cell) => cell.trim().isEmpty)) {
+      continue;
+    }
+    final data = <String, String>{};
+    for (var index = 0; index < header.length && index < row.length; index += 1) {
+      data[header[index]] = row[index];
+    }
+    final parsedBirthDate = DateTime.tryParse(data['birthDate'] ?? '');
+    final parsedAge = int.tryParse(data['age'] ?? '');
+    players.add(
+      ComputerPlayer(
+        id: data['id']?.trim().isNotEmpty == true
+            ? data['id']!.trim()
+            : 'csv-${DateTime.now().microsecondsSinceEpoch}-${players.length}',
+        name: data['name']?.trim() ?? 'CSV Player',
+        skill: int.tryParse(data['skill'] ?? '') ?? 1,
+        finishingSkill: int.tryParse(data['finishingSkill'] ?? '') ?? 1,
+        theoreticalAverage:
+            double.tryParse((data['theoreticalAverage'] ?? '').replaceAll(',', '.')) ??
+                0,
+        createdAt: DateTime.tryParse(data['createdAt'] ?? '') ?? DateTime.now(),
+        updatedAt: DateTime.tryParse(data['updatedAt'] ?? '') ?? DateTime.now(),
+        lastModifiedReason:
+            (data['lastModifiedReason'] ?? '').trim().isEmpty
+                ? 'csv_import'
+                : data['lastModifiedReason']!.trim(),
+        source: ComputerPlayerSourceSerialization.fromStorageValue(
+          data['source'],
+        ),
+        isFavorite: (data['isFavorite'] ?? '').toLowerCase() == 'true',
+        isProtected: (data['isProtected'] ?? '').toLowerCase() == 'true',
+        birthDate: parsedBirthDate,
+        age: parsedAge,
+        nationality: _normalizeNullableTextBackground(data['nationality']),
+        tags: _normalizeTagListBackground((data['tags'] ?? '').split('|')),
+        matchesPlayed: int.tryParse(data['matchesPlayed'] ?? '') ?? 0,
+        matchesWon: int.tryParse(data['matchesWon'] ?? '') ?? 0,
+        average: double.tryParse((data['average'] ?? '').replaceAll(',', '.')) ?? 0,
+        history: const <ComputerMatchHistoryEntry>[],
+      ).toJson(),
+    );
+  }
+  return <String, Object?>{
+    'players': players,
+  };
+}
+
+String _toCsvRowBackground(List<String> values) {
+  return values.map((value) => '"${value.replaceAll('"', '""')}"').join(',');
+}
+
+List<List<String>> _parseCsvBackground(String rawValue) {
+  final rows = <List<String>>[];
+  final currentRow = <String>[];
+  final buffer = StringBuffer();
+  var inQuotes = false;
+
+  void pushCell() {
+    currentRow.add(buffer.toString());
+    buffer.clear();
+  }
+
+  void pushRow() {
+    if (currentRow.isNotEmpty || buffer.isNotEmpty) {
+      pushCell();
+      rows.add(List<String>.from(currentRow));
+      currentRow.clear();
+    }
+  }
+
+  for (var index = 0; index < rawValue.length; index += 1) {
+    final char = rawValue[index];
+    if (char == '"') {
+      if (inQuotes && index + 1 < rawValue.length && rawValue[index + 1] == '"') {
+        buffer.write('"');
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char == ',' && !inQuotes) {
+      pushCell();
+    } else if ((char == '\n' || char == '\r') && !inQuotes) {
+      if (char == '\r' && index + 1 < rawValue.length && rawValue[index + 1] == '\n') {
+        index += 1;
+      }
+      pushRow();
+    } else {
+      buffer.write(char);
+    }
+  }
+  pushRow();
+  return rows;
+}
+
+String? _normalizeNullableTextBackground(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) {
+    return null;
+  }
+  return trimmed;
+}
+
+List<String> _normalizeTagListBackground(Iterable<String> values) {
+  final seen = <String>{};
+  final result = <String>[];
+  for (final value in values) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      continue;
+    }
+    final key = trimmed.toLowerCase();
+    if (seen.add(key)) {
+      result.add(trimmed);
+    }
+  }
+  return result;
 }
 
 double _runTheoAverageEstimate({

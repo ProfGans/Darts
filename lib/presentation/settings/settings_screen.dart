@@ -136,6 +136,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _scheduledTheoPrewarm = false;
+  bool _showDeveloperOptions = false;
 
   bool get _suppressAccessibilityUpdates =>
       defaultTargetPlatform == TargetPlatform.windows;
@@ -270,31 +271,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                _buildSliderCard(
-                  context,
-                  title: 'Simulations Spreizung',
-                  description:
-                      'Beeinflusst, wie stark gute und schwache Phasen in der Simulation auseinanderlaufen. Hoehere Werte sorgen fuer mehr Varianz, niedrigere fuer gleichmaessigere Leistungen.',
-                  value: settings.simulationSpreadPercent
-                      .clamp(
-                        SettingsRepository.minSimulationSpreadPercent,
-                        SettingsRepository.maxSimulationSpreadPercent,
-                      )
-                      .toDouble(),
-                  min:
-                      SettingsRepository.minSimulationSpreadPercent.toDouble(),
-                  max:
-                      SettingsRepository.maxSimulationSpreadPercent.toDouble(),
-                  label: '${settings.simulationSpreadPercent}% vom alten Standard',
-                  onChanged: (value) {
-                    repository.update(
-                      settings.copyWith(
-                        simulationSpreadPercent: value.round(),
-                      ),
-                    );
-                  },
-                  onChangeEnd: (_) {
-                  },
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Simulations Spreizung',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Dieser Wert ist im normalen Einstellungsbereich fest hinterlegt. Fuer Standard-Nutzung muss er nicht angepasst werden.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Aktueller interner Wert: ${settings.simulationSpreadPercent}% vom alten Standard',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Entwickler Optionen',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Erweiterte Bot- und Simulationswerte. Nur aendern, wenn du gezielt am Balancing arbeitest.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton(
+                            onPressed: () {
+                              setState(() {
+                                _showDeveloperOptions = !_showDeveloperOptions;
+                              });
+                            },
+                            child: Text(
+                              _showDeveloperOptions
+                                  ? 'Entwickler Optionen ausblenden'
+                                  : 'Entwickler Optionen anzeigen',
+                            ),
+                          ),
+                        ),
+                        if (_showDeveloperOptions) ...<Widget>[
+                          const SizedBox(height: 12),
+                          _buildSliderCardContent(
+                            context,
+                            title: 'Simulations Spreizung',
+                            description:
+                                'Beeinflusst, wie stark gute und schwache Phasen in der Simulation auseinanderlaufen. Hoehere Werte sorgen fuer mehr Varianz, niedrigere fuer gleichmaessigere Leistungen.',
+                            value: settings.simulationSpreadPercent
+                                .clamp(
+                                  SettingsRepository.minSimulationSpreadPercent,
+                                  SettingsRepository.maxSimulationSpreadPercent,
+                                )
+                                .toDouble(),
+                            min: SettingsRepository.minSimulationSpreadPercent
+                                .toDouble(),
+                            max: SettingsRepository.maxSimulationSpreadPercent
+                                .toDouble(),
+                            label:
+                                '${settings.simulationSpreadPercent}% vom alten Standard',
+                            onChanged: (value) {
+                              repository.update(
+                                settings.copyWith(
+                                  simulationSpreadPercent: value.round(),
+                                ),
+                              );
+                            },
+                            onChangeEnd: (_) {},
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Card(
@@ -429,31 +492,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              description,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(label),
-            Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: (max - min).round(),
-              onChanged: onChanged,
-              onChangeEnd: onChangeEnd,
-            ),
-          ],
+        child: _buildSliderCardContent(
+          context,
+          title: title,
+          description: description,
+          value: value,
+          min: min,
+          max: max,
+          label: label,
+          onChanged: onChanged,
+          onChangeEnd: onChangeEnd,
         ),
       ),
+    );
+  }
+
+  Widget _buildSliderCardContent(
+    BuildContext context, {
+    required String title,
+    required String description,
+    required double value,
+    required double min,
+    required double max,
+    required String label,
+    required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          description,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 8),
+        Text(label),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          divisions: (max - min).round(),
+          onChanged: onChanged,
+          onChangeEnd: onChangeEnd,
+        ),
+      ],
     );
   }
 }
