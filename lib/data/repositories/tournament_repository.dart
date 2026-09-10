@@ -6,12 +6,14 @@ import 'package:flutter/foundation.dart';
 
 import '../background/simulation_service.dart';
 import '../debug/app_debug.dart';
+import '../debug/simulation_debug_state.dart';
 import '../../domain/career/career_models.dart';
 import '../../domain/rankings/ranking_engine.dart';
 import '../../domain/tournament/tournament_engine.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
 import '../models/computer_player.dart';
+import '../models/tournament_community.dart';
 import '../models/generated_name_catalog.dart';
 import '../storage/app_storage.dart';
 import 'career_repository.dart';
@@ -30,6 +32,7 @@ class TournamentRepository extends ChangeNotifier {
 
   final TournamentEngine _engine = TournamentEngine();
   TournamentBracket? _currentBracket;
+  TournamentFlowState? _activeFlow;
   CareerTournamentContext? _careerContext;
   final List<TournamentArchiveEntry> _archive = <TournamentArchiveEntry>[];
   final List<TournamentComputerSelectionPreset> _savedComputerSelections =
@@ -37,22 +40,80 @@ class TournamentRepository extends ChangeNotifier {
   bool _simulationInProgress = false;
   String _simulationProgressLabel = '';
   double? _simulationProgress;
+  bool _simulationCancelRequested = false;
+  int _deferredPersistenceDepth = 0;
+  bool _persistenceDirty = false;
   String? _prewarmedCareerSimulationKey;
   Future<void>? _prewarmCareerSimulationFuture;
+  String? _cachedCareerPoolKey;
+  Map<String, _CareerPoolEntry>? _cachedCareerPool;
+  String? _preparedCareerParticipantsKey;
+  List<TournamentParticipant>? _preparedCareerParticipants;
+  Future<void>? _preparedCareerParticipantsFuture;
 
   TournamentBracket? get currentBracket => _currentBracket;
+  TournamentFlowState? get activeFlow => _activeFlow;
   CareerTournamentContext? get careerContext => _careerContext;
   bool get isCareerTournament => _careerContext != null;
   bool get hasActiveTournament => _currentBracket != null;
+  bool get canStartLeaguePlayoffs {
+    final bracket = _currentBracket;
+    return bracket != null &&
+        bracket.definition.format == TournamentFormat.leaguePlayoff &&
+        bracket.playoffRounds.isEmpty &&
+        bracket.leagueRounds.isNotEmpty &&
+        bracket.leagueRounds.every((round) => round.isCompleted);
+  }
+  bool get canStartNextFlowPhase {
+    final flow = _activeFlow;
+    final bracket = _currentBracket;
+    return flow != null &&
+        bracket != null &&
+        bracket.isCompleted &&
+        !flow.isCompleted;
+  }
   bool get simulationInProgress => _simulationInProgress;
   String get simulationProgressLabel => _simulationProgressLabel;
   double? get simulationProgress => _simulationProgress;
+  bool get simulationCancelRequested => _simulationCancelRequested;
   List<TournamentArchiveEntry> get archive =>
       List<TournamentArchiveEntry>.unmodifiable(_archive);
   List<TournamentComputerSelectionPreset> get savedComputerSelections =>
       List<TournamentComputerSelectionPreset>.unmodifiable(
         _savedComputerSelections,
       );
+
+  void beginDeferredPersistence() {
+    _deferredPersistenceDepth += 1;
+  }
+
+  Future<void> endDeferredPersistence() async {
+    if (_deferredPersistenceDepth <= 0) {
+      return;
+    }
+    _deferredPersistenceDepth -= 1;
+    if (_deferredPersistenceDepth == 0 && _persistenceDirty) {
+      _persistenceDirty = false;
+      await _persist();
+    }
+  }
+
+  String? get nextFlowStartLabel {
+    final flow = _activeFlow;
+    if (flow == null || _currentBracket == null || !_currentBracket!.isCompleted) {
+      return null;
+    }
+    final nextPosition = _nextFlowPosition(flow);
+    if (nextPosition == null) {
+      return 'Turnierserie abschliessen';
+    }
+    final phase = _phaseForNumber(flow, nextPosition.$1);
+    final hasMultipleTournaments = (phase?.tournaments.length ?? 0) > 1;
+    if (flow.phases.length <= 1 && !hasMultipleTournaments) {
+      return 'Naechste Runde starten';
+    }
+    return 'Phase ${nextPosition.$1} | Turnier ${nextPosition.$2} starten';
+  }
 
   Future<void> initialize() async {
     final json = await AppStorage.instance.readJsonMap(_storageKey);
@@ -63,6 +124,11 @@ class TournamentRepository extends ChangeNotifier {
     if (bracketJson is Map) {
       _currentBracket =
           TournamentBracket.fromJson(bracketJson.cast<String, dynamic>());
+    }
+    final activeFlowJson = json['activeFlow'];
+    if (activeFlowJson is Map) {
+      _activeFlow =
+          TournamentFlowState.fromJson(activeFlowJson.cast<String, dynamic>());
     }
     final contextJson = json['careerContext'];
     if (contextJson is Map) {
@@ -92,12 +158,56 @@ class TournamentRepository extends ChangeNotifier {
               ),
             ),
       );
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     await _persist();
     notifyListeners();
   }
 
+  void startLeaguePlayoffs() {
+    final bracket = _currentBracket;
+    if (!canStartLeaguePlayoffs || bracket == null) {
+      return;
+    }
+    _currentBracket = _engine.ensureLeaguePlayoffRounds(bracket);
+    notifyListeners();
+    unawaited(_persist());
+  }
+
+  void startNextFlowPhase() {
+    final flow = _activeFlow;
+    final bracket = _currentBracket;
+    if (flow == null || bracket == null || !bracket.isCompleted || flow.isCompleted) {
+      return;
+    }
+    final updatedFlow = _completeActiveFlowBracket(
+      flow: flow,
+      bracket: bracket,
+    );
+    _activeFlow = updatedFlow;
+    if (updatedFlow.isCompleted) {
+      notifyListeners();
+      unawaited(_persist());
+      return;
+    }
+    _currentBracket = _buildBracketForActiveFlow(updatedFlow);
+    notifyListeners();
+    unawaited(_persist());
+  }
+
   void createTournament({
     required String name,
+    TournamentCommunity? community,
+    List<TournamentPhaseDefinition> phases = const <TournamentPhaseDefinition>[
+      TournamentPhaseDefinition(
+        phaseNumber: 1,
+        tournaments: <TournamentPhaseTournamentDefinition>[
+          TournamentPhaseTournamentDefinition(
+            tournamentNumber: 1,
+            format: TournamentFormat.knockout,
+          ),
+        ],
+      ),
+    ],
     TournamentGame game = TournamentGame.x01,
     TournamentFormat format = TournamentFormat.knockout,
     required int fieldSize,
@@ -112,15 +222,21 @@ class TournamentRepository extends ChangeNotifier {
     int pointsForWin = 2,
     int pointsForDraw = 1,
     int roundRobinRepeats = 1,
+    int maxLeagueMatchesPerParticipant = 0,
     int playoffQualifierCount = 4,
+    int groupCount = 2,
+    int playersPerGroup = 4,
     required bool includeHumanPlayer,
+    List<String> selectedPlayerIds = const <String>[],
     int? computerOpponentCount,
     double? minimumComputerAverage,
     double? maximumComputerAverage,
     List<String> selectedComputerIds = const <String>[],
   }) {
     final participants = <TournamentParticipant>[];
-    final activePlayer = PlayerRepository.instance.activePlayer;
+    final playerRepository = PlayerRepository.instance;
+    final addedHumanIds = <String>{};
+    final activePlayer = playerRepository.activePlayer;
     if (includeHumanPlayer && activePlayer != null) {
       participants.add(
         TournamentParticipant(
@@ -129,6 +245,23 @@ class TournamentRepository extends ChangeNotifier {
           type: TournamentParticipantType.human,
           average: activePlayer.average,
           qualificationReason: 'Aktiver Spieler',
+        ),
+      );
+      addedHumanIds.add(activePlayer.id);
+    }
+
+    for (final playerId in selectedPlayerIds) {
+      final player = playerRepository.playerById(playerId);
+      if (player == null || !addedHumanIds.add(player.id)) {
+        continue;
+      }
+      participants.add(
+        TournamentParticipant(
+          id: player.id,
+          name: player.name,
+          type: TournamentParticipantType.human,
+          average: player.average,
+          qualificationReason: 'Spielerprofil',
         ),
       );
     }
@@ -194,28 +327,33 @@ class TournamentRepository extends ChangeNotifier {
       );
     }
 
-    _currentBracket = _engine.buildBracket(
-      definition: TournamentDefinition(
-        name: name,
-        game: game,
-        format: format,
-        fieldSize: fieldSize,
-        matchMode: matchMode,
-        legsToWin: legsToWin,
-        startScore: startScore,
-        startRequirement: startRequirement,
-        checkoutRequirement: checkoutRequirement,
-        setsToWin: setsToWin,
-        legsPerSet: legsPerSet,
-        roundDistanceValues: roundDistanceValues,
-        pointsForWin: pointsForWin,
-        pointsForDraw: pointsForDraw,
-        roundRobinRepeats: roundRobinRepeats,
-        playoffQualifierCount: playoffQualifierCount,
-        includeHumanPlayer: includeHumanPlayer,
-      ),
+    _activeFlow = _createFlowState(
+      name: name,
+      community: community,
+      phases: phases,
+      game: game,
+      format: format,
+      fieldSize: fieldSize,
+      matchMode: matchMode,
+      legsToWin: legsToWin,
+      startScore: startScore,
+      startRequirement: startRequirement,
+      checkoutRequirement: checkoutRequirement,
+      setsToWin: setsToWin,
+      legsPerSet: legsPerSet,
+      roundDistanceValues: roundDistanceValues,
+      pointsForWin: pointsForWin,
+      pointsForDraw: pointsForDraw,
+      roundRobinRepeats: roundRobinRepeats,
+      maxLeagueMatchesPerParticipant: maxLeagueMatchesPerParticipant,
+      playoffQualifierCount: playoffQualifierCount,
+      groupCount: groupCount,
+      playersPerGroup: playersPerGroup,
+      includeHumanPlayer: includeHumanPlayer,
       participants: participants,
     );
+    _currentBracket = _buildBracketForActiveFlow(_activeFlow!);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     _careerContext = null;
     notifyListeners();
     unawaited(_persist());
@@ -292,7 +430,7 @@ class TournamentRepository extends ChangeNotifier {
     );
     _logProcessMemory('vor Aufbau "${item.name}"');
     final participantsStopwatch = Stopwatch()..start();
-    final participants = _buildCareerParticipants(
+    final participants = _participantsForCareerItem(
       career: career,
       item: item,
     );
@@ -308,6 +446,7 @@ class TournamentRepository extends ChangeNotifier {
       );
       CareerRepository.instance.skipCurrentTournament(item: item);
       _currentBracket = null;
+      _activeFlow = null;
       _careerContext = null;
       if (!silent) {
         notifyListeners();
@@ -335,7 +474,10 @@ class TournamentRepository extends ChangeNotifier {
         pointsForWin: item.pointsForWin,
         pointsForDraw: item.pointsForDraw,
         roundRobinRepeats: item.roundRobinRepeats,
+        maxLeagueMatchesPerParticipant: item.maxLeagueMatchesPerParticipant,
         playoffQualifierCount: item.playoffQualifierCount,
+        groupCount: item.groupCount,
+        playersPerGroup: item.playersPerGroup,
         includeHumanPlayer:
             career.participantMode == CareerParticipantMode.withHuman,
       ),
@@ -351,6 +493,7 @@ class TournamentRepository extends ChangeNotifier {
       seasonNumber: career.currentSeason.seasonNumber,
       calendarItem: item,
     );
+    _activeFlow = null;
     if (!silent) {
       notifyListeners();
       unawaited(_persist());
@@ -383,6 +526,7 @@ class TournamentRepository extends ChangeNotifier {
     if (participants.isEmpty) {
       CareerRepository.instance.skipCurrentTournament(item: item);
       _currentBracket = null;
+      _activeFlow = null;
       _careerContext = null;
       if (!silent) {
         notifyListeners();
@@ -412,7 +556,10 @@ class TournamentRepository extends ChangeNotifier {
       pointsForWin: item.pointsForWin,
       pointsForDraw: item.pointsForDraw,
       roundRobinRepeats: item.roundRobinRepeats,
+      maxLeagueMatchesPerParticipant: item.maxLeagueMatchesPerParticipant,
       playoffQualifierCount: item.playoffQualifierCount,
+      groupCount: item.groupCount,
+      playersPerGroup: item.playersPerGroup,
       includeHumanPlayer:
           career.participantMode == CareerParticipantMode.withHuman,
     );
@@ -435,6 +582,7 @@ class TournamentRepository extends ChangeNotifier {
       if (currentRound == null) {
         CareerRepository.instance.skipCurrentTournament(item: item);
         _currentBracket = null;
+        _activeFlow = null;
         _careerContext = null;
         if (!silent) {
           notifyListeners();
@@ -462,6 +610,7 @@ class TournamentRepository extends ChangeNotifier {
       if (currentRound == null) {
         CareerRepository.instance.skipCurrentTournament(item: item);
         _currentBracket = null;
+        _activeFlow = null;
         _careerContext = null;
         if (!silent) {
           notifyListeners();
@@ -480,6 +629,7 @@ class TournamentRepository extends ChangeNotifier {
     }
 
     _currentBracket = nextBracket;
+    _activeFlow = null;
     _careerContext = CareerTournamentContext(
       careerId: career.id,
       seasonNumber: career.currentSeason.seasonNumber,
@@ -534,6 +684,7 @@ class TournamentRepository extends ChangeNotifier {
       ),
     );
     _simulateRemainingCpuMatchesForRound(roundNumber);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     notifyListeners();
     unawaited(_persist());
   }
@@ -576,6 +727,7 @@ class TournamentRepository extends ChangeNotifier {
     );
 
     _simulateRemainingCpuMatchesForRound(roundNumber);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
 
     notifyListeners();
     unawaited(_persist());
@@ -610,12 +762,14 @@ class TournamentRepository extends ChangeNotifier {
       ),
     );
     _simulateRemainingCpuMatchesForRound(roundNumber);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     notifyListeners();
     unawaited(_persist());
   }
 
   void simulateRemainingCpuMatchesInRound(int roundNumber) {
     _simulateRemainingCpuMatchesForRound(roundNumber);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     notifyListeners();
     unawaited(_persist());
   }
@@ -644,6 +798,7 @@ class TournamentRepository extends ChangeNotifier {
       return;
     }
     _simulateRemainingCpuMatchesForRound(roundNumber);
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     notifyListeners();
     unawaited(_persist());
   }
@@ -670,19 +825,21 @@ class TournamentRepository extends ChangeNotifier {
     bool includeHumanMatches = false,
     bool emitProgressUpdates = true,
     bool preferResponsiveUi = true,
+    bool fastMode = false,
   }) async {
     final bracket = _currentBracket;
     if (bracket == null || bracket.isCompleted) {
       return;
     }
 
+    _simulationCancelRequested = false;
     final action = AppDebug.instance.startAction(
       'Turnier',
       'Simulation "${bracket.definition.name}"',
     );
     AppDebug.instance.info(
       'Trace',
-      'Turnier-Simulation Einstieg | Turnier=${bracket.definition.name} | responsive=$preferResponsiveUi | human=$includeHumanMatches',
+      'Turnier-Simulation Einstieg | Turnier=${bracket.definition.name} | responsive=$preferResponsiveUi | human=$includeHumanMatches | fast=$fastMode',
     );
     final totalMatches = _countTotalMatches(bracket);
     _setSimulationProgress(
@@ -690,43 +847,66 @@ class TournamentRepository extends ChangeNotifier {
       label: 'Turnier wird vorbereitet: ${bracket.definition.name}',
       progress: totalMatches == 0 ? null : 0,
     );
-    const usePersistentWorker = false;
+    const usePersistentWorker = true;
     AppDebug.instance.info(
       'Trace',
-      'Turnier-Simulation Modus | Turnier=${bracket.definition.name} | worker=$usePersistentWorker | cachePrepared=${_engine.commonSimulationCachesPrepared}',
+      'Turnier-Simulation Modus | Turnier=${bracket.definition.name} | worker=$usePersistentWorker | cachePrepared=${_engine.commonSimulationCachesPrepared} | fast=$fastMode',
     );
-    final prewarmStopwatch = Stopwatch()..start();
-    await SimulationService.instance.prewarmProfiles(
-      _serializedProfilesForBracket(bracket),
-      onHandle: (handle) {
-        void updateSimulationProgress() {
-          _setSimulationProgress(
-            inProgress: handle.inProgress,
-            label: handle.label,
-            progress: handle.progress,
-          );
-        }
+    if (!fastMode) {
+      final prewarmStopwatch = Stopwatch()..start();
+      await SimulationService.instance.prewarmProfiles(
+        _serializedProfilesForBracket(bracket),
+        onHandle: (handle) {
+          void updateSimulationProgress() {
+            _setSimulationProgress(
+              inProgress: handle.inProgress,
+              label: handle.label,
+              progress: handle.progress,
+            );
+          }
 
-        handle.addListener(updateSimulationProgress);
-        handle.result.whenComplete(() {
-          handle.removeListener(updateSimulationProgress);
-        });
-      },
-    );
-    prewarmStopwatch.stop();
-    AppDebug.instance.info(
-      'Trace',
-      'Turnier-Simulation Vorwaermung fertig | Turnier=${bracket.definition.name} | Dauer=${prewarmStopwatch.elapsedMilliseconds} ms',
-    );
+          handle.addListener(updateSimulationProgress);
+          handle.result.whenComplete(() {
+            handle.removeListener(updateSimulationProgress);
+          });
+        },
+      );
+      prewarmStopwatch.stop();
+      AppDebug.instance.info(
+        'Trace',
+        'Turnier-Simulation Vorwaermung fertig | Turnier=${bracket.definition.name} | Dauer=${prewarmStopwatch.elapsedMilliseconds} ms',
+      );
+    } else {
+      AppDebug.instance.info(
+        'Trace',
+        'Turnier-Simulation Vorwaermung uebersprungen | Turnier=${bracket.definition.name} | Grund=FastMode',
+      );
+    }
     _logProcessMemory('vor Simulation "${bracket.definition.name}"');
     await Future<void>.delayed(Duration.zero);
-    final simulationResult = await _simulateTournamentLowMemory(
-      bracket: bracket,
-      includeHumanMatches: includeHumanMatches,
-      emitProgressUpdates: emitProgressUpdates,
-      totalMatches: totalMatches,
-      preferResponsiveUi: preferResponsiveUi,
-    );
+    late final Map<String, Object?> simulationResult;
+    try {
+      simulationResult = await _simulateTournamentOnWorker(
+        bracket: bracket,
+        includeHumanMatches: includeHumanMatches,
+        emitProgressUpdates: emitProgressUpdates,
+        fastMode: fastMode,
+      );
+    } catch (error, stackTrace) {
+      AppDebug.instance.warning(
+        'Turnier',
+        'Simulation-Worker fehlgeschlagen, falle auf lokalen Pfad zurueck: $error',
+      );
+      AppDebug.instance.error('Turnier', stackTrace.toString());
+      simulationResult = await _simulateTournamentLowMemory(
+        bracket: bracket,
+        includeHumanMatches: includeHumanMatches,
+        emitProgressUpdates: emitProgressUpdates,
+        totalMatches: totalMatches,
+        preferResponsiveUi: preferResponsiveUi,
+        fastMode: fastMode,
+      );
+    }
     AppDebug.instance.info(
       'Trace',
       'Turnier-Simulation Kern fertig | Turnier=${bracket.definition.name} | simMatches=${(simulationResult['simulatedMatches'] as num?)?.toInt() ?? 0} | completed=${simulationResult['completed']} | stoppedForHuman=${simulationResult['stoppedForHumanMatch']}',
@@ -739,9 +919,10 @@ class TournamentRepository extends ChangeNotifier {
         (simulationResult['simulatedMatches'] as num?)?.toInt() ?? 0;
     final stoppedForHumanMatch =
         simulationResult['stoppedForHumanMatch'] as bool? ?? false;
+    final cancelled = simulationResult['cancelled'] as bool? ?? false;
     final madeProgress = simulatedMatches > 0;
 
-    if (!madeProgress && !stoppedForHumanMatch) {
+    if (!madeProgress && !stoppedForHumanMatch && !cancelled) {
       AppDebug.instance.error(
         'Turnier',
         'Turnier "${bracket.definition.name}" macht keinen Fortschritt mehr.',
@@ -750,26 +931,95 @@ class TournamentRepository extends ChangeNotifier {
     }
 
     _currentBracket = simulatedBracket;
+    _synchronizeActiveFlowAfterCurrentBracketChange();
+    if (cancelled) {
+      AppDebug.instance.warning(
+        'Turnier',
+        'Turnier-Simulation "${simulatedBracket.definition.name}" wurde abgebrochen.',
+      );
+      action.complete('abgebrochen');
+    }
     AppDebug.instance.info(
       'Turnier',
       'Turnier "${simulatedBracket.definition.name}" abgeschlossen: ${simulatedBracket.isCompleted}.',
     );
-    action.complete('$simulatedMatches Matches');
+    if (!cancelled) {
+      action.complete('$simulatedMatches Matches');
+    }
     _logProcessMemory('nach Simulation "${simulatedBracket.definition.name}"');
     if (emitProgressUpdates) {
       notifyListeners();
     }
+    SimulationDebugState.instance.updateTournamentProgress(
+      tournamentName: simulatedBracket.definition.name,
+      phase: 'persist',
+      label: 'Turnierergebnis wird gespeichert',
+      progress: 1,
+    );
     await _persist();
+    SimulationDebugState.instance.markCheckpoint('Turnier-Persist abgeschlossen');
     _engine.compactSimulationCaches();
+    SimulationDebugState.instance.markCheckpoint('Turnier-Cleanup abgeschlossen');
     AppDebug.instance.info(
       'Trace',
       'Turnier-Simulation Persist/Cleanup fertig | Turnier=${simulatedBracket.definition.name}',
     );
     _setSimulationProgress(
-      inProgress: true,
-      label: 'Turniersimulation abgeschlossen: ${simulatedBracket.definition.name}',
-      progress: 1,
+      inProgress: !cancelled,
+      label: cancelled
+          ? 'Turniersimulation abgebrochen: ${simulatedBracket.definition.name}'
+          : 'Turniersimulation abgeschlossen: ${simulatedBracket.definition.name}',
+      progress: cancelled ? null : 1,
     );
+    _simulationCancelRequested = false;
+  }
+
+  Future<Map<String, Object?>> _simulateTournamentOnWorker({
+    required TournamentBracket bracket,
+    required bool includeHumanMatches,
+    required bool emitProgressUpdates,
+    required bool fastMode,
+  }) async {
+    final handle = SimulationService.instance.startPersistentJob<Map<String, Object?>>(
+      taskType: 'simulate_tournament',
+      initialLabel: 'Turnier wird simuliert: ${bracket.definition.name}',
+      payload: <String, Object?>{
+        'bracket': bracket.toJson(),
+        'profilesById': _serializedProfilesForBracket(bracket),
+        'includeHumanMatches': includeHumanMatches,
+        'fastMode': fastMode,
+      },
+    );
+
+    void updateSimulationProgress() {
+      _setSimulationProgress(
+        inProgress: handle.inProgress,
+        label: handle.label,
+        progress: handle.progress,
+      );
+      if (emitProgressUpdates) {
+        notifyListeners();
+      }
+    }
+
+    handle.addListener(updateSimulationProgress);
+    try {
+      updateSimulationProgress();
+      return await handle.result;
+    } catch (error) {
+      if (_simulationCancelRequested) {
+        return <String, Object?>{
+          'bracket': bracket.toJson(),
+          'simulatedMatches': 0,
+          'completed': false,
+          'stoppedForHumanMatch': false,
+          'cancelled': true,
+        };
+      }
+      rethrow;
+    } finally {
+      handle.removeListener(updateSimulationProgress);
+    }
   }
 
   Future<Map<String, Object?>> _simulateTournamentLowMemory({
@@ -778,6 +1028,7 @@ class TournamentRepository extends ChangeNotifier {
     required bool emitProgressUpdates,
     required int totalMatches,
     required bool preferResponsiveUi,
+    required bool fastMode,
   }) async {
     _engine.resetPerformanceTotals();
     var workingBracket = bracket;
@@ -785,8 +1036,13 @@ class TournamentRepository extends ChangeNotifier {
     var simulatedMatches = 0;
     var batchSize = preferResponsiveUi ? 1 : 2;
     var stoppedForHumanMatch = false;
+    var cancelled = false;
 
     while (!workingBracket.isCompleted) {
+      if (_simulationCancelRequested) {
+        cancelled = true;
+        break;
+      }
       if (!includeHumanMatches && _shouldStopBeforeNextRound(workingBracket)) {
         stoppedForHumanMatch = true;
         break;
@@ -797,6 +1053,7 @@ class TournamentRepository extends ChangeNotifier {
         profileProvider: profileProvider,
         includeHumanMatches: includeHumanMatches,
         maxMatches: batchSize,
+        fastMode: fastMode,
       );
       batchStopwatch.stop();
       if (!batch.madeProgress) {
@@ -862,6 +1119,7 @@ class TournamentRepository extends ChangeNotifier {
       'simulatedMatches': simulatedMatches,
       'completed': workingBracket.isCompleted,
       'stoppedForHumanMatch': stoppedForHumanMatch,
+      'cancelled': cancelled,
     };
   }
 
@@ -881,6 +1139,7 @@ class TournamentRepository extends ChangeNotifier {
       profileProvider: _profileForParticipant,
       includeHumanMatches: includeHumanMatches,
     );
+    _synchronizeActiveFlowAfterCurrentBracketChange();
     notifyListeners();
     unawaited(_persist());
   }
@@ -943,6 +1202,7 @@ class TournamentRepository extends ChangeNotifier {
         ),
       );
       _currentBracket = null;
+      _activeFlow = null;
       _careerContext = null;
       if (!silent) {
         notifyListeners();
@@ -985,6 +1245,7 @@ class TournamentRepository extends ChangeNotifier {
       ),
     );
     _currentBracket = null;
+    _activeFlow = null;
     _careerContext = null;
     if (!silent) {
       notifyListeners();
@@ -1017,6 +1278,7 @@ class TournamentRepository extends ChangeNotifier {
   }
 
   void clearSimulationProgress() {
+    _simulationCancelRequested = false;
     _setSimulationProgress(
       inProgress: false,
       label: '',
@@ -1024,12 +1286,35 @@ class TournamentRepository extends ChangeNotifier {
     );
   }
 
+  Future<void> requestSimulationCancel() async {
+    if (_simulationCancelRequested) {
+      return;
+    }
+    _simulationCancelRequested = true;
+    _setSimulationProgress(
+      inProgress: true,
+      label: 'Simulation wird abgebrochen...',
+      progress: _simulationProgress,
+    );
+    await SimulationService.instance.disposeSimulationWorker();
+  }
+
   Future<void> prewarmCareerSimulation({
     required CareerDefinition career,
     required CareerCalendarItem item,
   }) async {
-    final key =
-        '${career.id}|${career.currentSeason.seasonNumber}|${item.id}';
+    final profilesById = _serializedProfilesForCareerItem(career, item);
+    if (profilesById.isEmpty) {
+      AppDebug.instance.info(
+        'Trace',
+        'Karriere-Prewarm uebersprungen | Karriere=${career.name} | Turnier=${item.name} | Grund=keine Profile',
+      );
+      return;
+    }
+    final warmupPayload = _warmupProfilesPayloadFromSerializedProfiles(
+      profilesById,
+    );
+    final key = _simulationWarmupPayloadKey(warmupPayload);
     if (_prewarmedCareerSimulationKey == key &&
         _prewarmCareerSimulationFuture != null) {
       AppDebug.instance.info(
@@ -1039,23 +1324,15 @@ class TournamentRepository extends ChangeNotifier {
       await _prewarmCareerSimulationFuture;
       return;
     }
-    final profilesById = _serializedProfilesForCareerItem(career, item);
-    if (profilesById.isEmpty) {
-      AppDebug.instance.info(
-        'Trace',
-        'Karriere-Prewarm uebersprungen | Karriere=${career.name} | Turnier=${item.name} | Grund=keine Profile',
-      );
-      return;
-    }
     AppDebug.instance.info(
       'Trace',
-      'Karriere-Prewarm Start | Karriere=${career.name} | Turnier=${item.name} | Profile=${profilesById.length}',
+      'Karriere-Prewarm Start | Karriere=${career.name} | Turnier=${item.name} | Profile=${warmupPayload.length}',
     );
     final prewarmStopwatch = Stopwatch()..start();
     _prewarmedCareerSimulationKey = key;
     _prewarmCareerSimulationFuture = SimulationService.instance
         .prewarmProfiles(
-          profilesById,
+          warmupPayload,
         )
         .then((_) {
           prewarmStopwatch.stop();
@@ -1069,6 +1346,113 @@ class TournamentRepository extends ChangeNotifier {
           AppDebug.instance.error(
             'Trace',
             'Karriere-Prewarm Fehler | Karriere=${career.name} | Turnier=${item.name} | Fehler=$error',
+          );
+        })
+        .whenComplete(() {
+          if (_prewarmedCareerSimulationKey == key) {
+            _prewarmCareerSimulationFuture = null;
+          }
+        });
+    await _prewarmCareerSimulationFuture;
+  }
+
+  Future<void> prepareCareerTournamentBuild({
+    required CareerDefinition career,
+    required CareerCalendarItem item,
+  }) async {
+    final key = _careerTournamentBuildCacheKey(career: career, item: item);
+    if (_preparedCareerParticipantsKey == key &&
+        _preparedCareerParticipants != null) {
+      return;
+    }
+    final existing = _preparedCareerParticipantsFuture;
+    if (existing != null && _preparedCareerParticipantsKey == key) {
+      await existing;
+      return;
+    }
+    final stopwatch = Stopwatch()..start();
+    _preparedCareerParticipantsKey = key;
+    _preparedCareerParticipantsFuture = Future<void>(() {
+      final participants = _buildCareerParticipants(
+        career: career,
+        item: item,
+        logLabel: 'Prebuild ${item.name}',
+      );
+      _preparedCareerParticipants = List<TournamentParticipant>.unmodifiable(
+        participants,
+      );
+    }).whenComplete(() {
+      stopwatch.stop();
+      AppDebug.instance.info(
+        'Trace',
+        'Karriere-Prebuild Ende | Karriere=${career.name} | Turnier=${item.name} | Dauer=${stopwatch.elapsedMilliseconds} ms',
+      );
+      if (_preparedCareerParticipantsKey == key) {
+        _preparedCareerParticipantsFuture = null;
+      }
+    });
+    await _preparedCareerParticipantsFuture;
+  }
+
+  Future<void> prewarmCareerSeasonSimulation({
+    required CareerDefinition career,
+  }) async {
+    final remainingItems =
+        career.currentSeason.calendar
+            .where(
+              (item) =>
+                  !career.currentSeason.completedItemIds.contains(item.id) &&
+                  CareerRepository.instance.shouldTournamentTakePlace(
+                    item,
+                    career: career,
+                  ),
+            )
+            .toList(growable: false);
+    if (remainingItems.isEmpty) {
+      return;
+    }
+    final warmupPayload = <String, Object?>{};
+    for (final item in remainingItems) {
+      final profilesById = _serializedProfilesForCareerItem(career, item);
+      if (profilesById.isEmpty) {
+        continue;
+      }
+      warmupPayload.addAll(
+        _warmupProfilesPayloadFromSerializedProfiles(profilesById),
+      );
+    }
+    if (warmupPayload.isEmpty) {
+      return;
+    }
+    final key = _simulationWarmupPayloadKey(warmupPayload);
+    if (_prewarmedCareerSimulationKey == key &&
+        _prewarmCareerSimulationFuture != null) {
+      await _prewarmCareerSimulationFuture;
+      return;
+    }
+    AppDebug.instance.info(
+      'Trace',
+      'Saison-Prewarm Start | Karriere=${career.name} | Turniere=${remainingItems.length} | Profile=${warmupPayload.length}',
+    );
+    final prewarmStopwatch = Stopwatch()..start();
+    _prewarmedCareerSimulationKey = key;
+    _prewarmCareerSimulationFuture = SimulationService.instance
+        .prewarmProfiles(
+          warmupPayload,
+          initialLabel: 'Saison-Simulation wird vorbereitet',
+        )
+        .then((_) {
+          prewarmStopwatch.stop();
+          AppDebug.instance.info(
+            'Trace',
+            'Saison-Prewarm Ende | Karriere=${career.name} | Dauer=${prewarmStopwatch.elapsedMilliseconds} ms',
+          );
+        })
+        .catchError((Object error) {
+          prewarmStopwatch.stop();
+          AppDebug.instance.error(
+            'Trace',
+            'Saison-Prewarm Fehler | Karriere=${career.name} | Fehler=$error',
           );
         })
         .whenComplete(() {
@@ -1101,6 +1485,16 @@ class TournamentRepository extends ChangeNotifier {
     _simulationInProgress = inProgress;
     _simulationProgressLabel = label;
     _simulationProgress = normalizedProgress;
+    final currentTournamentName =
+        _currentBracket?.definition.name ?? _careerContext?.calendarItem.name;
+    if (currentTournamentName != null && currentTournamentName.isNotEmpty) {
+      SimulationDebugState.instance.updateTournamentProgress(
+        tournamentName: currentTournamentName,
+        phase: inProgress ? 'tournament_progress' : 'tournament_done',
+        label: label,
+        progress: normalizedProgress,
+      );
+    }
     notifyListeners();
   }
 
@@ -1109,7 +1503,7 @@ class TournamentRepository extends ChangeNotifier {
     required CareerCalendarItem item,
   }) {
     return List<TournamentParticipant>.unmodifiable(
-      _buildCareerParticipants(career: career, item: item),
+      _participantsForCareerItem(career: career, item: item),
     );
   }
 
@@ -1126,7 +1520,7 @@ class TournamentRepository extends ChangeNotifier {
     }
     final participants = item.isLeagueSeriesItem
         ? _previewParticipantsForLeagueSeriesItem(career: career, item: item)
-        : _buildCareerParticipants(career: career, item: item);
+        : _participantsForCareerItem(career: career, item: item);
     return _serializedProfilesForParticipants(participants);
   }
 
@@ -1134,6 +1528,7 @@ class TournamentRepository extends ChangeNotifier {
     for (final entry in _archive) {
       if (entry.id == archiveId) {
         _currentBracket = entry.bracket;
+        _activeFlow = null;
         _careerContext = null;
         notifyListeners();
         unawaited(_persist());
@@ -1145,12 +1540,17 @@ class TournamentRepository extends ChangeNotifier {
   List<TournamentParticipant> _buildCareerParticipants({
     required CareerDefinition career,
     required CareerCalendarItem item,
+    String? logLabel,
   }) {
+    final totalStopwatch = Stopwatch()..start();
+    final poolStopwatch = Stopwatch()..start();
     final pool = _careerPool(career);
+    poolStopwatch.stop();
     final rankingsById = <String, CareerRankingDefinition>{
       for (final ranking in career.rankings) ranking.id: ranking,
     };
     final standingsCache = <String, List<RankingStanding>>{};
+    final sortStopwatch = Stopwatch()..start();
     final orderedPool = pool.values.toList()
       ..sort((left, right) {
         if (left.type == TournamentParticipantType.human &&
@@ -1163,6 +1563,7 @@ class TournamentRepository extends ChangeNotifier {
         }
         return right.average.compareTo(left.average);
       });
+    sortStopwatch.stop();
 
     final selected = <_CareerPoolEntry>[];
     final selectedIds = <String>{};
@@ -1386,7 +1787,7 @@ class TournamentRepository extends ChangeNotifier {
       }
     }
 
-    return selected.take(item.fieldSize).map((entry) {
+    final result = selected.take(item.fieldSize).map((entry) {
       return TournamentParticipant(
         id: entry.id,
         name: entry.name,
@@ -1399,6 +1800,14 @@ class TournamentRepository extends ChangeNotifier {
         botFinishingSkill: entry.botFinishingSkill,
       );
     }).toList();
+    totalStopwatch.stop();
+    if (logLabel != null) {
+      AppDebug.instance.info(
+        'Performance',
+        'Karriere-Teilnehmer "$logLabel": total=${totalStopwatch.elapsedMilliseconds} ms | pool=${poolStopwatch.elapsedMilliseconds} ms | sort=${sortStopwatch.elapsedMilliseconds} ms | standings=${standingsCache.length} | selected=${result.length}',
+      );
+    }
+    return result;
   }
 
   List<_CareerPoolEntry> _generateAverageFillEntries({
@@ -1583,6 +1992,12 @@ class TournamentRepository extends ChangeNotifier {
   }
 
   Map<String, _CareerPoolEntry> _careerPool(CareerDefinition career) {
+    final cacheKey = _careerPoolCacheKey(career);
+    final cachedPool = _cachedCareerPool;
+    if (_cachedCareerPoolKey == cacheKey && cachedPool != null) {
+      return cachedPool;
+    }
+    final stopwatch = Stopwatch()..start();
     final pool = <String, _CareerPoolEntry>{};
     _CareerPoolEntry? selectedHuman;
     if (career.participantMode == CareerParticipantMode.withHuman) {
@@ -1697,7 +2112,63 @@ class TournamentRepository extends ChangeNotifier {
         );
     }
 
+    stopwatch.stop();
+    _cachedCareerPoolKey = cacheKey;
+    _cachedCareerPool = pool;
+    AppDebug.instance.info(
+      'Performance',
+      'Karriere-Pool aufgebaut: ${stopwatch.elapsedMilliseconds} ms | Spieler=${pool.length}',
+    );
     return pool;
+  }
+
+  List<TournamentParticipant> _participantsForCareerItem({
+    required CareerDefinition career,
+    required CareerCalendarItem item,
+  }) {
+    final key = _careerTournamentBuildCacheKey(career: career, item: item);
+    final cachedParticipants = _preparedCareerParticipants;
+    if (_preparedCareerParticipantsKey == key && cachedParticipants != null) {
+      return cachedParticipants;
+    }
+    final participants = _buildCareerParticipants(
+      career: career,
+      item: item,
+      logLabel: item.name,
+    );
+    _preparedCareerParticipantsKey = key;
+    _preparedCareerParticipants = List<TournamentParticipant>.unmodifiable(
+      participants,
+    );
+    return _preparedCareerParticipants!;
+  }
+
+  String _careerPoolCacheKey(CareerDefinition career) {
+    return [
+      identityHashCode(career),
+      career.id,
+      career.currentSeason.seasonNumber,
+      career.currentSeason.completedItemIds.length,
+      career.completedTournaments.length,
+      career.databasePlayers.length,
+      career.playerProfileId ?? '',
+      career.participantMode.name,
+    ].join('|');
+  }
+
+  String _careerTournamentBuildCacheKey({
+    required CareerDefinition career,
+    required CareerCalendarItem item,
+  }) {
+    return [
+      _careerPoolCacheKey(career),
+      item.id,
+      item.fieldSize,
+      item.seedCount,
+      item.seedingRankingId ?? '',
+      item.effectiveSlotRules.length,
+      item.effectiveFillRules.length,
+    ].join('|');
   }
 
   bool _matchesCareerTags(
@@ -1871,6 +2342,35 @@ class TournamentRepository extends ChangeNotifier {
       };
     }
     return result;
+  }
+
+  Map<String, Object?> _warmupProfilesPayloadFromSerializedProfiles(
+    Map<String, Object?> profilesById,
+  ) {
+    final result = <String, Object?>{};
+    for (final value in profilesById.values) {
+      if (value is! Map) {
+        continue;
+      }
+      final normalized = value.cast<String, Object?>();
+      final key = _serializedProfileSignature(normalized);
+      result.putIfAbsent(key, () => normalized);
+    }
+    return result;
+  }
+
+  String _simulationWarmupPayloadKey(Map<String, Object?> profilesById) {
+    final keys = profilesById.keys.toList()..sort();
+    return keys.join('|');
+  }
+
+  String _serializedProfileSignature(Map<String, Object?> profile) {
+    return [
+      (profile['skill'] as num?)?.toInt() ?? 0,
+      (profile['finishingSkill'] as num?)?.toInt() ?? 0,
+      (profile['radiusCalibrationPercent'] as num?)?.toInt() ?? 0,
+      (profile['simulationSpreadPercent'] as num?)?.toInt() ?? 0,
+    ].join(':');
   }
 
   int _countCompletedMatchesLowMemory(TournamentBracket bracket) {
@@ -2196,6 +2696,523 @@ class TournamentRepository extends ChangeNotifier {
     return false;
   }
 
+  TournamentFlowState _createFlowState({
+    required String name,
+    required TournamentCommunity? community,
+    required List<TournamentPhaseDefinition> phases,
+    required TournamentGame game,
+    required TournamentFormat format,
+    required int fieldSize,
+    required MatchMode matchMode,
+    required int legsToWin,
+    required int startScore,
+    required StartRequirement startRequirement,
+    required CheckoutRequirement checkoutRequirement,
+    required int setsToWin,
+    required int legsPerSet,
+    required List<int> roundDistanceValues,
+    required int pointsForWin,
+    required int pointsForDraw,
+    required int roundRobinRepeats,
+    required int maxLeagueMatchesPerParticipant,
+    required int playoffQualifierCount,
+    required int groupCount,
+    required int playersPerGroup,
+    required bool includeHumanPlayer,
+    required List<TournamentParticipant> participants,
+  }) {
+    final normalizedPhases = phases.isEmpty
+        ? const <TournamentPhaseDefinition>[
+            TournamentPhaseDefinition(
+              phaseNumber: 1,
+              tournaments: <TournamentPhaseTournamentDefinition>[
+                TournamentPhaseTournamentDefinition(
+                  tournamentNumber: 1,
+                  format: TournamentFormat.knockout,
+                ),
+              ],
+            ),
+          ]
+        : phases;
+    return TournamentFlowState(
+      id: 'flow-${DateTime.now().microsecondsSinceEpoch}',
+      rootName: name,
+      communityId: community?.id,
+      communityName: community?.name,
+      phases: normalizedPhases,
+      game: game,
+      format: format,
+      fieldSize: fieldSize,
+      matchMode: matchMode,
+      legsToWin: legsToWin,
+      startScore: startScore,
+      startRequirement: startRequirement,
+      checkoutRequirement: checkoutRequirement,
+      setsToWin: setsToWin,
+      legsPerSet: legsPerSet,
+      roundDistanceValues: roundDistanceValues,
+      pointsForWin: pointsForWin,
+      pointsForDraw: pointsForDraw,
+      roundRobinRepeats: roundRobinRepeats,
+      maxLeagueMatchesPerParticipant: maxLeagueMatchesPerParticipant,
+      playoffQualifierCount: playoffQualifierCount,
+      groupCount: groupCount,
+      playersPerGroup: playersPerGroup,
+      includeHumanPlayer: includeHumanPlayer,
+      activePhaseNumber: normalizedPhases.first.phaseNumber,
+      activeTournamentNumber:
+          normalizedPhases.first.tournaments.first.tournamentNumber,
+      pools: _buildInitialPools(
+        phases: normalizedPhases,
+        participants: participants,
+      ),
+      completedBrackets: const <TournamentFlowCompletedBracket>[],
+    );
+  }
+
+  List<TournamentFlowPoolEntry> _buildInitialPools({
+    required List<TournamentPhaseDefinition> phases,
+    required List<TournamentParticipant> participants,
+  }) {
+    final pools = <TournamentFlowPoolEntry>[];
+    for (final phase in phases) {
+      for (final tournament in phase.tournaments) {
+        pools.add(
+          TournamentFlowPoolEntry(
+            phaseNumber: phase.phaseNumber,
+            tournamentNumber: tournament.tournamentNumber,
+            participants: const <TournamentParticipant>[],
+          ),
+        );
+      }
+    }
+    final firstPhase = phases.first;
+    final seededGroups = _distributeParticipantsAcrossTournaments(
+      participants: participants,
+      bucketCount: firstPhase.tournaments.length,
+    );
+    for (var index = 0; index < firstPhase.tournaments.length; index += 1) {
+      final tournament = firstPhase.tournaments[index];
+      final poolIndex = pools.indexWhere(
+        (entry) =>
+            entry.phaseNumber == firstPhase.phaseNumber &&
+            entry.tournamentNumber == tournament.tournamentNumber,
+      );
+      if (poolIndex < 0) {
+        continue;
+      }
+      pools[poolIndex] = pools[poolIndex].copyWith(
+        participants: seededGroups[index],
+      );
+    }
+    return pools;
+  }
+
+  List<List<TournamentParticipant>> _distributeParticipantsAcrossTournaments({
+    required List<TournamentParticipant> participants,
+    required int bucketCount,
+  }) {
+    final safeBucketCount = bucketCount < 1 ? 1 : bucketCount;
+    final groups = List<List<TournamentParticipant>>.generate(
+      safeBucketCount,
+      (_) => <TournamentParticipant>[],
+    );
+    final orderedParticipants = List<TournamentParticipant>.from(participants)
+      ..sort((left, right) => right.average.compareTo(left.average));
+    for (var index = 0; index < orderedParticipants.length; index += 1) {
+      final cycle = index ~/ safeBucketCount;
+      final offset = index % safeBucketCount;
+      final bucketIndex = cycle.isEven ? offset : (safeBucketCount - 1 - offset);
+      groups[bucketIndex].add(orderedParticipants[index]);
+    }
+    return groups;
+  }
+
+  TournamentBracket? _buildBracketForActiveFlow(TournamentFlowState flow) {
+    final phase = _phaseForNumber(flow, flow.activePhaseNumber);
+    if (phase == null) {
+      return null;
+    }
+    TournamentPhaseTournamentDefinition? tournamentDefinition;
+    for (final tournament in phase.tournaments) {
+      if (tournament.tournamentNumber == flow.activeTournamentNumber) {
+        tournamentDefinition = tournament;
+        break;
+      }
+    }
+    if (tournamentDefinition == null) {
+      return null;
+    }
+    final participants = _poolParticipantsFor(
+      flow,
+      phaseNumber: flow.activePhaseNumber,
+      tournamentNumber: flow.activeTournamentNumber,
+    );
+    if (participants.isEmpty) {
+      return null;
+    }
+    return _engine.buildBracket(
+      definition: TournamentDefinition(
+        name: _flowBracketName(
+          flow: flow,
+          phaseNumber: flow.activePhaseNumber,
+          tournamentNumber: flow.activeTournamentNumber,
+        ),
+        communityId: flow.communityId,
+        communityName: flow.communityName,
+        phases: flow.phases,
+        game: flow.game,
+        format: tournamentDefinition.format,
+        fieldSize: participants.length,
+        matchMode: flow.matchMode,
+        legsToWin: flow.legsToWin,
+        startScore: flow.startScore,
+        startRequirement: flow.startRequirement,
+        checkoutRequirement: flow.checkoutRequirement,
+        setsToWin: flow.setsToWin,
+        legsPerSet: flow.legsPerSet,
+        roundDistanceValues: flow.roundDistanceValues,
+        pointsForWin: flow.pointsForWin,
+        pointsForDraw: flow.pointsForDraw,
+        roundRobinRepeats: flow.roundRobinRepeats,
+        maxLeagueMatchesPerParticipant: flow.maxLeagueMatchesPerParticipant,
+        playoffQualifierCount: flow.playoffQualifierCount,
+        groupCount: flow.groupCount,
+        playersPerGroup: flow.playersPerGroup,
+        includeHumanPlayer: flow.includeHumanPlayer,
+      ),
+      participants: participants,
+    );
+  }
+
+  String _flowBracketName({
+    required TournamentFlowState flow,
+    required int phaseNumber,
+    required int tournamentNumber,
+  }) {
+    final hasMultiplePhases = flow.phases.length > 1;
+    final currentPhase = _phaseForNumber(flow, phaseNumber);
+    final hasMultipleTournaments =
+        currentPhase != null && currentPhase.tournaments.length > 1;
+    if (!hasMultiplePhases && !hasMultipleTournaments) {
+      return flow.rootName;
+    }
+    return '${flow.rootName} | Phase $phaseNumber | Turnier $tournamentNumber';
+  }
+
+  TournamentPhaseDefinition? _phaseForNumber(
+    TournamentFlowState flow,
+    int phaseNumber,
+  ) {
+    for (final phase in flow.phases) {
+      if (phase.phaseNumber == phaseNumber) {
+        return phase;
+      }
+    }
+    return null;
+  }
+
+  List<TournamentParticipant> _poolParticipantsFor(
+    TournamentFlowState flow, {
+    required int phaseNumber,
+    required int tournamentNumber,
+  }) {
+    for (final pool in flow.pools) {
+      if (pool.phaseNumber == phaseNumber &&
+          pool.tournamentNumber == tournamentNumber) {
+        return List<TournamentParticipant>.from(pool.participants);
+      }
+    }
+    return const <TournamentParticipant>[];
+  }
+
+  void _synchronizeActiveFlowAfterCurrentBracketChange() {
+    final flow = _activeFlow;
+    if (flow == null || flow.isCompleted) {
+      return;
+    }
+    if (_currentBracket != null) {
+      return;
+    }
+    _currentBracket = _buildBracketForActiveFlow(flow);
+  }
+
+  TournamentFlowState _completeActiveFlowBracket({
+    required TournamentFlowState flow,
+    required TournamentBracket bracket,
+  }) {
+    final completedEntry = TournamentFlowCompletedBracket(
+      phaseNumber: flow.activePhaseNumber,
+      tournamentNumber: flow.activeTournamentNumber,
+      bracket: bracket,
+    );
+    final completedBrackets = List<TournamentFlowCompletedBracket>.from(
+      flow.completedBrackets,
+    )
+      ..removeWhere(
+        (entry) =>
+            entry.phaseNumber == completedEntry.phaseNumber &&
+            entry.tournamentNumber == completedEntry.tournamentNumber,
+      )
+      ..add(completedEntry);
+
+    var updatedFlow = flow.copyWith(completedBrackets: completedBrackets);
+    updatedFlow = _applyQualificationResults(
+      flow: updatedFlow,
+      bracket: bracket,
+      phaseNumber: flow.activePhaseNumber,
+      tournamentNumber: flow.activeTournamentNumber,
+    );
+    final nextPosition = _nextFlowPosition(updatedFlow);
+    if (nextPosition == null) {
+      return updatedFlow.copyWith(isCompleted: true);
+    }
+    return updatedFlow.copyWith(
+      activePhaseNumber: nextPosition.$1,
+      activeTournamentNumber: nextPosition.$2,
+    );
+  }
+
+  TournamentFlowState _applyQualificationResults({
+    required TournamentFlowState flow,
+    required TournamentBracket bracket,
+    required int phaseNumber,
+    required int tournamentNumber,
+  }) {
+    final phase = _phaseForNumber(flow, phaseNumber);
+    if (phase == null) {
+      return flow;
+    }
+    TournamentPhaseTournamentDefinition? sourceTournament;
+    for (final tournament in phase.tournaments) {
+      if (tournament.tournamentNumber == tournamentNumber) {
+        sourceTournament = tournament;
+        break;
+      }
+    }
+    if (sourceTournament == null || sourceTournament.qualificationRules.isEmpty) {
+      return flow;
+    }
+
+    final placementOrder = _placementOrderForBracket(bracket);
+    var updatedFlow = flow;
+    for (final rule in sourceTournament.qualificationRules) {
+      if (rule.startPlacement < 1 ||
+          rule.endPlacement < rule.startPlacement ||
+          rule.targetTournamentNumber < 1) {
+        continue;
+      }
+      final targetPool = _poolParticipantsFor(
+        updatedFlow,
+        phaseNumber: rule.targetPhaseNumber,
+        tournamentNumber: rule.targetTournamentNumber,
+      );
+      final existingIds = targetPool.map((entry) => entry.id).toSet();
+      final nextPool = List<TournamentParticipant>.from(targetPool);
+      final endPlacement = min(rule.endPlacement, placementOrder.length);
+      for (var placement = rule.startPlacement;
+          placement <= endPlacement;
+          placement += 1) {
+        final qualifier = placementOrder[placement - 1];
+        if (!existingIds.add(qualifier.id)) {
+          continue;
+        }
+        nextPool.add(
+          TournamentParticipant(
+            id: qualifier.id,
+            name: qualifier.name,
+            type: qualifier.type,
+            average: qualifier.average,
+            qualificationReason:
+                'Phase $phaseNumber | Turnier $tournamentNumber | Platz $placement',
+            botSkill: qualifier.botSkill,
+            botFinishingSkill: qualifier.botFinishingSkill,
+          ),
+        );
+      }
+      updatedFlow = _withUpdatedPool(
+        updatedFlow,
+        phaseNumber: rule.targetPhaseNumber,
+        tournamentNumber: rule.targetTournamentNumber,
+        participants: nextPool,
+      );
+    }
+    return updatedFlow;
+  }
+
+  TournamentFlowState _withUpdatedPool(
+    TournamentFlowState flow, {
+    required int phaseNumber,
+    required int tournamentNumber,
+    required List<TournamentParticipant> participants,
+  }) {
+    final nextPools = List<TournamentFlowPoolEntry>.from(flow.pools);
+    final poolIndex = nextPools.indexWhere(
+      (entry) =>
+          entry.phaseNumber == phaseNumber &&
+          entry.tournamentNumber == tournamentNumber,
+    );
+    final normalizedParticipants = List<TournamentParticipant>.from(participants);
+    if (poolIndex >= 0) {
+      nextPools[poolIndex] = nextPools[poolIndex].copyWith(
+        participants: normalizedParticipants,
+      );
+    } else {
+      nextPools.add(
+        TournamentFlowPoolEntry(
+          phaseNumber: phaseNumber,
+          tournamentNumber: tournamentNumber,
+          participants: normalizedParticipants,
+        ),
+      );
+    }
+    return flow.copyWith(pools: nextPools);
+  }
+
+  (int, int)? _nextFlowPosition(TournamentFlowState flow) {
+    var foundCurrent = false;
+    for (final phase in flow.phases) {
+      for (final tournament in phase.tournaments) {
+        if (!foundCurrent) {
+          if (phase.phaseNumber == flow.activePhaseNumber &&
+              tournament.tournamentNumber == flow.activeTournamentNumber) {
+            foundCurrent = true;
+          }
+          continue;
+        }
+        return (phase.phaseNumber, tournament.tournamentNumber);
+      }
+    }
+    return null;
+  }
+
+  List<TournamentParticipant> _placementOrderForBracket(TournamentBracket bracket) {
+    switch (bracket.definition.format) {
+      case TournamentFormat.league:
+        return bracket.standings.map((entry) => entry.participant).toList();
+      case TournamentFormat.leaguePlayoff:
+        final ranked = <TournamentParticipant>[];
+        final addedIds = <String>{};
+        final playoffRanking = _knockoutPlacementOrderFromRounds(
+          rounds: bracket.playoffRounds,
+        );
+        for (final participant in playoffRanking) {
+          if (addedIds.add(participant.id)) {
+            ranked.add(participant);
+          }
+        }
+        for (final standing in bracket.standings) {
+          if (addedIds.add(standing.participant.id)) {
+            ranked.add(standing.participant);
+          }
+        }
+        return ranked;
+      case TournamentFormat.groupStage:
+        final ranked = <TournamentParticipant>[];
+        final addedIds = <String>{};
+        final groups = bracket.groupedStandings;
+        var placementIndex = 0;
+        while (true) {
+          var foundAny = false;
+          final samePlacement = <TournamentStanding>[];
+          for (final group in groups) {
+            if (placementIndex < group.standings.length) {
+              samePlacement.add(group.standings[placementIndex]);
+              foundAny = true;
+            }
+          }
+          if (!foundAny) {
+            break;
+          }
+          samePlacement.sort((left, right) {
+            final pointsCompare = right.points.compareTo(left.points);
+            if (pointsCompare != 0) {
+              return pointsCompare;
+            }
+            final setDiffCompare =
+                right.setDifference.compareTo(left.setDifference);
+            if (setDiffCompare != 0) {
+              return setDiffCompare;
+            }
+            final legDiffCompare =
+                right.legDifference.compareTo(left.legDifference);
+            if (legDiffCompare != 0) {
+              return legDiffCompare;
+            }
+            return right.participant.average.compareTo(left.participant.average);
+          });
+          for (final standing in samePlacement) {
+            if (addedIds.add(standing.participant.id)) {
+              ranked.add(standing.participant);
+            }
+          }
+          placementIndex += 1;
+        }
+        return ranked;
+      case TournamentFormat.knockout:
+        return _knockoutPlacementOrderFromRounds(rounds: bracket.rounds);
+    }
+  }
+
+  List<TournamentParticipant> _knockoutPlacementOrderFromRounds({
+    required List<TournamentRound> rounds,
+  }) {
+    if (rounds.isEmpty) {
+      return const <TournamentParticipant>[];
+    }
+    final ranked = <TournamentParticipant>[];
+    final addedIds = <String>{};
+    final finalRound = rounds.last;
+    if (finalRound.matches.isNotEmpty) {
+      final finalMatch = finalRound.matches.first;
+      final winner = _winnerOfMatch(finalMatch);
+      final runnerUp = _loserOfMatch(finalMatch);
+      if (winner != null && addedIds.add(winner.id)) {
+        ranked.add(winner);
+      }
+      if (runnerUp != null && addedIds.add(runnerUp.id)) {
+        ranked.add(runnerUp);
+      }
+    }
+    for (var roundIndex = rounds.length - 2; roundIndex >= 0; roundIndex -= 1) {
+      for (final match in rounds[roundIndex].matches) {
+        final loser = _loserOfMatch(match);
+        if (loser != null && addedIds.add(loser.id)) {
+          ranked.add(loser);
+        }
+      }
+    }
+    return ranked;
+  }
+
+  TournamentParticipant? _winnerOfMatch(TournamentMatch match) {
+    final winnerId = match.result?.winnerId;
+    if (winnerId == null) {
+      return null;
+    }
+    if (match.playerA?.id == winnerId) {
+      return match.playerA;
+    }
+    if (match.playerB?.id == winnerId) {
+      return match.playerB;
+    }
+    return null;
+  }
+
+  TournamentParticipant? _loserOfMatch(TournamentMatch match) {
+    final winnerId = match.result?.winnerId;
+    if (winnerId == null) {
+      return null;
+    }
+    if (match.playerA != null && match.playerA!.id != winnerId) {
+      return match.playerA;
+    }
+    if (match.playerB != null && match.playerB!.id != winnerId) {
+      return match.playerB;
+    }
+    return null;
+  }
+
   void _simulateRemainingCpuMatchesForRound(int? roundNumber) {
     if (roundNumber == null) {
       return;
@@ -2243,10 +3260,15 @@ class TournamentRepository extends ChangeNotifier {
   }
 
   Future<void> _persist() {
+    if (_deferredPersistenceDepth > 0) {
+      _persistenceDirty = true;
+      return Future<void>.value();
+    }
     return AppStorage.instance.writeJson(
       _storageKey,
       <String, dynamic>{
         'currentBracket': _currentBracket?.toJson(),
+        'activeFlow': _activeFlow?.toJson(),
         'careerContext': _careerContext?.toJson(),
         'archive': _archive.map((entry) => entry.toJson()).toList(),
         'savedComputerSelections': _savedComputerSelections
@@ -2279,7 +3301,42 @@ class TournamentRepository extends ChangeNotifier {
   }
 
   TournamentBracket _lightweightArchiveBracket(TournamentBracket bracket) {
-    return TournamentBracket.fromJson(bracket.toJson());
+    final rounds = bracket.rounds
+        .map(
+          (round) => TournamentRound(
+            roundNumber: round.roundNumber,
+            title: round.title,
+            stage: round.stage,
+            groupNumber: round.groupNumber,
+            groupName: round.groupName,
+            matches: round.matches
+                .map(
+                  (match) => TournamentMatch(
+                    id: match.id,
+                    roundNumber: match.roundNumber,
+                    matchNumber: match.matchNumber,
+                    playerA: match.playerA,
+                    playerB: match.playerB,
+                    status: match.status,
+                    result: match.result == null
+                        ? null
+                        : TournamentMatchResult(
+                            winnerId: match.result!.winnerId,
+                            winnerName: match.result!.winnerName,
+                            scoreText: match.result!.scoreText,
+                            isDraw: match.result!.isDraw,
+                          ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        )
+        .toList(growable: false);
+    return TournamentBracket(
+      definition: bracket.definition,
+      participants: bracket.participants,
+      rounds: rounds,
+    );
   }
 
   void _pruneArchive() {
@@ -2566,6 +3623,325 @@ class _CareerRankedEntry {
   final int rank;
   final _CareerPoolEntry entry;
   final bool isFallback;
+}
+
+class TournamentFlowState {
+  const TournamentFlowState({
+    required this.id,
+    required this.rootName,
+    this.communityId,
+    this.communityName,
+    required this.phases,
+    required this.game,
+    required this.format,
+    required this.fieldSize,
+    required this.matchMode,
+    required this.legsToWin,
+    required this.startScore,
+    required this.startRequirement,
+    required this.checkoutRequirement,
+    required this.setsToWin,
+    required this.legsPerSet,
+    required this.roundDistanceValues,
+    required this.pointsForWin,
+    required this.pointsForDraw,
+    required this.roundRobinRepeats,
+    required this.maxLeagueMatchesPerParticipant,
+    required this.playoffQualifierCount,
+    required this.groupCount,
+    required this.playersPerGroup,
+    required this.includeHumanPlayer,
+    required this.activePhaseNumber,
+    required this.activeTournamentNumber,
+    required this.pools,
+    required this.completedBrackets,
+    this.isCompleted = false,
+  });
+
+  final String id;
+  final String rootName;
+  final String? communityId;
+  final String? communityName;
+  final List<TournamentPhaseDefinition> phases;
+  final TournamentGame game;
+  final TournamentFormat format;
+  final int fieldSize;
+  final MatchMode matchMode;
+  final int legsToWin;
+  final int startScore;
+  final StartRequirement startRequirement;
+  final CheckoutRequirement checkoutRequirement;
+  final int setsToWin;
+  final int legsPerSet;
+  final List<int> roundDistanceValues;
+  final int pointsForWin;
+  final int pointsForDraw;
+  final int roundRobinRepeats;
+  final int maxLeagueMatchesPerParticipant;
+  final int playoffQualifierCount;
+  final int groupCount;
+  final int playersPerGroup;
+  final bool includeHumanPlayer;
+  final int activePhaseNumber;
+  final int activeTournamentNumber;
+  final List<TournamentFlowPoolEntry> pools;
+  final List<TournamentFlowCompletedBracket> completedBrackets;
+  final bool isCompleted;
+
+  TournamentFlowState copyWith({
+    String? id,
+    String? rootName,
+    String? communityId,
+    bool clearCommunityId = false,
+    String? communityName,
+    bool clearCommunityName = false,
+    List<TournamentPhaseDefinition>? phases,
+    TournamentGame? game,
+    TournamentFormat? format,
+    int? fieldSize,
+    MatchMode? matchMode,
+    int? legsToWin,
+    int? startScore,
+    StartRequirement? startRequirement,
+    CheckoutRequirement? checkoutRequirement,
+    int? setsToWin,
+    int? legsPerSet,
+    List<int>? roundDistanceValues,
+    int? pointsForWin,
+    int? pointsForDraw,
+    int? roundRobinRepeats,
+    int? maxLeagueMatchesPerParticipant,
+    int? playoffQualifierCount,
+    int? groupCount,
+    int? playersPerGroup,
+    bool? includeHumanPlayer,
+    int? activePhaseNumber,
+    int? activeTournamentNumber,
+    List<TournamentFlowPoolEntry>? pools,
+    List<TournamentFlowCompletedBracket>? completedBrackets,
+    bool? isCompleted,
+  }) {
+    return TournamentFlowState(
+      id: id ?? this.id,
+      rootName: rootName ?? this.rootName,
+      communityId: clearCommunityId ? null : communityId ?? this.communityId,
+      communityName:
+          clearCommunityName ? null : communityName ?? this.communityName,
+      phases: phases ?? this.phases,
+      game: game ?? this.game,
+      format: format ?? this.format,
+      fieldSize: fieldSize ?? this.fieldSize,
+      matchMode: matchMode ?? this.matchMode,
+      legsToWin: legsToWin ?? this.legsToWin,
+      startScore: startScore ?? this.startScore,
+      startRequirement: startRequirement ?? this.startRequirement,
+      checkoutRequirement: checkoutRequirement ?? this.checkoutRequirement,
+      setsToWin: setsToWin ?? this.setsToWin,
+      legsPerSet: legsPerSet ?? this.legsPerSet,
+      roundDistanceValues: roundDistanceValues ?? this.roundDistanceValues,
+      pointsForWin: pointsForWin ?? this.pointsForWin,
+      pointsForDraw: pointsForDraw ?? this.pointsForDraw,
+      roundRobinRepeats: roundRobinRepeats ?? this.roundRobinRepeats,
+      maxLeagueMatchesPerParticipant:
+          maxLeagueMatchesPerParticipant ?? this.maxLeagueMatchesPerParticipant,
+      playoffQualifierCount:
+          playoffQualifierCount ?? this.playoffQualifierCount,
+      groupCount: groupCount ?? this.groupCount,
+      playersPerGroup: playersPerGroup ?? this.playersPerGroup,
+      includeHumanPlayer: includeHumanPlayer ?? this.includeHumanPlayer,
+      activePhaseNumber: activePhaseNumber ?? this.activePhaseNumber,
+      activeTournamentNumber:
+          activeTournamentNumber ?? this.activeTournamentNumber,
+      pools: pools ?? this.pools,
+      completedBrackets: completedBrackets ?? this.completedBrackets,
+      isCompleted: isCompleted ?? this.isCompleted,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'rootName': rootName,
+      'communityId': communityId,
+      'communityName': communityName,
+      'phases': phases.map((entry) => entry.toJson()).toList(),
+      'game': game.name,
+      'format': format.name,
+      'fieldSize': fieldSize,
+      'matchMode': matchMode.name,
+      'legsToWin': legsToWin,
+      'startScore': startScore,
+      'startRequirement': startRequirement.name,
+      'checkoutRequirement': checkoutRequirement.name,
+      'setsToWin': setsToWin,
+      'legsPerSet': legsPerSet,
+      'roundDistanceValues': roundDistanceValues,
+      'pointsForWin': pointsForWin,
+      'pointsForDraw': pointsForDraw,
+      'roundRobinRepeats': roundRobinRepeats,
+      'maxLeagueMatchesPerParticipant': maxLeagueMatchesPerParticipant,
+      'playoffQualifierCount': playoffQualifierCount,
+      'groupCount': groupCount,
+      'playersPerGroup': playersPerGroup,
+      'includeHumanPlayer': includeHumanPlayer,
+      'activePhaseNumber': activePhaseNumber,
+      'activeTournamentNumber': activeTournamentNumber,
+      'pools': pools.map((entry) => entry.toJson()).toList(),
+      'completedBrackets':
+          completedBrackets.map((entry) => entry.toJson()).toList(),
+      'isCompleted': isCompleted,
+    };
+  }
+
+  static TournamentFlowState fromJson(Map<String, dynamic> json) {
+    return TournamentFlowState(
+      id: json['id'] as String,
+      rootName: json['rootName'] as String,
+      communityId: json['communityId'] as String?,
+      communityName: json['communityName'] as String?,
+      phases: (json['phases'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (entry) =>
+                TournamentPhaseDefinition.fromJson(entry.cast<String, dynamic>()),
+          )
+          .toList(),
+      game: TournamentGame.values.byName(
+        json['game'] as String? ?? TournamentGame.x01.name,
+      ),
+      format: TournamentFormat.values.byName(
+        json['format'] as String? ?? TournamentFormat.knockout.name,
+      ),
+      fieldSize: (json['fieldSize'] as num?)?.toInt() ?? 0,
+      matchMode: MatchMode.values.byName(
+        json['matchMode'] as String? ?? MatchMode.legs.name,
+      ),
+      legsToWin: (json['legsToWin'] as num?)?.toInt() ?? 1,
+      startScore: (json['startScore'] as num?)?.toInt() ?? 501,
+      startRequirement: StartRequirement.values.byName(
+        json['startRequirement'] as String? ?? StartRequirement.straightIn.name,
+      ),
+      checkoutRequirement: CheckoutRequirement.values.byName(
+        json['checkoutRequirement'] as String? ??
+            CheckoutRequirement.doubleOut.name,
+      ),
+      setsToWin: (json['setsToWin'] as num?)?.toInt() ?? 1,
+      legsPerSet: (json['legsPerSet'] as num?)?.toInt() ?? 1,
+      roundDistanceValues:
+          (json['roundDistanceValues'] as List<dynamic>? ?? const <dynamic>[])
+              .map((entry) => (entry as num).toInt())
+              .toList(),
+      pointsForWin: (json['pointsForWin'] as num?)?.toInt() ?? 2,
+      pointsForDraw: (json['pointsForDraw'] as num?)?.toInt() ?? 1,
+      roundRobinRepeats: (json['roundRobinRepeats'] as num?)?.toInt() ?? 1,
+      maxLeagueMatchesPerParticipant:
+          (json['maxLeagueMatchesPerParticipant'] as num?)?.toInt() ?? 0,
+      playoffQualifierCount:
+          (json['playoffQualifierCount'] as num?)?.toInt() ?? 4,
+      groupCount: (json['groupCount'] as num?)?.toInt() ?? 2,
+      playersPerGroup: (json['playersPerGroup'] as num?)?.toInt() ?? 4,
+      includeHumanPlayer: json['includeHumanPlayer'] as bool? ?? false,
+      activePhaseNumber: (json['activePhaseNumber'] as num?)?.toInt() ?? 1,
+      activeTournamentNumber:
+          (json['activeTournamentNumber'] as num?)?.toInt() ?? 1,
+      pools: (json['pools'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map(
+            (entry) => TournamentFlowPoolEntry.fromJson(
+              entry.cast<String, dynamic>(),
+            ),
+          )
+          .toList(),
+      completedBrackets:
+          (json['completedBrackets'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map>()
+              .map(
+                (entry) => TournamentFlowCompletedBracket.fromJson(
+                  entry.cast<String, dynamic>(),
+                ),
+              )
+              .toList(),
+      isCompleted: json['isCompleted'] as bool? ?? false,
+    );
+  }
+}
+
+class TournamentFlowPoolEntry {
+  const TournamentFlowPoolEntry({
+    required this.phaseNumber,
+    required this.tournamentNumber,
+    required this.participants,
+  });
+
+  final int phaseNumber;
+  final int tournamentNumber;
+  final List<TournamentParticipant> participants;
+
+  TournamentFlowPoolEntry copyWith({
+    int? phaseNumber,
+    int? tournamentNumber,
+    List<TournamentParticipant>? participants,
+  }) {
+    return TournamentFlowPoolEntry(
+      phaseNumber: phaseNumber ?? this.phaseNumber,
+      tournamentNumber: tournamentNumber ?? this.tournamentNumber,
+      participants: participants ?? this.participants,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'phaseNumber': phaseNumber,
+      'tournamentNumber': tournamentNumber,
+      'participants': participants.map((entry) => entry.toJson()).toList(),
+    };
+  }
+
+  static TournamentFlowPoolEntry fromJson(Map<String, dynamic> json) {
+    return TournamentFlowPoolEntry(
+      phaseNumber: (json['phaseNumber'] as num?)?.toInt() ?? 1,
+      tournamentNumber: (json['tournamentNumber'] as num?)?.toInt() ?? 1,
+      participants:
+          (json['participants'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map>()
+              .map(
+                (entry) => TournamentParticipant.fromJson(
+                  entry.cast<String, dynamic>(),
+                ),
+              )
+              .toList(),
+    );
+  }
+}
+
+class TournamentFlowCompletedBracket {
+  const TournamentFlowCompletedBracket({
+    required this.phaseNumber,
+    required this.tournamentNumber,
+    required this.bracket,
+  });
+
+  final int phaseNumber;
+  final int tournamentNumber;
+  final TournamentBracket bracket;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'phaseNumber': phaseNumber,
+      'tournamentNumber': tournamentNumber,
+      'bracket': bracket.toJson(),
+    };
+  }
+
+  static TournamentFlowCompletedBracket fromJson(Map<String, dynamic> json) {
+    return TournamentFlowCompletedBracket(
+      phaseNumber: (json['phaseNumber'] as num?)?.toInt() ?? 1,
+      tournamentNumber: (json['tournamentNumber'] as num?)?.toInt() ?? 1,
+      bracket: TournamentBracket.fromJson(
+        (json['bracket'] as Map).cast<String, dynamic>(),
+      ),
+    );
+  }
 }
 
 class CareerTournamentContext {

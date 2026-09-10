@@ -563,43 +563,169 @@ class PlayerBob27Stats {
   }
 }
 
+enum PlayerTrainingType {
+  x01,
+  scoring,
+  doubles,
+  checkout,
+  cricket,
+  bob27,
+  custom,
+}
+
+extension PlayerTrainingTypeSerialization on PlayerTrainingType {
+  String get storageValue => name;
+
+  String get label => switch (this) {
+        PlayerTrainingType.x01 => 'X01',
+        PlayerTrainingType.scoring => 'Scoring',
+        PlayerTrainingType.doubles => 'Doubles',
+        PlayerTrainingType.checkout => 'Checkout',
+        PlayerTrainingType.cricket => 'Cricket',
+        PlayerTrainingType.bob27 => 'Bob27',
+        PlayerTrainingType.custom => 'Custom',
+      };
+
+  static PlayerTrainingType fromStorageValue(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'x01':
+        return PlayerTrainingType.x01;
+      case 'scoring':
+        return PlayerTrainingType.scoring;
+      case 'doubles':
+        return PlayerTrainingType.doubles;
+      case 'checkout':
+        return PlayerTrainingType.checkout;
+      case 'cricket':
+        return PlayerTrainingType.cricket;
+      case 'bob27':
+        return PlayerTrainingType.bob27;
+      case 'custom':
+      default:
+        return PlayerTrainingType.custom;
+    }
+  }
+}
+
+enum PlayerTrainingValueUnit {
+  points,
+  average,
+  hits,
+  marks,
+  percent,
+  count,
+}
+
+extension PlayerTrainingValueUnitSerialization on PlayerTrainingValueUnit {
+  String get storageValue => name;
+
+  String get label => switch (this) {
+        PlayerTrainingValueUnit.points => 'Punkte',
+        PlayerTrainingValueUnit.average => 'Average',
+        PlayerTrainingValueUnit.hits => 'Hits',
+        PlayerTrainingValueUnit.marks => 'Marks',
+        PlayerTrainingValueUnit.percent => '%',
+        PlayerTrainingValueUnit.count => 'Anzahl',
+      };
+
+  String formatValue(double value) {
+    final needsDecimal = value % 1 != 0;
+    final number = needsDecimal ? value.toStringAsFixed(1) : value.toStringAsFixed(0);
+    return switch (this) {
+      PlayerTrainingValueUnit.percent => '$number %',
+      _ => '$number $label',
+    };
+  }
+
+  static PlayerTrainingValueUnit fromStorageValue(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'points':
+        return PlayerTrainingValueUnit.points;
+      case 'average':
+        return PlayerTrainingValueUnit.average;
+      case 'hits':
+        return PlayerTrainingValueUnit.hits;
+      case 'marks':
+        return PlayerTrainingValueUnit.marks;
+      case 'percent':
+        return PlayerTrainingValueUnit.percent;
+      case 'count':
+      default:
+        return PlayerTrainingValueUnit.count;
+    }
+  }
+}
+
 class PlayerTrainingEntry {
   const PlayerTrainingEntry({
     required this.id,
-    required this.mode,
-    required this.scoreLabel,
+    required this.type,
     required this.playedAt,
     this.equipmentId,
     this.equipmentName,
+    this.customLabel,
+    this.resultValue,
+    this.resultUnit,
+    this.resultLabel,
     this.average,
     this.notes,
   });
 
   final String id;
-  final String mode;
-  final String scoreLabel;
+  final PlayerTrainingType type;
   final DateTime playedAt;
   final String? equipmentId;
   final String? equipmentName;
+  final String? customLabel;
+  final double? resultValue;
+  final PlayerTrainingValueUnit? resultUnit;
+  final String? resultLabel;
   final double? average;
   final String? notes;
 
+  String get title {
+    final normalizedCustomLabel = customLabel?.trim();
+    if (normalizedCustomLabel != null && normalizedCustomLabel.isNotEmpty) {
+      return normalizedCustomLabel;
+    }
+    return type.label;
+  }
+
+  String get resultSummary {
+    final normalizedResultLabel = resultLabel?.trim();
+    if (normalizedResultLabel != null && normalizedResultLabel.isNotEmpty) {
+      return normalizedResultLabel;
+    }
+    if (resultValue != null && resultUnit != null) {
+      return resultUnit!.formatValue(resultValue!);
+    }
+    return '-';
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
-        'mode': mode,
-        'scoreLabel': scoreLabel,
+        'type': type.storageValue,
         'playedAt': playedAt.toIso8601String(),
         'equipmentId': equipmentId,
         'equipmentName': equipmentName,
+        'customLabel': customLabel,
+        'resultValue': resultValue,
+        'resultUnit': resultUnit?.storageValue,
+        'resultLabel': resultLabel,
         'average': average,
         'notes': notes,
       };
 
   static PlayerTrainingEntry fromJson(Map<String, dynamic> json) {
+    final legacyMode = (json['mode'] as String?)?.trim();
+    final legacyScoreLabel = (json['scoreLabel'] as String?)?.trim();
     return PlayerTrainingEntry(
       id: json['id'] as String,
-      mode: json['mode'] as String? ?? 'Training',
-      scoreLabel: json['scoreLabel'] as String? ?? '-',
+      type: json['type'] == null
+          ? PlayerTrainingType.custom
+          : PlayerTrainingTypeSerialization.fromStorageValue(
+              json['type'] as String?,
+            ),
       playedAt: DateTime.tryParse(json['playedAt'] as String? ?? '') ?? DateTime.now(),
       equipmentId: (json['equipmentId'] as String?)?.trim().isEmpty ?? true
           ? null
@@ -607,12 +733,44 @@ class PlayerTrainingEntry {
       equipmentName: (json['equipmentName'] as String?)?.trim().isEmpty ?? true
           ? null
           : (json['equipmentName'] as String?)?.trim(),
+      customLabel: (json['customLabel'] as String?)?.trim().isEmpty ?? true
+          ? legacyMode
+          : (json['customLabel'] as String?)?.trim(),
+      resultValue: (json['resultValue'] as num?)?.toDouble(),
+      resultUnit: json['resultUnit'] == null
+          ? null
+          : PlayerTrainingValueUnitSerialization.fromStorageValue(
+              json['resultUnit'] as String?,
+            ),
+      resultLabel: (json['resultLabel'] as String?)?.trim().isEmpty ?? true
+          ? legacyScoreLabel
+          : (json['resultLabel'] as String?)?.trim(),
       average: (json['average'] as num?)?.toDouble(),
       notes: (json['notes'] as String?)?.trim().isEmpty ?? true
           ? null
           : (json['notes'] as String?)?.trim(),
     );
   }
+}
+
+class PlayerTrainingSessionDraft {
+  const PlayerTrainingSessionDraft({
+    required this.type,
+    this.customLabel,
+    this.resultValue,
+    this.resultUnit,
+    this.resultLabel,
+    this.average,
+    this.notes,
+  });
+
+  final PlayerTrainingType type;
+  final String? customLabel;
+  final double? resultValue;
+  final PlayerTrainingValueUnit? resultUnit;
+  final String? resultLabel;
+  final double? average;
+  final String? notes;
 }
 
 class PlayerProfileStats {
@@ -1202,6 +1360,7 @@ class PlayerProfile {
     this.isFavorite = false,
     this.isProtected = false,
     this.age,
+    this.birthDate,
     this.nationality,
     this.favoriteDouble,
     this.hatedDouble,
@@ -1229,6 +1388,7 @@ class PlayerProfile {
   final bool isFavorite;
   final bool isProtected;
   final int? age;
+  final DateTime? birthDate;
   final String? nationality;
   final String? favoriteDouble;
   final String? hatedDouble;
@@ -1249,6 +1409,21 @@ class PlayerProfile {
   double get winRate =>
       matchesPlayed <= 0 ? 0 : (matchesWon / matchesPlayed) * 100;
 
+  int? get effectiveAge {
+    if (birthDate != null) {
+      final now = DateTime.now();
+      var years = now.year - birthDate!.year;
+      final hadBirthday =
+          now.month > birthDate!.month ||
+          (now.month == birthDate!.month && now.day >= birthDate!.day);
+      if (!hadBirthday) {
+        years -= 1;
+      }
+      return years < 0 ? null : years;
+    }
+    return age;
+  }
+
   PlayerProfile copyWith({
     String? id,
     String? name,
@@ -1260,6 +1435,8 @@ class PlayerProfile {
     bool? isProtected,
     int? age,
     bool clearAge = false,
+    DateTime? birthDate,
+    bool clearBirthDate = false,
     String? nationality,
     bool clearNationality = false,
     String? favoriteDouble,
@@ -1292,6 +1469,7 @@ class PlayerProfile {
       isFavorite: isFavorite ?? this.isFavorite,
       isProtected: isProtected ?? this.isProtected,
       age: clearAge ? null : age ?? this.age,
+      birthDate: clearBirthDate ? null : birthDate ?? this.birthDate,
       nationality: clearNationality ? null : nationality ?? this.nationality,
       favoriteDouble:
           clearFavoriteDouble ? null : favoriteDouble ?? this.favoriteDouble,
@@ -1325,6 +1503,7 @@ class PlayerProfile {
       'isFavorite': isFavorite,
       'isProtected': isProtected,
       'age': age,
+      'birthDate': birthDate?.toIso8601String(),
       'nationality': nationality,
       'favoriteDouble': favoriteDouble,
       'hatedDouble': hatedDouble,
@@ -1367,6 +1546,7 @@ class PlayerProfile {
       isFavorite: json['isFavorite'] as bool? ?? false,
       isProtected: json['isProtected'] as bool? ?? false,
       age: (json['age'] as num?)?.toInt(),
+      birthDate: DateTime.tryParse((json['birthDate'] as String?) ?? ''),
       nationality:
           rawNationality == null || rawNationality.isEmpty ? null : rawNationality,
       favoriteDouble: (json['favoriteDouble'] as String?)?.trim().isEmpty ?? true

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../../domain/bot/bot_engine.dart';
 import '../../domain/x01/x01_match_simulator.dart';
@@ -8,6 +10,7 @@ import '../../domain/x01/x01_models.dart';
 import '../debug/app_debug.dart';
 import '../repositories/computer_repository.dart';
 import '../repositories/settings_repository.dart';
+import '../storage/app_storage.dart';
 import 'background_task_runner.dart';
 
 abstract class SimulationTaskExecutor {
@@ -150,8 +153,12 @@ class SimulationService extends ChangeNotifier {
 
   static final SimulationService instance = SimulationService();
 
-  static const int _maxProfiles = 12;
+  static const int _maxProfiles = 21;
+  static const Duration _startupPrebootDelay = Duration(milliseconds: 600);
   static const Duration _workerRestartBackoff = Duration(milliseconds: 150);
+  static const String _bundledWarmupAssetPath =
+      'assets/data/bundled_simulation_warmup_snapshot.json';
+  static const String _simulationTablesStorageKey = 'simulation_warmup_tables';
 
   final SimulationTaskExecutor _executor;
   final Map<String, SimulationJobHandle<dynamic>> _jobsById =
@@ -159,6 +166,7 @@ class SimulationService extends ChangeNotifier {
 
   Map<String, Object?>? _tables;
   Future<void>? _startupWarmupFuture;
+  Future<void>? _startupPrebootFuture;
   SimulationJobHandle<void>? _warmupJob;
   int _jobSequence = 0;
 
@@ -174,11 +182,42 @@ class SimulationService extends ChangeNotifier {
     if (isValidSimulationWarmupSnapshot(storedTables)) {
       _tables = storedTables;
       AppDebug.instance.info('Warmup', 'Persistente Warm-up-Daten gefunden');
+      notifyListeners();
+      return;
+    }
+    final bundledTables = await _loadBundledSimulationTables();
+    if (bundledTables != null) {
+      _tables = bundledTables;
+      AppDebug.instance.info('Warmup', 'Gebuendelte Warm-up-Daten gefunden');
+      unawaited(
+        AppStorage.instance.writeJson(_simulationTablesStorageKey, bundledTables),
+      );
     } else {
       _tables = null;
-      AppDebug.instance.info('Warmup', 'Keine gueltigen Warm-up-Daten gefunden');
+      AppDebug.instance.info(
+        'Warmup',
+        'Keine gueltigen Warm-up-Daten gefunden',
+      );
     }
     notifyListeners();
+  }
+
+  Future<Map<String, Object?>?> _loadBundledSimulationTables() async {
+    try {
+      final raw = await rootBundle.loadString(_bundledWarmupAssetPath);
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return null;
+      }
+      final normalized = decoded.cast<String, Object?>();
+      return isValidSimulationWarmupSnapshot(normalized) ? normalized : null;
+    } catch (error) {
+      AppDebug.instance.warning(
+        'Warmup',
+        'Gebuendelte Warm-up-Daten konnten nicht geladen werden: $error',
+      );
+      return null;
+    }
   }
 
   void applyToBotEngine(BotEngine botEngine) {
@@ -208,6 +247,16 @@ class SimulationService extends ChangeNotifier {
     }
     final future = _runStartupWarmup();
     _startupWarmupFuture = future;
+    return future;
+  }
+
+  Future<void> startColdBootPreloadIfNeeded() {
+    final existing = _startupPrebootFuture;
+    if (existing != null) {
+      return existing;
+    }
+    final future = _runStartupColdBootPreload();
+    _startupPrebootFuture = future;
     return future;
   }
 
@@ -375,6 +424,34 @@ class SimulationService extends ChangeNotifier {
     }
   }
 
+  Future<void> _runStartupColdBootPreload() async {
+    try {
+      await Future<void>.delayed(_startupPrebootDelay);
+      if (_startupWarmupFuture != null) {
+        return;
+      }
+      AppDebug.instance.info('Warmup', 'Starte gestaffelten Simulation-Preboot');
+      await _executor.prewarmSimulationWorker(
+        payload: const <String, Object?>{},
+      );
+      final prebootProfiles = _buildPrebootProfilesPayload();
+      if (prebootProfiles.isNotEmpty) {
+        await _executor.prewarmSimulationWorker(
+          payload: <String, Object?>{
+            'profilesById': prebootProfiles,
+          },
+        );
+      }
+    } catch (error) {
+      AppDebug.instance.warning(
+        'Warmup',
+        'Simulation-Preboot konnte nicht abgeschlossen werden: $error',
+      );
+    } finally {
+      _startupPrebootFuture = null;
+    }
+  }
+
   Future<void> _runPersistentWarmupWithRecovery({
     required Map<String, Object?> payload,
     void Function(BackgroundTaskSnapshot snapshot)? onUpdate,
@@ -398,6 +475,10 @@ class SimulationService extends ChangeNotifier {
     }
   }
 
+  Future<void> disposeSimulationWorker() {
+    return _executor.disposeSimulationWorker();
+  }
+
   Map<String, Object?> _buildWarmupProfilesPayload() {
     final profilesByKey = <String, BotProfile>{};
 
@@ -411,8 +492,20 @@ class SimulationService extends ChangeNotifier {
 
     addProfile(
       SettingsRepository.instance.createBotProfile(
+        skill: 320,
+        finishingSkill: 260,
+      ),
+    );
+    addProfile(
+      SettingsRepository.instance.createBotProfile(
         skill: 420,
         finishingSkill: 360,
+      ),
+    );
+    addProfile(
+      SettingsRepository.instance.createBotProfile(
+        skill: 560,
+        finishingSkill: 440,
       ),
     );
     addProfile(
@@ -423,8 +516,20 @@ class SimulationService extends ChangeNotifier {
     );
     addProfile(
       SettingsRepository.instance.createBotProfile(
+        skill: 820,
+        finishingSkill: 700,
+      ),
+    );
+    addProfile(
+      SettingsRepository.instance.createBotProfile(
         skill: 920,
         finishingSkill: 860,
+      ),
+    );
+    addProfile(
+      SettingsRepository.instance.createBotProfile(
+        skill: 1020,
+        finishingSkill: 940,
       ),
     );
 
@@ -448,6 +553,33 @@ class SimulationService extends ChangeNotifier {
           'radiusCalibrationPercent': entry.value.radiusCalibrationPercent,
           'simulationSpreadPercent': entry.value.simulationSpreadPercent,
         },
+    };
+  }
+
+  Map<String, Object?> _buildPrebootProfilesPayload() {
+    final allProfiles = _buildWarmupProfilesPayload();
+    if (allProfiles.isEmpty) {
+      return const <String, Object?>{};
+    }
+    final entries = allProfiles.entries.toList(growable: false);
+    final selected = <MapEntry<String, Object?>>[];
+    void addAt(int index) {
+      if (index < 0 || index >= entries.length) {
+        return;
+      }
+      final entry = entries[index];
+      if (selected.any((existing) => existing.key == entry.key)) {
+        return;
+      }
+      selected.add(entry);
+    }
+
+    addAt(0);
+    addAt(entries.length ~/ 2);
+    addAt(entries.length - 1);
+
+    return <String, Object?>{
+      for (final entry in selected) entry.key: entry.value,
     };
   }
 

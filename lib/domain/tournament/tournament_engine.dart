@@ -15,6 +15,7 @@ class TournamentEngine {
         );
 
   final X01MatchSimulator _simulator;
+  final Random _fastSimulationRandom = Random();
   bool _commonSimulationCachesPrepared = false;
 
   void resetPerformanceTotals() {
@@ -43,10 +44,12 @@ class TournamentEngine {
             .cast<String, Object?>();
     _simulator.botEngine.importDeterministicTables(bot);
     _simulator.importDeterministicTables(x01);
+    _commonSimulationCachesPrepared = true;
   }
 
   Future<void> prepareCommonSimulationCaches({
     required Iterable<BotProfile> profiles,
+    int maxRepresentativeProfiles = 3,
     void Function(String label, double? progress)? onProgress,
   }) async {
     if (_commonSimulationCachesPrepared) {
@@ -57,7 +60,10 @@ class TournamentEngine {
       const BotProfile(skill: 700, finishingSkill: 700),
       ...profiles,
     ];
-    final uniqueProfiles = _selectRepresentativeWarmupProfiles(prepProfiles);
+    final uniqueProfiles = _selectRepresentativeWarmupProfiles(
+      prepProfiles,
+      maxRepresentativeProfiles: maxRepresentativeProfiles,
+    );
     final warmupScores = _buildWarmupScores();
     final totalSteps = warmupScores.length.clamp(1, 1 << 30);
     onProgress?.call('Simulationsdaten werden vorbereitet', 0);
@@ -104,7 +110,9 @@ class TournamentEngine {
 
   List<BotProfile> _selectRepresentativeWarmupProfiles(
     Iterable<BotProfile> profiles,
-  ) {
+    {
+    required int maxRepresentativeProfiles,
+  }) {
     final byBucket = <String, BotProfile>{};
     for (final profile in profiles) {
       final skillBucket = (profile.skill / 180).floor().clamp(0, 6);
@@ -113,7 +121,7 @@ class TournamentEngine {
       final key =
           '$skillBucket|$finishingBucket|${profile.radiusCalibrationPercent}|${profile.simulationSpreadPercent}';
       byBucket.putIfAbsent(key, () => profile);
-      if (byBucket.length >= 3) {
+      if (byBucket.length >= maxRepresentativeProfiles) {
         break;
       }
     }
@@ -213,12 +221,111 @@ class TournamentEngine {
     required BotProfile Function(String participantId) profileProvider,
     required bool includeHumanMatches,
     required int maxMatches,
+    bool fastMode = false,
   }) {
+    if (fastMode) {
+      return _simulateMatchesBatchApprox(
+        bracket: bracket,
+        includeHumanMatches: includeHumanMatches,
+        maxMatches: maxMatches,
+      );
+    }
     return _simulateMatchesBatchFast(
       bracket: bracket,
       profileProvider: profileProvider,
       includeHumanMatches: includeHumanMatches,
       maxMatches: maxMatches,
+    );
+  }
+
+  TournamentSimulationBatch _simulateMatchesBatchApprox({
+    required TournamentBracket bracket,
+    required bool includeHumanMatches,
+    required int maxMatches,
+  }) {
+    final rounds = _cloneRounds(bracket.rounds);
+    var workingBracket = TournamentBracket(
+      definition: bracket.definition,
+      participants: bracket.participants,
+      rounds: rounds,
+    );
+    var simulatedMatches = 0;
+
+    while (!workingBracket.isCompleted && simulatedMatches < maxMatches) {
+      if (workingBracket.definition.format == TournamentFormat.leaguePlayoff &&
+          workingBracket.playoffRounds.isEmpty &&
+          _allRoundsCompleted(workingBracket.leagueRounds)) {
+        final playoffRounds = _buildPlayoffRounds(workingBracket);
+        if (playoffRounds.isNotEmpty) {
+          rounds.addAll(playoffRounds);
+          workingBracket = TournamentBracket(
+            definition: workingBracket.definition,
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          _autoAdvanceByesInPlace(
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          workingBracket = TournamentBracket(
+            definition: workingBracket.definition,
+            participants: workingBracket.participants,
+            rounds: rounds,
+          );
+          continue;
+        }
+      }
+
+      final nextMatchRef = _findNextSimulatableMatch(
+        rounds,
+        includeHumanMatches: includeHumanMatches,
+      );
+      if (nextMatchRef == null) {
+        return TournamentSimulationBatch(
+          bracket: workingBracket,
+          simulatedMatches: simulatedMatches,
+          madeProgress: false,
+        );
+      }
+
+      final match = rounds[nextMatchRef.roundIndex].matches[nextMatchRef.matchIndex];
+      final playerA = match.playerA!;
+      final playerB = match.playerB!;
+      final legsToWin = _legsToWinForMatch(
+        bracket: workingBracket,
+        roundNumber: match.roundNumber,
+      );
+      final setsToWin = _setsToWinForMatch(
+        bracket: workingBracket,
+        roundNumber: match.roundNumber,
+      );
+      final result = _simulateApproximateMatch(
+        definition: workingBracket.definition,
+        playerA: playerA,
+        playerB: playerB,
+        legsToWin: legsToWin,
+        setsToWin: setsToWin,
+      );
+      _applyResultInPlace(
+        rounds: rounds,
+        participants: workingBracket.participants,
+        roundIndex: nextMatchRef.roundIndex,
+        matchIndex: nextMatchRef.matchIndex,
+        result: result,
+        format: workingBracket.definition.format,
+      );
+      simulatedMatches += 1;
+      workingBracket = TournamentBracket(
+        definition: workingBracket.definition,
+        participants: workingBracket.participants,
+        rounds: rounds,
+      );
+    }
+
+    return TournamentSimulationBatch(
+      bracket: workingBracket,
+      simulatedMatches: simulatedMatches,
+      madeProgress: simulatedMatches > 0,
     );
   }
 
@@ -342,16 +449,20 @@ class TournamentEngine {
     required TournamentDefinition definition,
     required List<TournamentParticipant> participants,
   }) {
-    final orderedParticipants = List<TournamentParticipant>.from(participants)
-      ..sort((left, right) {
-        final leftSeed = left.seedNumber ?? 1 << 20;
-        final rightSeed = right.seedNumber ?? 1 << 20;
-        final seedCompare = leftSeed.compareTo(rightSeed);
-        if (seedCompare != 0) {
-          return seedCompare;
-        }
-        return right.average.compareTo(left.average);
-      });
+    final seededEntries = participants
+        .where((participant) => participant.seedNumber != null)
+        .toList()
+      ..sort(
+        (left, right) => left.seedNumber!.compareTo(right.seedNumber!),
+      );
+    final unseededEntries = participants
+        .where((participant) => participant.seedNumber == null)
+        .toList()
+      ..shuffle(Random());
+    final orderedParticipants = <TournamentParticipant>[
+      ...seededEntries,
+      ...unseededEntries,
+    ];
 
     final seededParticipants = <TournamentParticipant>[];
     for (var index = 0; index < orderedParticipants.length; index += 1) {
@@ -363,10 +474,24 @@ class TournamentEngine {
           type: participant.type,
           average: participant.average,
           entryRound: participant.entryRound,
-          seedNumber: participant.seedNumber ?? index + 1,
+          seedNumber: participant.seedNumber,
           qualificationReason: participant.qualificationReason,
           botSkill: participant.botSkill,
           botFinishingSkill: participant.botFinishingSkill,
+        ),
+      );
+    }
+
+    if (definition.format == TournamentFormat.groupStage) {
+      return TournamentBracket(
+        definition: definition,
+        participants: seededParticipants,
+        rounds: _buildGroupStageRounds(
+          participants: seededParticipants,
+          groupCount: definition.groupCount,
+          playersPerGroup: definition.playersPerGroup,
+          repeatCount: definition.roundRobinRepeats,
+          maxMatchesPerParticipant: definition.maxLeagueMatchesPerParticipant,
         ),
       );
     }
@@ -379,6 +504,7 @@ class TournamentEngine {
         rounds: _buildLeagueRounds(
           participants: seededParticipants,
           repeatCount: definition.roundRobinRepeats,
+          maxMatchesPerParticipant: definition.maxLeagueMatchesPerParticipant,
         ),
       );
     }
@@ -444,10 +570,12 @@ class TournamentEngine {
   List<TournamentRound> buildLeagueRounds({
     required List<TournamentParticipant> participants,
     required int repeatCount,
+    int maxMatchesPerParticipant = 0,
   }) {
     return _buildLeagueRounds(
       participants: participants,
       repeatCount: repeatCount,
+      maxMatchesPerParticipant: maxMatchesPerParticipant,
     );
   }
 
@@ -762,21 +890,9 @@ class TournamentEngine {
       return updatedBracket;
     }
     if (bracket.definition.format == TournamentFormat.leaguePlayoff) {
-      if (updatedBracket.playoffRounds.isEmpty &&
-          _allRoundsCompleted(updatedBracket.leagueRounds)) {
-        return _autoAdvanceByes(
-          TournamentBracket(
-            definition: updatedBracket.definition,
-            participants: updatedBracket.participants,
-            rounds: <TournamentRound>[
-              ...updatedBracket.rounds,
-              ..._buildPlayoffRounds(updatedBracket),
-            ],
-          ),
-        );
-      }
-
-      return _advancePlayoffWinners(updatedBracket);
+      return updatedBracket.playoffRounds.isEmpty
+          ? updatedBracket
+          : _advancePlayoffWinners(updatedBracket);
     }
 
     return _autoAdvanceByes(_withAdvancedWinners(updatedBracket));
@@ -828,7 +944,7 @@ class TournamentEngine {
       result: result,
     );
 
-    if (format == TournamentFormat.league) {
+    if (format == TournamentFormat.league || format == TournamentFormat.groupStage) {
       return;
     }
 
@@ -1240,6 +1356,368 @@ class TournamentEngine {
     );
   }
 
+  TournamentMatchResult _simulateApproximateMatch({
+    required TournamentDefinition definition,
+    required TournamentParticipant playerA,
+    required TournamentParticipant playerB,
+    required int legsToWin,
+    required int setsToWin,
+  }) {
+    final averageA = playerA.average.clamp(25, 130).toDouble();
+    final averageB = playerB.average.clamp(25, 130).toDouble();
+    final matchAverageA = _approximateMatchAverage(
+      baseAverage: averageA,
+      opponentAverage: averageB,
+    );
+    final matchAverageB = _approximateMatchAverage(
+      baseAverage: averageB,
+      opponentAverage: averageA,
+    );
+    const startingAdvantage = 1.4;
+    final baseStrengthA = matchAverageA + startingAdvantage;
+    final baseStrengthB = matchAverageB;
+    final matchLengthFactor = definition.matchMode == MatchMode.sets
+        ? max(1.0, setsToWin * legsToWin * 0.7)
+        : max(1.0, legsToWin.toDouble());
+    final upsetVariance = 1.0 + (4.8 / matchLengthFactor);
+    final strengthGap = (baseStrengthA - baseStrengthB) / (7.5 * upsetVariance);
+    final rawWinProbabilityA = 1 / (1 + exp(-strengthGap));
+    final compression = (
+      (definition.matchMode == MatchMode.sets ? 0.14 : 0.20) +
+      (definition.matchMode == MatchMode.legs && legsToWin <= 6 ? 0.08 : 0.0) -
+      ((matchLengthFactor - 1) * 0.010)
+    ).clamp(0.08, 0.28).toDouble();
+    final winProbabilityA =
+        0.5 + ((rawWinProbabilityA - 0.5) * (1 - compression));
+
+    if (definition.matchMode == MatchMode.sets) {
+      var setsA = 0;
+      var setsB = 0;
+      var legsWonA = 0;
+      var legsWonB = 0;
+      while (setsA < setsToWin && setsB < setsToWin) {
+        var setLegsA = 0;
+        var setLegsB = 0;
+        while (setLegsA < legsToWin && setLegsB < legsToWin) {
+          final legWinnerA = _fastSimulationRandom.nextDouble() <
+              _jitterWinProbability(winProbabilityA);
+          if (legWinnerA) {
+            setLegsA += 1;
+            legsWonA += 1;
+          } else {
+            setLegsB += 1;
+            legsWonB += 1;
+          }
+        }
+        if (setLegsA > setLegsB) {
+          setsA += 1;
+        } else {
+          setsB += 1;
+        }
+      }
+      final winner = setsA > setsB ? playerA : playerB;
+      return TournamentMatchResult(
+        winnerId: winner.id,
+        winnerName: winner.name,
+        scoreText: '$setsA:$setsB',
+        participantStats: <TournamentPlayerMatchStats>[
+          _buildApproximatePlayerMatchStats(
+            participant: playerA,
+            ownAverage: matchAverageA,
+            opponentAverage: matchAverageB,
+            legsWon: legsWonA,
+            legsLost: legsWonB,
+          ),
+          _buildApproximatePlayerMatchStats(
+            participant: playerB,
+            ownAverage: matchAverageB,
+            opponentAverage: matchAverageA,
+            legsWon: legsWonB,
+            legsLost: legsWonA,
+          ),
+        ],
+      );
+    }
+
+    var legsA = 0;
+    var legsB = 0;
+    while (legsA < legsToWin && legsB < legsToWin) {
+      if (_fastSimulationRandom.nextDouble() <
+          _jitterWinProbability(winProbabilityA)) {
+        legsA += 1;
+      } else {
+        legsB += 1;
+      }
+    }
+    final winner = legsA > legsB ? playerA : playerB;
+    return TournamentMatchResult(
+      winnerId: winner.id,
+      winnerName: winner.name,
+      scoreText: '$legsA:$legsB',
+      participantStats: <TournamentPlayerMatchStats>[
+        _buildApproximatePlayerMatchStats(
+          participant: playerA,
+          ownAverage: matchAverageA,
+          opponentAverage: matchAverageB,
+          legsWon: legsA,
+          legsLost: legsB,
+        ),
+        _buildApproximatePlayerMatchStats(
+          participant: playerB,
+          ownAverage: matchAverageB,
+          opponentAverage: matchAverageA,
+          legsWon: legsB,
+          legsLost: legsA,
+        ),
+      ],
+    );
+  }
+
+  double _approximateMatchAverage({
+    required double baseAverage,
+    required double opponentAverage,
+  }) {
+    final formSwing = _nextCenteredDouble() * 4.9;
+    final pressureSwing = _nextCenteredDouble() * 1.5;
+    final opponentPull = (opponentAverage - baseAverage) * 0.05;
+    return (baseAverage + formSwing + pressureSwing + opponentPull)
+        .clamp(28.0, 125.0)
+        .toDouble();
+  }
+
+  double _jitterWinProbability(double baseProbability) {
+    final swing = _nextCenteredDouble() * 0.085;
+    return (baseProbability + swing).clamp(0.10, 0.90).toDouble();
+  }
+
+  double _nextCenteredDouble() {
+    return (_fastSimulationRandom.nextDouble() * 2) - 1;
+  }
+
+  TournamentPlayerMatchStats _buildApproximatePlayerMatchStats({
+    required TournamentParticipant participant,
+    required double ownAverage,
+    required double opponentAverage,
+    required int legsWon,
+    required int legsLost,
+  }) {
+    final legsPlayed = legsWon + legsLost;
+    final avgLegDarts =
+        max(12, ((501 * 3) / max(ownAverage, 1)).round()).toInt();
+    final strengthShare =
+        (ownAverage / max(ownAverage + opponentAverage, 1)).clamp(0.0, 1.0);
+    final losingLegPoints = legsLost == 0
+        ? 0
+        : (501 *
+                (0.60 +
+                    0.28 * strengthShare +
+                    (_nextCenteredDouble() * 0.05)))
+            .round()
+            .clamp(220, 498)
+            .toInt();
+    final pointsScored = (legsWon * 501) + (legsLost * losingLegPoints);
+    final dartsThrown = max(
+      legsPlayed == 0 ? 0 : legsPlayed * 9,
+      (((pointsScored * 3) / max(ownAverage, 1)) +
+              (_nextCenteredDouble() * max(2, legsPlayed)))
+          .round(),
+    ).toInt();
+    final visits = max(1, (dartsThrown / 3).ceil());
+    final checkoutAttempts =
+        max(legsWon, (legsPlayed * (0.42 + ownAverage / 255)).round());
+    final successfulCheckouts = legsWon;
+    final scores100Plus = ((dartsThrown / 9 * (ownAverage / 77)) +
+            (_nextCenteredDouble() * 1.6))
+        .round()
+        .clamp(0, 9999);
+    final scores140Plus =
+        max(0, ((scores100Plus / 3) + (_nextCenteredDouble() * 0.8)).round());
+    final scores180 =
+        max(0, ((scores140Plus / 5) + (_nextCenteredDouble() * 0.45)).round());
+    final firstNinePoints =
+        (ownAverage * (2.88 + (_nextCenteredDouble() * 0.05))).roundToDouble();
+    final highestFinish =
+        legsWon == 0
+            ? 0
+            : (40 +
+                    ((ownAverage - 40).clamp(0, 90)) +
+                    (_nextCenteredDouble() * 10))
+                .round()
+                .clamp(0, 170)
+                .toInt();
+    final totalFinishValue = successfulCheckouts == 0
+        ? 0
+        : highestFinish * successfulCheckouts;
+    final decidingLegsPlayed =
+        (legsWon - legsLost).abs() <= 1 && legsPlayed > 1 ? 1 : 0;
+    final decidingLegsWon =
+        decidingLegsPlayed == 1 && legsWon > legsLost ? 1 : 0;
+    final bestLegDarts = legsWon == 0
+        ? 0
+        : max(9, avgLegDarts - (2 + _fastSimulationRandom.nextInt(3)));
+    final won12Darters = bestLegDarts > 0 && bestLegDarts <= 12
+        ? min(legsWon, 1 + _fastSimulationRandom.nextInt(min(legsWon, 3)))
+        : 0;
+    final won15Darters = bestLegDarts > 0 && bestLegDarts <= 15
+        ? max(
+            won12Darters,
+            min(
+              legsWon,
+              won12Darters + _fastSimulationRandom.nextInt(max(1, min(legsWon, 4))),
+            ),
+          )
+        : 0;
+    final won18Darters = bestLegDarts > 0 && bestLegDarts <= 18
+        ? max(
+            won15Darters,
+            min(
+              legsWon,
+              won15Darters + _fastSimulationRandom.nextInt(max(1, min(legsWon, 5))),
+            ),
+          )
+        : 0;
+    final nineDarterChancePerWonLeg = ownAverage >= 99
+        ? ((ownAverage - 98) / 6500).clamp(0.0, 0.006)
+        : 0.0;
+    var won9Darters = 0;
+    for (var index = 0; index < legsWon; index += 1) {
+      if (_fastSimulationRandom.nextDouble() < nineDarterChancePerWonLeg) {
+        won9Darters += 1;
+      }
+    }
+    final normalizedWon12Darters =
+        max(won12Darters, won9Darters).clamp(0, legsWon).toInt();
+    final normalizedWon15Darters =
+        max(won15Darters, normalizedWon12Darters).clamp(0, legsWon).toInt();
+    final normalizedWon18Darters =
+        max(won18Darters, normalizedWon15Darters).clamp(0, legsWon).toInt();
+    final withThrowShare = (0.50 + (_nextCenteredDouble() * 0.03))
+        .clamp(0.44, 0.56)
+        .toDouble();
+    final throwDelta = (1.6 + (strengthShare * 1.8) + (_nextCenteredDouble() * 0.5))
+        .clamp(0.5, 3.5)
+        .toDouble();
+    final withThrowDarts = (dartsThrown * withThrowShare).round();
+    final againstThrowDarts = max(0, dartsThrown - withThrowDarts).toInt();
+    final withThrowAverageTarget = ownAverage + throwDelta;
+    var withThrowPoints =
+        ((withThrowAverageTarget / 3) * withThrowDarts).round();
+    withThrowPoints = withThrowPoints.clamp(0, pointsScored).toInt();
+    final againstThrowPoints = pointsScored - withThrowPoints;
+    final decidingLegDarts = decidingLegsPlayed == 0
+        ? 0
+        : max(9, avgLegDarts + _fastSimulationRandom.nextInt(4) - 1);
+    final decidingLegAverageTarget = decidingLegsPlayed == 0
+        ? 0.0
+        : (ownAverage + (_nextCenteredDouble() * 3.5)).clamp(70.0, 125.0);
+    final decidingLegPoints = decidingLegsPlayed == 0
+        ? 0
+        : ((decidingLegAverageTarget / 3) * decidingLegDarts)
+            .round()
+            .clamp(0, 501)
+            .toInt();
+    final bullCheckoutAttempts = ownAverage > opponentAverage
+        ? min(checkoutAttempts, max(0, checkoutAttempts ~/ 10))
+        : min(checkoutAttempts, max(0, checkoutAttempts ~/ 16));
+    final bullCheckouts = min(
+      successfulCheckouts,
+      bullCheckoutAttempts == 0
+          ? 0
+          : (bullCheckoutAttempts * (0.28 + strengthShare * 0.18)).round(),
+    );
+    final functionalDoubleAttempts = max(
+      successfulCheckouts,
+      checkoutAttempts - max(0, checkoutAttempts ~/ 8),
+    ).toInt();
+    final functionalDoubleSuccesses = min(
+      successfulCheckouts,
+      max(successfulCheckouts, (functionalDoubleAttempts * 0.72).round()),
+    );
+    final checkoutAttempts1Dart = min(
+      checkoutAttempts,
+      max(0, (checkoutAttempts * (0.16 + strengthShare * 0.06)).round()),
+    );
+    final checkoutAttempts2Dart = min(
+      max(0, checkoutAttempts - checkoutAttempts1Dart),
+      max(0, (checkoutAttempts * 0.34).round()),
+    );
+    final checkoutAttempts3Dart =
+        max(0, checkoutAttempts - checkoutAttempts1Dart - checkoutAttempts2Dart);
+    final successfulCheckouts1Dart = min(
+      checkoutAttempts1Dart,
+      min(successfulCheckouts, (checkoutAttempts1Dart * 0.48).round()),
+    );
+    final remainingCheckoutsAfter1 =
+        max(0, successfulCheckouts - successfulCheckouts1Dart);
+    final successfulCheckouts2Dart = min(
+      checkoutAttempts2Dart,
+      min(remainingCheckoutsAfter1, (checkoutAttempts2Dart * 0.55).round()),
+    );
+    final successfulCheckouts3Dart = max(
+      0,
+      min(
+        checkoutAttempts3Dart,
+        successfulCheckouts -
+            successfulCheckouts1Dart -
+            successfulCheckouts2Dart,
+      ),
+    );
+    final thirdDartCheckoutAttempts = checkoutAttempts3Dart;
+    final thirdDartCheckouts = successfulCheckouts3Dart;
+
+    return TournamentPlayerMatchStats(
+      participantId: participant.id,
+      participantName: participant.name,
+      pointsScored: pointsScored,
+      dartsThrown: dartsThrown,
+      visits: visits,
+      legsWon: legsWon,
+      legsPlayed: legsPlayed,
+      legsStarted: (legsPlayed / 2).ceil(),
+      legsWonAsStarter: min(legsWon, (legsPlayed / 2).ceil()),
+      legsWonWithoutStarter: max(0, legsWon - min(legsWon, (legsPlayed / 2).ceil())),
+      scores0To40: max(0, visits ~/ 8),
+      scores41To59: max(0, visits ~/ 7),
+      scores60Plus: max(0, visits - (visits ~/ 8) - (visits ~/ 7)),
+      scores100Plus: scores100Plus,
+      scores140Plus: scores140Plus,
+      scores171Plus: 0,
+      scores180: scores180,
+      checkoutAttempts: checkoutAttempts,
+      successfulCheckouts: successfulCheckouts,
+      checkoutAttempts1Dart: checkoutAttempts1Dart,
+      checkoutAttempts2Dart: checkoutAttempts2Dart,
+      checkoutAttempts3Dart: checkoutAttempts3Dart,
+      successfulCheckouts1Dart: successfulCheckouts1Dart,
+      successfulCheckouts2Dart: successfulCheckouts2Dart,
+      successfulCheckouts3Dart: successfulCheckouts3Dart,
+      thirdDartCheckoutAttempts: thirdDartCheckoutAttempts,
+      thirdDartCheckouts: thirdDartCheckouts,
+      bullCheckoutAttempts: bullCheckoutAttempts,
+      bullCheckouts: bullCheckouts,
+      functionalDoubleAttempts: functionalDoubleAttempts,
+      functionalDoubleSuccesses: functionalDoubleSuccesses,
+      firstNinePoints: firstNinePoints,
+      firstNineDarts:
+          legsPlayed == 0 ? 0 : min(legsPlayed * 9, dartsThrown).toInt(),
+      highestFinish: highestFinish,
+      bestLegDarts: bestLegDarts,
+      totalFinishValue: totalFinishValue,
+      withThrowPoints: withThrowPoints,
+      withThrowDarts: withThrowDarts,
+      againstThrowPoints: againstThrowPoints,
+      againstThrowDarts: againstThrowDarts,
+      decidingLegPoints: decidingLegPoints,
+      decidingLegDarts: decidingLegDarts,
+      decidingLegsPlayed: decidingLegsPlayed,
+      decidingLegsWon: decidingLegsWon,
+      won9Darters: won9Darters,
+      won12Darters: normalizedWon12Darters,
+      won15Darters: normalizedWon15Darters,
+      won18Darters: normalizedWon18Darters,
+    );
+  }
+
   List<TournamentRound> _advanceWinners({
     required List<TournamentParticipant> participants,
     required List<TournamentRound> rounds,
@@ -1301,6 +1779,111 @@ class TournamentEngine {
   List<TournamentRound> _buildLeagueRounds({
     required List<TournamentParticipant> participants,
     required int repeatCount,
+    required int maxMatchesPerParticipant,
+  }) {
+    return _buildRoundRobinRounds(
+      participants: participants,
+      repeatCount: repeatCount,
+      maxMatchesPerParticipant: maxMatchesPerParticipant,
+      stage: TournamentRoundStage.league,
+      titleBuilder: (roundNumber, _, __) => 'Spieltag $roundNumber',
+    );
+  }
+
+  List<TournamentRound> _buildGroupStageRounds({
+    required List<TournamentParticipant> participants,
+    required int groupCount,
+    required int playersPerGroup,
+    required int repeatCount,
+    required int maxMatchesPerParticipant,
+  }) {
+    final safeGroupCount = groupCount < 1 ? 1 : groupCount;
+    final groups = _distributeParticipantsIntoGroups(
+      participants: participants,
+      groupCount: safeGroupCount,
+      playersPerGroup: playersPerGroup,
+    );
+    final rounds = <TournamentRound>[];
+    var roundNumberOffset = 1;
+    for (var index = 0; index < groups.length; index += 1) {
+      final groupParticipants = groups[index];
+      final groupName = _groupName(index);
+      final groupRounds = _buildRoundRobinRounds(
+        participants: groupParticipants,
+        repeatCount: repeatCount,
+        maxMatchesPerParticipant: maxMatchesPerParticipant,
+        stage: TournamentRoundStage.group,
+        roundNumberOffset: roundNumberOffset,
+        groupNumber: index + 1,
+        groupName: groupName,
+        titleBuilder: (roundNumber, groupNo, groupLabel) =>
+            '$groupLabel - Spieltag ${roundNumber - roundNumberOffset + 1}',
+      );
+      rounds.addAll(groupRounds);
+      roundNumberOffset += groupRounds.length;
+    }
+    return rounds;
+  }
+
+  List<List<TournamentParticipant>> _distributeParticipantsIntoGroups({
+    required List<TournamentParticipant> participants,
+    required int groupCount,
+    required int playersPerGroup,
+  }) {
+    final groups = List<List<TournamentParticipant>>.generate(
+      groupCount,
+      (_) => <TournamentParticipant>[],
+    );
+    if (participants.isEmpty) {
+      return groups;
+    }
+    final orderedParticipants = List<TournamentParticipant>.from(participants)
+      ..sort((left, right) {
+        final leftSeed = left.seedNumber ?? 1 << 20;
+        final rightSeed = right.seedNumber ?? 1 << 20;
+        final seedCompare = leftSeed.compareTo(rightSeed);
+        if (seedCompare != 0) {
+          return seedCompare;
+        }
+        return right.average.compareTo(left.average);
+      });
+    final safePlayersPerGroup = playersPerGroup < 1 ? 1 : playersPerGroup;
+    for (var index = 0; index < orderedParticipants.length; index += 1) {
+      final cycle = index ~/ groupCount;
+      final offset = index % groupCount;
+      final groupIndex = cycle.isEven ? offset : (groupCount - 1 - offset);
+      if (groups[groupIndex].length >= safePlayersPerGroup) {
+        final fallbackIndex = groups.indexWhere(
+          (group) => group.length < safePlayersPerGroup,
+        );
+        if (fallbackIndex >= 0) {
+          groups[fallbackIndex].add(orderedParticipants[index]);
+          continue;
+        }
+      }
+      groups[groupIndex].add(orderedParticipants[index]);
+    }
+    return groups;
+  }
+
+  String _groupName(int index) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if (index >= 0 && index < alphabet.length) {
+      return 'Gruppe ${alphabet[index]}';
+    }
+    return 'Gruppe ${index + 1}';
+  }
+
+  List<TournamentRound> _buildRoundRobinRounds({
+    required List<TournamentParticipant> participants,
+    required int repeatCount,
+    required int maxMatchesPerParticipant,
+    required TournamentRoundStage stage,
+    required String Function(int roundNumber, int? groupNumber, String? groupName)
+        titleBuilder,
+    int roundNumberOffset = 1,
+    int? groupNumber,
+    String? groupName,
   }) {
     if (participants.length < 2) {
       return const <TournamentRound>[];
@@ -1334,9 +1917,17 @@ class TournamentEngine {
     }
 
     final rounds = <TournamentRound>[];
-    var roundNumber = 1;
+    var roundNumber = roundNumberOffset;
+    final limitedMatchdays = maxMatchesPerParticipant > 0
+        ? maxMatchesPerParticipant
+        : null;
+    var scheduledMatchdays = 0;
     for (var cycle = 0; cycle < repeatCount; cycle += 1) {
       for (final pairings in matchdayTemplates) {
+        if (limitedMatchdays != null &&
+            scheduledMatchdays >= limitedMatchdays) {
+          break;
+        }
         final matches = <TournamentMatch>[];
         for (var matchIndex = 0; matchIndex < pairings.length; matchIndex += 1) {
           final pairing = pairings[matchIndex];
@@ -1359,12 +1950,19 @@ class TournamentEngine {
         rounds.add(
           TournamentRound(
             roundNumber: roundNumber,
-            title: 'Spieltag $roundNumber',
+            title: titleBuilder(roundNumber, groupNumber, groupName),
             matches: matches,
-            stage: TournamentRoundStage.league,
+            stage: stage,
+            groupNumber: groupNumber,
+            groupName: groupName,
           ),
         );
+        scheduledMatchdays += 1;
         roundNumber += 1;
+      }
+      if (limitedMatchdays != null &&
+          scheduledMatchdays >= limitedMatchdays) {
+        break;
       }
     }
     return rounds;

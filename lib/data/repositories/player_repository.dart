@@ -399,6 +399,7 @@ class PlayerRepository extends ChangeNotifier {
     required String name,
     String? nationality,
     int? age,
+    DateTime? birthDate,
     String? favoriteDouble,
     String? hatedDouble,
     List<String> tags = const <String>[],
@@ -412,6 +413,10 @@ class PlayerRepository extends ChangeNotifier {
     }
 
     final now = DateTime.now();
+    final normalizedBirthData = _normalizeBirthData(
+      age: age,
+      birthDate: birthDate,
+    );
     final profile = PlayerProfile(
       id: 'player-${DateTime.now().microsecondsSinceEpoch}',
       name: trimmed,
@@ -419,7 +424,8 @@ class PlayerRepository extends ChangeNotifier {
       updatedAt: now,
       lastModifiedReason: 'manual_create',
       nationality: _normalizeNationality(nationality),
-      age: age,
+      age: normalizedBirthData.age,
+      birthDate: normalizedBirthData.birthDate,
       favoriteDouble: _normalizeNullableText(favoriteDouble),
       hatedDouble: _normalizeNullableText(hatedDouble),
       tags: _normalizeTags(tags),
@@ -566,6 +572,7 @@ class PlayerRepository extends ChangeNotifier {
     required String name,
     String? nationality,
     int? age,
+    DateTime? birthDate,
     String? favoriteDouble,
     String? hatedDouble,
     List<String> tags = const <String>[],
@@ -581,13 +588,19 @@ class PlayerRepository extends ChangeNotifier {
       return;
     }
 
+    final normalizedBirthData = _normalizeBirthData(
+      age: age,
+      birthDate: birthDate,
+    );
     _players[index] = _players[index].copyWith(
       name: trimmedName,
       nationality: _normalizeNationality(nationality),
       clearNationality:
           _normalizeNullableText(nationality) == null,
-      age: age,
-      clearAge: age == null,
+      age: normalizedBirthData.age,
+      clearAge: normalizedBirthData.age == null,
+      birthDate: normalizedBirthData.birthDate,
+      clearBirthDate: normalizedBirthData.birthDate == null,
       favoriteDouble: _normalizeNullableText(favoriteDouble),
       clearFavoriteDouble: _normalizeNullableText(favoriteDouble) == null,
       hatedDouble: _normalizeNullableText(hatedDouble),
@@ -827,10 +840,7 @@ class PlayerRepository extends ChangeNotifier {
 
   void recordTrainingSession({
     required String playerId,
-    required String mode,
-    required String scoreLabel,
-    double? average,
-    String? notes,
+    required PlayerTrainingSessionDraft session,
   }) {
     final index = _players.indexWhere((player) => player.id == playerId);
     if (index < 0) {
@@ -840,13 +850,16 @@ class PlayerRepository extends ChangeNotifier {
     final activeEquipment = _resolveActiveEquipment(current);
     final entry = PlayerTrainingEntry(
       id: 'training-${DateTime.now().microsecondsSinceEpoch}',
-      mode: mode,
-      scoreLabel: scoreLabel,
+      type: session.type,
       playedAt: DateTime.now(),
       equipmentId: activeEquipment?.id,
       equipmentName: activeEquipment?.name,
-      average: average,
-      notes: _normalizeNullableText(notes),
+      customLabel: _normalizeNullableText(session.customLabel),
+      resultValue: session.resultValue,
+      resultUnit: session.resultUnit,
+      resultLabel: _normalizeNullableText(session.resultLabel),
+      average: session.average,
+      notes: _normalizeNullableText(session.notes),
     );
     _players[index] = current.copyWith(
       trainingHistory: <PlayerTrainingEntry>[entry, ...current.trainingHistory],
@@ -885,6 +898,7 @@ class PlayerRepository extends ChangeNotifier {
         'name',
         'source',
         'nationality',
+        'birthDate',
         'age',
         'favorite',
         'protected',
@@ -904,7 +918,8 @@ class PlayerRepository extends ChangeNotifier {
             player.name,
             player.source.storageValue,
             player.nationality ?? '',
-            player.age?.toString() ?? '',
+            player.birthDate?.toIso8601String() ?? '',
+            player.effectiveAge?.toString() ?? '',
             player.isFavorite.toString(),
             player.isProtected.toString(),
             player.favoriteDouble ?? '',
@@ -999,6 +1014,11 @@ class PlayerRepository extends ChangeNotifier {
         values[header[index]] = row[index];
       }
       final now = DateTime.now();
+      final parsedBirthDate = _parseBirthDate(values['birthDate'] ?? '');
+      final normalizedBirthData = _normalizeBirthData(
+        age: int.tryParse(values['age'] ?? ''),
+        birthDate: parsedBirthDate,
+      );
       importedPlayers.add(
         PlayerProfile(
           id: values['id']?.trim().isNotEmpty == true
@@ -1013,7 +1033,8 @@ class PlayerRepository extends ChangeNotifier {
           ),
           isFavorite: values['favorite'] == 'true',
           isProtected: values['protected'] == 'true',
-          age: int.tryParse(values['age'] ?? ''),
+          age: normalizedBirthData.age,
+          birthDate: normalizedBirthData.birthDate,
           nationality: _normalizeNationality(values['nationality']),
           favoriteDouble: _normalizeNullableText(values['favoriteDouble']),
           hatedDouble: _normalizeNullableText(values['hatedDouble']),
@@ -1122,10 +1143,18 @@ class PlayerRepository extends ChangeNotifier {
     final rebuiltStats = _rebuildStatsFromHistory(player);
     final rebuiltCricketStats = _rebuildCricketStatsFromHistory(player);
     final rebuiltBob27Stats = _rebuildBob27StatsFromHistory(player);
+    final normalizedBirthData = _normalizeBirthData(
+      age: player.age,
+      birthDate: player.birthDate,
+    );
     final average = rebuiltStats.dartsThrown > 0
         ? rebuiltStats.average
         : player.average;
     return player.copyWith(
+      age: normalizedBirthData.age,
+      clearAge: normalizedBirthData.age == null,
+      birthDate: normalizedBirthData.birthDate,
+      clearBirthDate: normalizedBirthData.birthDate == null,
       nationality: _normalizeNationality(player.nationality),
       clearNationality: _normalizeNationality(player.nationality) == null,
       tags: normalizedTags,
@@ -1144,6 +1173,68 @@ class PlayerRepository extends ChangeNotifier {
           ? _historyWinCount(player)
           : player.matchesWon,
     );
+  }
+
+  ({int? age, DateTime? birthDate}) _normalizeBirthData({
+    int? age,
+    DateTime? birthDate,
+  }) {
+    if (birthDate != null) {
+      final normalizedBirthDate = DateTime(
+        birthDate.year,
+        birthDate.month,
+        birthDate.day,
+      );
+      return (
+        age: _deriveAgeFromBirthDate(normalizedBirthDate),
+        birthDate: normalizedBirthDate,
+      );
+    }
+    return (age: age, birthDate: null);
+  }
+
+  DateTime? _parseBirthDate(String rawValue) {
+    final trimmed = rawValue.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final iso = DateTime.tryParse(trimmed);
+    if (iso != null) {
+      return DateTime(iso.year, iso.month, iso.day);
+    }
+    final parts = trimmed.split(RegExp(r'[./-]'));
+    if (parts.length != 3) {
+      return null;
+    }
+    final first = int.tryParse(parts[0]);
+    final second = int.tryParse(parts[1]);
+    final third = int.tryParse(parts[2]);
+    if (first == null || second == null || third == null) {
+      return null;
+    }
+    if (parts[0].length == 4) {
+      return DateTime.tryParse(
+        '${first.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${third.toString().padLeft(2, '0')}',
+      );
+    }
+    return DateTime.tryParse(
+      '${third.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${first.toString().padLeft(2, '0')}',
+    );
+  }
+
+  int? _deriveAgeFromBirthDate(DateTime? birthDate) {
+    if (birthDate == null) {
+      return null;
+    }
+    final now = DateTime.now();
+    var years = now.year - birthDate.year;
+    final hadBirthday =
+        now.month > birthDate.month ||
+        (now.month == birthDate.month && now.day >= birthDate.day);
+    if (!hadBirthday) {
+      years -= 1;
+    }
+    return years < 0 ? null : years;
   }
 
   int _historyWinCount(PlayerProfile player) {

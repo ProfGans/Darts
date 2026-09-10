@@ -45,10 +45,7 @@ class BoardGeometry {
     }
 
     if (dartThrow.label == '25') {
-      return _segmentMarkerPoint(
-        (radii.bull + radii.outerBull) / 2,
-        0,
-      );
+      return _segmentMarkerPoint((radii.bull + radii.outerBull) / 2, 0);
     }
 
     final segmentIndex = X01Rules.wheel.indexOf(dartThrow.baseValue);

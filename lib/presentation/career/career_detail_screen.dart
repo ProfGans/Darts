@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/routes.dart';
 import '../../data/debug/app_debug.dart';
+import '../../data/debug/simulation_debug_state.dart';
 import '../../data/repositories/career_repository.dart';
 import '../../data/repositories/player_repository.dart';
 import '../../data/repositories/tournament_repository.dart';
@@ -33,6 +34,12 @@ Future<bool> _runCareerTournamentSimulation({
     'Karriere',
     'Turnier-Simulation "${item.name}"',
   );
+  SimulationDebugState.instance.beginTournament(
+    careerName: career.name,
+    tournamentName: item.name,
+    phase: 'build',
+    label: 'Turnieraufbau startet',
+  );
   AppDebug.instance.info(
     'Trace',
     'Karriere-Simulation gestartet | Karriere=${career.name} | Turnier=${item.name} | ausSaison=$calledFromSeason',
@@ -46,28 +53,51 @@ Future<bool> _runCareerTournamentSimulation({
       silent: calledFromSeason,
     );
     buildStopwatch.stop();
+    SimulationDebugState.instance.markCheckpoint(
+      'Turnieraufbau abgeschlossen',
+      durationMs: buildStopwatch.elapsedMilliseconds,
+    );
     AppDebug.instance.info(
       'Performance',
       'Turnieraufbau "${item.name}": ${buildStopwatch.elapsedMilliseconds} ms',
     );
     await Future<void>.delayed(const Duration(milliseconds: 1));
     final simulationStopwatch = Stopwatch()..start();
+    SimulationDebugState.instance.updateTournamentProgress(
+      tournamentName: item.name,
+      phase: 'simulate',
+      label: 'Turniersimulation laeuft',
+    );
     await tournamentRepository.simulateCurrentTournamentUntilComplete(
       includeHumanMatches: true,
       emitProgressUpdates: !calledFromSeason,
       preferResponsiveUi: true,
+      fastMode: calledFromSeason,
     );
     simulationStopwatch.stop();
+    SimulationDebugState.instance.markCheckpoint(
+      'Turniersimulation abgeschlossen',
+      durationMs: simulationStopwatch.elapsedMilliseconds,
+    );
     AppDebug.instance.info(
       'Performance',
       'Turniersimulation "${item.name}": ${simulationStopwatch.elapsedMilliseconds} ms',
     );
     if (tournamentRepository.currentBracket?.isCompleted ?? false) {
       final commitStopwatch = Stopwatch()..start();
+      SimulationDebugState.instance.updateTournamentProgress(
+        tournamentName: item.name,
+        phase: 'commit',
+        label: 'Karriere-Commit laeuft',
+      );
       tournamentRepository.commitCurrentCareerTournament(
         silent: calledFromSeason,
       );
       commitStopwatch.stop();
+      SimulationDebugState.instance.markCheckpoint(
+        'Karriere-Commit abgeschlossen',
+        durationMs: commitStopwatch.elapsedMilliseconds,
+      );
       AppDebug.instance.info(
         'Performance',
         'Karriere-Commit "${item.name}": ${commitStopwatch.elapsedMilliseconds} ms',
@@ -80,8 +110,12 @@ Future<bool> _runCareerTournamentSimulation({
       );
     }
     action.complete();
+    SimulationDebugState.instance.clear();
   } catch (error) {
     action.fail(error);
+    SimulationDebugState.instance.markCheckpoint(
+      'Fehler: $error',
+    );
     rethrow;
   }
 
@@ -446,6 +480,7 @@ class _CareerSeasonCalendarScreen extends StatefulWidget {
 class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen> {
   bool _isSimulatingTournament = false;
   bool _isSimulatingSeason = false;
+  bool _seasonCancelRequested = false;
   String? _simulationStatus;
   bool _showSimulationOverlay = true;
 
@@ -529,6 +564,12 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
                             icon: const Icon(Icons.auto_awesome_motion),
                             label: const Text('Komplette Saison simulieren'),
                           ),
+                          if (_isSimulatingSeason)
+                            OutlinedButton.icon(
+                              onPressed: _cancelSeasonSimulation,
+                              icon: const Icon(Icons.stop_circle_outlined),
+                              label: const Text('Simulation abbrechen'),
+                            ),
                           OutlinedButton.icon(
                             onPressed: canFinishSeason
                                 ? repository.finishCurrentSeason
@@ -602,6 +643,9 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
                                 _showSimulationOverlay = false;
                               });
                             },
+                            onCancel: _isSimulatingSeason
+                                ? _cancelSeasonSimulation
+                                : null,
                           )
                         : _SimulationProgressHandle(
                             label:
@@ -701,8 +745,12 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       return;
     }
     final repository = CareerRepository.instance;
+    final tournamentRepository = TournamentRepository.instance;
+    var deferredPersistenceActive = false;
+    var deferredTournamentPersistenceActive = false;
     setState(() {
       _isSimulatingSeason = true;
+      _seasonCancelRequested = false;
       _simulationStatus = 'Saison-Simulation gestartet...';
       _showSimulationOverlay = true;
     });
@@ -711,8 +759,32 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
       'Komplette Saison-Simulation',
     );
     try {
+      SimulationDebugState.instance.beginSeason(
+        careerName: career.name,
+        totalTournaments: career.currentSeason.calendar.length,
+      );
+      repository.beginDeferredPersistence();
+      tournamentRepository.beginDeferredPersistence();
+      deferredPersistenceActive = true;
+      deferredTournamentPersistenceActive = true;
+      setState(() {
+        _simulationStatus = 'Saison-Simulation wird vorbereitet...';
+      });
+      SimulationDebugState.instance.updateSeasonStep(
+        completed: 0,
+        total: career.currentSeason.calendar.length,
+        tournamentName: '-',
+        phase: 'season_prewarm',
+        label: 'Saison-Simulation wird vorbereitet',
+      );
+      await tournamentRepository.prewarmCareerSeasonSimulation(
+        career: career,
+      );
       final total = career.currentSeason.calendar.length;
       while (mounted) {
+        if (_seasonCancelRequested) {
+          break;
+        }
         final nextItem = repository.nextOpenCalendarItem();
         if (nextItem == null) {
           break;
@@ -720,6 +792,13 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
         final completed =
             repository.activeCareer?.currentSeason.completedItemIds.length ?? 0;
         final currentIndex = completed + 1;
+        SimulationDebugState.instance.updateSeasonStep(
+          completed: completed,
+          total: total,
+          tournamentName: nextItem.name,
+          phase: 'next_tournament',
+          label: 'Saison-Simulation: Turnier $currentIndex/$total - ${nextItem.name}',
+        );
         setState(() {
           _simulationStatus =
               'Saison-Simulation: Turnier $currentIndex/$total - ${nextItem.name}';
@@ -729,25 +808,46 @@ class _CareerSeasonCalendarScreenState extends State<_CareerSeasonCalendarScreen
           item: nextItem,
           calledFromSeason: true,
         );
-        if (!progressed) {
+        if (_seasonCancelRequested || !progressed) {
           break;
         }
         await Future<void>.delayed(const Duration(milliseconds: 12));
       }
-      action.complete();
+      action.complete(_seasonCancelRequested ? 'abgebrochen' : null);
     } catch (error) {
       action.fail(error);
+      SimulationDebugState.instance.markCheckpoint('Saisonfehler: $error');
       rethrow;
     } finally {
+      SimulationDebugState.instance.clear();
+      if (deferredPersistenceActive) {
+        await repository.endDeferredPersistence();
+      }
+      if (deferredTournamentPersistenceActive) {
+        await tournamentRepository.endDeferredPersistence();
+      }
       if (mounted) {
           setState(() {
             _isSimulatingSeason = false;
+            _seasonCancelRequested = false;
             _simulationStatus = null;
           });
         }
-        TournamentRepository.instance.clearSimulationProgress();
+        tournamentRepository.clearSimulationProgress();
       }
     }
+
+  void _cancelSeasonSimulation() {
+    if (!_isSimulatingSeason || _seasonCancelRequested) {
+      return;
+    }
+    setState(() {
+      _seasonCancelRequested = true;
+      _simulationStatus = 'Saison-Simulation wird abgebrochen...';
+      _showSimulationOverlay = true;
+    });
+    unawaited(TournamentRepository.instance.requestSimulationCancel());
+  }
 }
 
 class _CareerCalendarItemCard extends StatelessWidget {
@@ -2555,12 +2655,14 @@ class _SimulationProgressOverlay extends StatelessWidget {
     required this.label,
     required this.progress,
     required this.onHide,
+    this.onCancel,
   });
 
   final String title;
   final String? label;
   final double? progress;
   final VoidCallback onHide;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -2568,7 +2670,7 @@ class _SimulationProgressOverlay extends StatelessWidget {
       child: IgnorePointer(
         ignoring: false,
         child: ColoredBox(
-          color: Colors.black.withOpacity(0.18),
+          color: Colors.black.withValues(alpha: 0.18),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 460),
@@ -2618,6 +2720,17 @@ class _SimulationProgressOverlay extends StatelessWidget {
                                 color: const Color(0xFF5D7285),
                               ),
                         ),
+                        if (onCancel != null) ...<Widget>[
+                          const SizedBox(height: 14),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: OutlinedButton.icon(
+                              onPressed: onCancel,
+                              icon: const Icon(Icons.stop_circle_outlined),
+                              label: const Text('Simulation abbrechen'),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

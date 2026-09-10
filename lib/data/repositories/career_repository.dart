@@ -10,6 +10,7 @@ import '../../domain/rankings/ranking_engine.dart';
 import '../../domain/tournament/tournament_models.dart';
 import '../../domain/x01/x01_models.dart';
 import '../models/player_profile.dart';
+import '../debug/simulation_debug_state.dart';
 import '../storage/app_storage.dart';
 import 'computer_repository.dart';
 import 'player_repository.dart';
@@ -27,6 +28,8 @@ class CareerRepository extends ChangeNotifier {
   final RankingEngine _rankingEngine = const RankingEngine();
   final List<CareerDefinition> _careers = <CareerDefinition>[];
   String? _activeCareerId;
+  int _deferredPersistenceDepth = 0;
+  bool _persistenceDirty = false;
   Map<String, String>? _cachedParticipantMap;
   CareerStatisticsSummary? _cachedStatisticsSummary;
   final Map<String, List<RankingStanding>> _cachedStandingsByRankingId =
@@ -802,7 +805,10 @@ class CareerRepository extends ChangeNotifier {
     int pointsForWin = 2,
     int pointsForDraw = 1,
     int roundRobinRepeats = 1,
+    int maxLeagueMatchesPerParticipant = 0,
     int playoffQualifierCount = 4,
+    int groupCount = 2,
+    int playersPerGroup = 4,
     required List<String> countsForRankingIds,
     String? seedingRankingId,
     int seedCount = 0,
@@ -850,7 +856,10 @@ class CareerRepository extends ChangeNotifier {
       pointsForWin: pointsForWin,
       pointsForDraw: pointsForDraw,
       roundRobinRepeats: roundRobinRepeats,
+      maxLeagueMatchesPerParticipant: maxLeagueMatchesPerParticipant,
       playoffQualifierCount: playoffQualifierCount,
+      groupCount: groupCount,
+      playersPerGroup: playersPerGroup,
       countsForRankingIds: countsForRankingIds,
       seedingRankingId: seedingRankingId,
       seedCount: seedCount,
@@ -898,7 +907,10 @@ class CareerRepository extends ChangeNotifier {
     int pointsForWin = 2,
     int pointsForDraw = 1,
     int roundRobinRepeats = 1,
+    int maxLeagueMatchesPerParticipant = 0,
     int playoffQualifierCount = 4,
+    int groupCount = 2,
+    int playersPerGroup = 4,
     required List<String> countsForRankingIds,
     String? seedingRankingId,
     int seedCount = 0,
@@ -946,7 +958,10 @@ class CareerRepository extends ChangeNotifier {
       pointsForWin: pointsForWin,
       pointsForDraw: pointsForDraw,
       roundRobinRepeats: roundRobinRepeats,
+      maxLeagueMatchesPerParticipant: maxLeagueMatchesPerParticipant,
       playoffQualifierCount: playoffQualifierCount,
+      groupCount: groupCount,
+      playersPerGroup: playersPerGroup,
       countsForRankingIds: countsForRankingIds,
       seedingRankingId: seedingRankingId,
       seedCount: seedCount,
@@ -1033,6 +1048,27 @@ class CareerRepository extends ChangeNotifier {
         ),
       );
     }
+
+  void beginDeferredPersistence() {
+    _deferredPersistenceDepth += 1;
+  }
+
+  Future<void> endDeferredPersistence() async {
+    if (_deferredPersistenceDepth <= 0) {
+      return;
+    }
+    _deferredPersistenceDepth -= 1;
+    if (_deferredPersistenceDepth == 0 && _persistenceDirty) {
+      _persistenceDirty = false;
+      SimulationDebugState.instance.markCheckpoint(
+        'Karriere-Persist gestartet',
+      );
+      await _persist();
+      SimulationDebugState.instance.markCheckpoint(
+        'Karriere-Persist abgeschlossen',
+      );
+    }
+  }
 
   void completeCurrentTournament({
     required CareerCalendarItem item,
@@ -1548,7 +1584,11 @@ class CareerRepository extends ChangeNotifier {
     _careers[index] = _normalizeLoadedCareer(updatedCareer);
     _invalidateDerivedDataCaches();
     notifyListeners();
-    unawaited(_persist());
+    if (_deferredPersistenceDepth > 0) {
+      _persistenceDirty = true;
+    } else {
+      unawaited(_persist());
+    }
   }
 
   void _invalidateDerivedDataCaches() {

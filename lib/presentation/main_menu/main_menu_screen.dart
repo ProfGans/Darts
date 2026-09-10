@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../app/routes.dart';
 import '../../data/repositories/career_repository.dart';
 import '../career/career_hub_screen.dart';
+import '../tournament/tournament_hub_screen.dart';
 
 enum AppShellSection {
   play,
+  tournament,
   career,
   manage,
   tools,
@@ -37,6 +39,7 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
           index: _section.index,
           children: const <Widget>[
             _PlayHub(),
+            _TournamentSectionHub(),
             _CareerHub(),
             _ManageHub(),
             _ToolsHub(),
@@ -55,6 +58,11 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
             icon: Icon(Icons.sports_score_outlined),
             selectedIcon: Icon(Icons.sports_score),
             label: 'Spielen',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.emoji_events_outlined),
+            selectedIcon: Icon(Icons.emoji_events),
+            label: 'Tunierverwaltung',
           ),
           NavigationDestination(
             icon: Icon(Icons.timeline_outlined),
@@ -79,6 +87,7 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
   String _titleForSection(AppShellSection section) {
     return switch (section) {
       AppShellSection.play => 'Spielen',
+      AppShellSection.tournament => 'Tunierverwaltung',
       AppShellSection.career => 'Karriere',
       AppShellSection.manage => 'Verwalten',
       AppShellSection.tools => 'Tools',
@@ -205,6 +214,17 @@ class _CareerHub extends StatelessWidget {
   }
 }
 
+class _TournamentSectionHub extends StatelessWidget {
+  const _TournamentSectionHub();
+
+  @override
+  Widget build(BuildContext context) {
+    return const TournamentHubScreen(
+      embeddedInShell: true,
+    );
+  }
+}
+
 class _ManageHub extends StatelessWidget {
   const _ManageHub();
 
@@ -272,15 +292,6 @@ class _ToolsHub extends StatelessWidget {
                   'Restscore und Darts eingeben, passende Finishes vergleichen.',
               onTap: () {
                 Navigator.of(context).pushNamed(AppRoutes.checkoutCalculator);
-              },
-            ),
-            _HubTile(
-              icon: Icons.center_focus_strong_rounded,
-              title: 'Erkennungs-Tester',
-              subtitle:
-                  'Board-Erkennung, Kalibrierung und Dartspitzen-Vorschlag ohne Match testen.',
-              onTap: () {
-                Navigator.of(context).pushNamed(AppRoutes.boardRecognitionTester);
               },
             ),
             _HubTile(

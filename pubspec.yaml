@@ -9,10 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  camera: ^0.11.0+2
-  image: ^4.2.0
   path_provider: ^2.1.5
-  speech_to_text: ^7.3.0
 
 dev_dependencies:
   flutter_test:
@@ -24,5 +21,6 @@ flutter:
   assets:
     - assets/data/default_computer_players.json
     - assets/data/bundled_theoretical_average_cache.json
+    - assets/data/bundled_simulation_warmup_snapshot.json
     - assets/data/checkout_routes_v1.json
     - assets/templates/basic_pdc_template.json

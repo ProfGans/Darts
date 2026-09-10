@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/routes.dart';
@@ -13,6 +14,7 @@ import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../data/repositories/tournament_repository.dart';
+import '../../data/simulation/theo_resolution_lookup.dart';
 import '../../domain/career/career_models.dart';
 import '../../domain/career/career_template.dart';
 import '../../domain/rankings/ranking_engine.dart';
@@ -29,8 +31,12 @@ import 'widgets/career_tag_definitions_list.dart';
 import 'widgets/career_tournament_editor.dart';
 import 'widgets/career_tournament_prize_editor.dart';
 import 'widgets/career_validation_panel.dart';
+import '../widgets/theo_display.dart';
 import '../tournament/tournament_basics_form.dart';
 import '../tournament/tournament_form_models.dart';
+
+part 'career_setup_simple_flow.dart';
+part 'career_setup_templates.dart';
 
 class CareerSetupScreen extends StatefulWidget {
   const CareerSetupScreen({
@@ -45,6 +51,11 @@ class CareerSetupScreen extends StatefulWidget {
 }
 
 enum CareerCreationMode {
+  simple,
+  expert,
+}
+
+enum _SimpleCreationPath {
   simple,
   expert,
 }
@@ -234,12 +245,6 @@ class _SimpleQuickTournamentEditorPageState
       blueprint: blueprint,
       fieldSize: fieldSize,
     );
-    final playoffQualifierCount = blueprint.format == TournamentFormat.leaguePlayoff
-        ? widget.host._quickPlayoffQualifierCountForFieldSize(
-            fieldSize: fieldSize,
-            requestedQualifierCount: blueprint.playoffQualifierCount,
-          )
-        : blueprint.playoffQualifierCount;
     final effectiveFieldSize = initialConfig?.fieldSizeOverride ?? fieldSize;
     final effectivePrizePool = initialConfig?.prizePoolOverride ?? prizePool;
     final effectivePreset =
@@ -652,6 +657,23 @@ enum _CareerTournamentAccessPreset {
 }
 
 class _CareerSetupScreenState extends State<CareerSetupScreen> {
+  int get _trainingApplyBatchSize {
+    if (kIsWeb) {
+      return 16;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 6;
+      case TargetPlatform.iOS:
+        return 8;
+      case TargetPlatform.fuchsia:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+        return 20;
+    }
+  }
+
   final CareerRepository _repository = CareerRepository.instance;
   final CareerTemplateRepository _templateRepository =
       CareerTemplateRepository.instance;
@@ -688,6 +710,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       TextEditingController();
   final TextEditingController _trainingMaxAverageController =
       TextEditingController();
+  final TextEditingController _simpleQuickSeasonTournamentCountController =
+      TextEditingController(text: '24');
   final TextEditingController _simpleTargetRosterSizeController =
       TextEditingController(text: '32');
   final TextEditingController _careerTagNameController = TextEditingController();
@@ -716,6 +740,10 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   final TextEditingController _tournamentTagGateMinimumController =
       TextEditingController();
 
+  void _updateState(VoidCallback callback) {
+    setState(callback);
+  }
+
   CareerParticipantMode _participantMode = CareerParticipantMode.withHuman;
   String? _selectedPlayerProfileId;
   bool _replaceWeakestPlayerWithHuman = true;
@@ -740,6 +768,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   String? _editingCareerTagId;
   String? _editingSeasonTagRuleId;
   String? _selectedTrainingPoolTagName;
+  String? _editingTemplateId;
+  String? _editingTemplateDraftCareerId;
   bool _isTrainingModeExpanded = false;
   String? _selectedSeasonTagRuleTagName;
   String? _selectedSeasonTagRuleRankingId;
@@ -766,6 +796,9 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   final Map<String, _SimpleQuickTourTypeConfig> _simpleQuickTourConfigs =
       <String, _SimpleQuickTourTypeConfig>{};
   final Set<String> _simpleQuickSelectedBlueprintIds = <String>{};
+  bool _simpleTrainingModeEnabled = false;
+  bool _simpleUseTemplate = true;
+  _SimpleCreationPath _simpleCreationPath = _SimpleCreationPath.simple;
   bool _simpleQuickTournamentGenerationEnabled = true;
   final Set<TournamentFormat> _simpleQuickFormats = <TournamentFormat>{
     TournamentFormat.knockout,
@@ -774,7 +807,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   };
   bool _simpleQuickIncludeSeries = true;
   bool _simpleQuickIncludeStandalone = true;
-  bool _showAdvancedCreation = false;
   bool _creationModeApplied = false;
   bool _isBusy = false;
   String _busyMessage = '';
@@ -834,6 +866,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     _careerRosterTagsController.dispose();
     _trainingMinAverageController.dispose();
     _trainingMaxAverageController.dispose();
+    _simpleQuickSeasonTournamentCountController.dispose();
     _simpleTargetRosterSizeController.dispose();
     _careerTagNameController.dispose();
     _careerTagAttributesController.dispose();
@@ -891,8 +924,12 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         }
         if (!_creationModeApplied) {
           _creationModeApplied = true;
-          _showAdvancedCreation =
-              widget.creationMode == CareerCreationMode.expert;
+          _simpleCreationPath = widget.creationMode == CareerCreationMode.expert
+              ? _SimpleCreationPath.expert
+              : _SimpleCreationPath.simple;
+          _simpleUseTemplate = widget.creationMode != CareerCreationMode.expert;
+          _simpleQuickTournamentGenerationEnabled = !_simpleUseTemplate &&
+              _simpleCreationPath == _SimpleCreationPath.simple;
         }
 
         return Stack(
@@ -984,6 +1021,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     required CareerDefinition? activeCareer,
     required List<CareerTemplate> templates,
     required List<PlayerProfile> players,
+    bool showInitialSetupOptions = true,
   }) {
     return Card(
       child: Padding(
@@ -997,59 +1035,61 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               controller: _careerNameController,
               decoration: const InputDecoration(labelText: 'Karrierename'),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<CareerParticipantMode>(
-              key: ValueKey<CareerParticipantMode>(_participantMode),
-              initialValue: _participantMode,
-              decoration: const InputDecoration(labelText: 'Teilnehmermodus'),
-              items: const <DropdownMenuItem<CareerParticipantMode>>[
-                DropdownMenuItem(
-                  value: CareerParticipantMode.withHuman,
-                  child: Text('Mit mir'),
+            if (showInitialSetupOptions) ...<Widget>[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<CareerParticipantMode>(
+                key: ValueKey<CareerParticipantMode>(_participantMode),
+                initialValue: _participantMode,
+                decoration: const InputDecoration(labelText: 'Teilnehmermodus'),
+                items: const <DropdownMenuItem<CareerParticipantMode>>[
+                  DropdownMenuItem(
+                    value: CareerParticipantMode.withHuman,
+                    child: Text('Mit mir'),
+                  ),
+                  DropdownMenuItem(
+                    value: CareerParticipantMode.cpuOnly,
+                    child: Text('Nur Computer'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _participantMode = value);
+                  }
+                },
+              ),
+              if (_participantMode == CareerParticipantMode.withHuman) ...<Widget>[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(_selectedPlayerProfileId ?? 'no-player'),
+                  initialValue: _selectedPlayerProfileId,
+                  decoration: const InputDecoration(labelText: 'Spielerprofil'),
+                  items: players
+                      .map(
+                        (player) => DropdownMenuItem<String>(
+                          value: player.id,
+                          child: Text(player.name),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: players.isEmpty
+                      ? null
+                      : (value) {
+                          setState(() => _selectedPlayerProfileId = value);
+                        },
                 ),
-                DropdownMenuItem(
-                  value: CareerParticipantMode.cpuOnly,
-                  child: Text('Nur Computer'),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _replaceWeakestPlayerWithHuman,
+                  onChanged: (value) {
+                    setState(() => _replaceWeakestPlayerWithHuman = value);
+                  },
+                  title: const Text('Schwaechsten Spieler ersetzen'),
+                  subtitle: const Text(
+                    'Dein Karriere-Spieler ersetzt im allgemeinen Teilnehmerpool den Computer-Spieler mit dem niedrigsten Average. Qualifikation und Setzlisten gelten danach weiterhin ganz normal.',
+                  ),
                 ),
               ],
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => _participantMode = value);
-                }
-              },
-            ),
-            if (_participantMode == CareerParticipantMode.withHuman) ...<Widget>[
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                key: ValueKey<String>(_selectedPlayerProfileId ?? 'no-player'),
-                initialValue: _selectedPlayerProfileId,
-                decoration: const InputDecoration(labelText: 'Spielerprofil'),
-                items: players
-                    .map(
-                      (player) => DropdownMenuItem<String>(
-                        value: player.id,
-                        child: Text(player.name),
-                      ),
-                    )
-                    .toList(),
-                onChanged: players.isEmpty
-                    ? null
-                    : (value) {
-                        setState(() => _selectedPlayerProfileId = value);
-                      },
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _replaceWeakestPlayerWithHuman,
-                onChanged: (value) {
-                  setState(() => _replaceWeakestPlayerWithHuman = value);
-                },
-                title: const Text('Schwaechsten Spieler ersetzen'),
-                subtitle: const Text(
-                  'Dein Karriere-Spieler ersetzt im allgemeinen Teilnehmerpool den Computer-Spieler mit dem niedrigsten Average. Qualifikation und Setzlisten gelten danach weiterhin ganz normal.',
-                ),
-              ),
             ],
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -1057,7 +1097,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               icon: const Icon(Icons.add),
               label: const Text('Karriere erstellen'),
             ),
-            if (templates.isNotEmpty) ...<Widget>[
+            if (showInitialSetupOptions && templates.isNotEmpty) ...<Widget>[
               const SizedBox(height: 12),
               DropdownButtonFormField<String?>(
                 key: ValueKey<String?>(_selectedTemplateId),
@@ -1078,8 +1118,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                   onChanged: (value) {
                     setState(() {
                       _selectedTemplateId = value;
-                      _simpleTemplateTrainingOverrides.clear();
-                      _selectedTrainingPoolTagName = null;
                     });
                   },
                 ),
@@ -1451,6 +1489,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         return 'Liga';
       case TournamentFormat.leaguePlayoff:
         return 'Liga + Playoff';
+      case TournamentFormat.groupStage:
+        return 'Gruppenphase';
     }
   }
 
@@ -1644,7 +1684,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         if (_tournamentFormData.format == TournamentFormat.league ||
-            _tournamentFormData.format == TournamentFormat.leaguePlayoff)
+            _tournamentFormData.format == TournamentFormat.leaguePlayoff ||
+            _tournamentFormData.format == TournamentFormat.groupStage)
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _expandLeagueIntoMatchdays && _editingCalendarItemId == null,
@@ -1661,7 +1702,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         if (_expandLeagueIntoMatchdays &&
             _editingCalendarItemId == null &&
             (_tournamentFormData.format == TournamentFormat.league ||
-                _tournamentFormData.format == TournamentFormat.leaguePlayoff)) ...<Widget>[
+                _tournamentFormData.format == TournamentFormat.leaguePlayoff ||
+                _tournamentFormData.format == TournamentFormat.groupStage)) ...<Widget>[
           const SizedBox(height: 12),
           DropdownButtonFormField<CareerLeagueSeriesQualificationMode>(
             initialValue: _leagueSeriesQualificationMode,
@@ -2527,7 +2569,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     final assignedTagNames = _parseCareerTags(
       _databasePlayerTagsController.text,
     ).map((entry) => entry.tagName).toSet();
-    final rosterSteps = _CareerRosterSubstep.values;
+    const rosterSteps = _CareerRosterSubstep.values;
     final rosterIndex = rosterSteps.indexOf(_rosterSubstep);
     final rosterSummary = switch (_rosterSubstep) {
         _CareerRosterSubstep.pool =>
@@ -2742,12 +2784,12 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   }
 
   Widget _buildTournamentStep(BuildContext context, CareerDefinition career) {
-    final tournamentSteps = _CareerTournamentSubstep.values;
+    const tournamentSteps = _CareerTournamentSubstep.values;
     final tournamentIndex = tournamentSteps.indexOf(_tournamentSubstep);
     final rankingCount = _selectedRankingIds.length;
     final tournamentSummary = switch (_tournamentSubstep) {
       _CareerTournamentSubstep.basics =>
-        '${_tournamentFormatLabel(_tournamentFormData.format)} | Tier ${_tournamentFormData.parsedTier ?? '-'} | Feld ${_tournamentFormData.parsedFieldSize ?? '-'}',
+        '${_tournamentFormatLabel(_tournamentFormData.format)} | Tier ${_tournamentFormData.parsedTier ?? '-'} | Feld ${_tournamentFormData.effectiveFieldSize ?? '-'}',
       _CareerTournamentSubstep.quali =>
         '${_simpleQualificationSummary(career)} | Setzliste ${_seedingRankingId == null ? 'aus' : 'an'} | ${_qualificationConditions.length} Gesamtregeln',
       _CareerTournamentSubstep.preisgeld =>
@@ -3584,625 +3626,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     );
   }
 
-  Widget _buildTemplateSelectionCard(BuildContext context) {
-    final templates = _templateRepository.templates;
-    final selectedTemplate = _selectedTemplate();
-    final subtitle = selectedTemplate == null
-        ? (_simpleQuickTournamentGenerationEnabled
-            ? 'Quick-Erstellung ist aktiv. Eine Vorlage ist aktuell nicht ausgewaehlt.'
-            : 'Waehle eine Vorlage aus oder aktiviere stattdessen die Quick-Erstellung.')
-        : '${selectedTemplate.calendar.length} Turniere | ${selectedTemplate.rankings.length} Ranglisten';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Vorlage',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF556372),
-                  ),
-            ),
-            if (templates.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String?>(
-                key: ValueKey<String?>('grundlagen-template-$_selectedTemplateId'),
-                initialValue: _selectedTemplateId,
-                decoration: const InputDecoration(labelText: 'Aktive Vorlage'),
-                items: <DropdownMenuItem<String?>>[
-                  const DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Keine Vorlage'),
-                  ),
-                  ...templates.map(
-                    (template) => DropdownMenuItem<String?>(
-                      value: template.id,
-                      child: Text(template.name),
-                    ),
-                  ),
-                ],
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedTemplateId = value;
-                      if (value != null) {
-                        _simpleQuickTournamentGenerationEnabled = false;
-                      }
-                      _simpleTemplateTrainingOverrides.clear();
-                      _selectedTrainingPoolTagName = null;
-                    });
-                  },
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSimpleQuickTournamentCard(
-    BuildContext context,
-    CareerTemplate? template,
-  ) {
-    final selectedFormats = _effectiveSimpleQuickFormats();
-    final selectedPoolCount = _templateCreationPoolPlayers(template).length;
-    final rosterSize = _effectiveSimpleTargetRosterSize(selectedPoolCount);
-    final availableBlueprints = _availableSimpleQuickTourBlueprints();
-    final selectedBlueprints = availableBlueprints
-        .where((entry) => _simpleQuickSelectedBlueprintIds.contains(entry.id))
-        .toList();
-    final addableBlueprints = availableBlueprints
-        .where((entry) => !_simpleQuickSelectedBlueprintIds.contains(entry.id))
-        .toList();
-
-    return _buildWizardSectionCard(
-      context,
-      title: 'Quick-Turniererstellung',
-      subtitle:
-          'Baue hier deine eigene Quick-Tour aus frei hinzugefuegten Turnierbausteinen auf.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _simpleQuickTournamentGenerationEnabled,
-            onChanged: (value) {
-              if (!value && _selectedTemplateId == null) {
-                return;
-              }
-                setState(() {
-                  _simpleQuickTournamentGenerationEnabled = value;
-                  if (value) {
-                    _selectedTemplateId = null;
-                  }
-                  _simpleTemplateTrainingOverrides.clear();
-                  _selectedTrainingPoolTagName = null;
-                });
-              },
-            title: const Text('Quick-Turniermix aktivieren'),
-            subtitle: const Text(
-              'Erzeugt fuer die einfache Karriere ein eigenstaendiges Tour-Geruest statt Turniere aus einer Vorlage zu remixen.',
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: _simpleQuickTournamentGenerationEnabled
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Aktueller Ziel-Kader: $rosterSize Spieler',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Formate',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: TournamentFormat.values.map((format) {
-                          final selected = selectedFormats.contains(format);
-                          return FilterChip(
-                            label: Text(_tournamentFormatLabel(format)),
-                            selected: selected,
-                            onSelected: (_) {
-                              setState(() {
-                                if (selected) {
-                                  if (_simpleQuickFormats.length > 1) {
-                                    _simpleQuickFormats.remove(format);
-                                  }
-                                } else {
-                                  _simpleQuickFormats.add(format);
-                                }
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Modi',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: <Widget>[
-                          FilterChip(
-                            label: const Text('Turnierserien'),
-                            selected: _simpleQuickIncludeSeries,
-                            onSelected: (value) {
-                              if (!value && !_simpleQuickIncludeStandalone) {
-                                return;
-                              }
-                              setState(() => _simpleQuickIncludeSeries = value);
-                            },
-                          ),
-                          FilterChip(
-                            label: const Text('Einzelturniere'),
-                            selected: _simpleQuickIncludeStandalone,
-                            onSelected: (value) {
-                              if (!value && !_simpleQuickIncludeSeries) {
-                                return;
-                              }
-                              setState(
-                                () => _simpleQuickIncludeStandalone = value,
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Bausteine',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Material(
-                            color: addableBlueprints.isEmpty
-                                ? Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest
-                                : Theme.of(context).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(999),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(999),
-                              onTap: addableBlueprints.isEmpty
-                                  ? null
-                                  : () => _openSimpleQuickTournamentComposer(
-                                        addableBlueprints,
-                                        rosterSize: rosterSize,
-                                      ),
-                              child: const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: Icon(Icons.add_rounded),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                addableBlueprints.isEmpty
-                                    ? 'Mit den aktuellen Filtern sind keine weiteren Turnierarten verfuegbar.'
-                                    : 'Fuege neue Turniere hinzu und bearbeite sie anschliessend immer ueber dieselbe Quick-Turnier-Seite.',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                      color: const Color(0xFF556372),
-                                    ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Ausgewaehlte Tour-Bausteine',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      if (selectedBlueprints.isEmpty)
-                        const Text(
-                          'Fuege zuerst Tour-Bausteine hinzu. Die komplette Konfiguration erfolgt dann in der Quick-Turnier-Seite.',
-                        )
-                      else
-                        _buildSimpleQuickSelectedBlueprintList(
-                          context,
-                          selectedBlueprints: selectedBlueprints,
-                          rosterSize: rosterSize,
-                        ),
-                      const SizedBox(height: 6),
-                      Text(
-                        template == null
-                            ? 'Ohne Vorlage wird eine eigenstaendige Quick-Tour aufgebaut.'
-                            : 'Mit Vorlage bleibt Quick deaktiviert, bis du die Vorlage abwaehlst.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF556372),
-                            ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    template == null
-                        ? 'Quick-Erstellung ist aus. Waehle eine Vorlage oder aktiviere die Quick-Erstellung fuer eine eigenstaendige Tour.'
-                        : 'Es ist eine Vorlage aktiv. Fuer die Quick-Erstellung wird die Vorlage automatisch abgewaehlt.',
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSimpleQuickSelectedBlueprintList(
-    BuildContext context, {
-    required List<_SimpleQuickTourBlueprint> selectedBlueprints,
-    required int rosterSize,
-  }) {
-    return Column(
-      children: selectedBlueprints
-          .map(
-            (blueprint) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _buildSimpleQuickSelectedBlueprintCard(
-                context,
-                blueprint: blueprint,
-                rosterSize: rosterSize,
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
-
-  Widget _buildSimpleQuickSelectedBlueprintCard(
-    BuildContext context, {
-    required _SimpleQuickTourBlueprint blueprint,
-    required int rosterSize,
-  }) {
-    final config = _simpleQuickTourConfigs[blueprint.id] ??
-        _SimpleQuickTourTypeConfig(
-          count: _defaultSimpleQuickCountForBlueprint(blueprint.id),
-        );
-    final effectiveFieldSize = config.fieldSizeOverride ??
-        _quickFieldSizeForBlueprint(
-          blueprint: blueprint,
-          rosterSize: rosterSize,
-        );
-    final effectivePrizePool = config.prizePoolOverride ??
-        _quickPrizePoolForFieldSize(
-          blueprint: blueprint,
-          fieldSize: effectiveFieldSize,
-        );
-    final displayName =
-        (config.customName?.trim().isNotEmpty ?? false)
-            ? config.customName!.trim()
-            : blueprint.categoryName;
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        displayName,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        blueprint.isSeries
-                            ? 'Serienformat'
-                            : 'Einzelturnier',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFF556372),
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE9F4F3),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(_tournamentFormatLabel(blueprint.format)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: <Widget>[
-                _buildQuickSummaryChip('Anzahl', '${config.count}'),
-                _buildQuickSummaryChip(
-                  'Teilnehmerfeld',
-                  '$effectiveFieldSize',
-                ),
-                _buildQuickSummaryChip('Preisgeld', '$effectivePrizePool'),
-                _buildQuickSummaryChip(
-                  'Share',
-                  config.prizeSplitPreset.label,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                OutlinedButton.icon(
-                  onPressed: () => _editSimpleQuickTournamentBlueprint(
-                    blueprint,
-                    rosterSize: rosterSize,
-                  ),
-                  icon: const Icon(Icons.edit_rounded),
-                  label: const Text('Bearbeiten'),
-                ),
-                const SizedBox(width: 8),
-                TextButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _simpleQuickSelectedBlueprintIds.remove(blueprint.id);
-                      _simpleQuickTourConfigs.remove(blueprint.id);
-                    });
-                  },
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  label: const Text('Entfernen'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickSummaryChip(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F7F8),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text('$label: $value'),
-    );
-  }
-
-  Widget _buildSimpleCreationIntroCard(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'Einfache Karriere',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Starte entweder mit einer Vorlage oder mit einer frei aufgebauten Quick-Tour. Fuer Spezialfaelle kannst du darunter jederzeit in die komplexe Erstellung wechseln.',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGlobalTrainingModeCard(BuildContext context) {
-    final selectedTemplate = _selectedTemplate();
-    return _buildWizardSectionCard(
-      context,
-      title: 'Trainingsmodus',
-      subtitle:
-          'Dieser Schritt liegt bewusst ueber allen Editoren, weil er den Start-Kader und damit die spaetere Karrierequalitaet festlegt.',
-      child: _buildSimpleTrainingModeSection(selectedTemplate),
-    );
-  }
-
-  Widget _buildSimpleStartSection(
-    BuildContext context, {
-    required CareerTemplate? selectedTemplate,
-    required CareerTemplate? effectiveTemplate,
-    required int selectedPoolCount,
-    required int generatedCount,
-    required int targetRosterSize,
-    required bool canCreate,
-  }) {
-    final summary = selectedTemplate == null
-        ? (_simpleQuickTournamentGenerationEnabled
-            ? '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'} ${effectiveTemplate == null ? 'Noch keine Quick-Tour aktiv.' : '${effectiveTemplate.calendar.length} Quick-Tour-Eintraege sind vorbereitet.'}'
-            : 'Waehle zuerst eine Vorlage oder aktiviere die Quick-Erstellung.')
-        : '$selectedPoolCount ausgewaehlte Spieler. ${generatedCount <= 0 ? 'Der aktuelle Kader ist bereits gross genug.' : '$generatedCount Zusatzspieler und bis zu $targetRosterSize Kaderplaetze sind vorbereitet.'}';
-    return _buildWizardSectionCard(
-      context,
-      title: 'Start',
-      subtitle:
-          'Hier pruefst du den aktuellen Stand und startest die Karriere-Erstellung.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            summary,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF556372),
-                ),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: canCreate ? _createSimpleCareerFromTemplate : null,
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Einfache Karriere erstellen'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAdvancedCreationSection(
-    BuildContext context, {
-    required List<CareerDefinition> careers,
-    required CareerDefinition? activeCareer,
-    required List<CareerTemplate> templates,
-    required List<PlayerProfile> players,
-  }) {
-    return _buildWizardSectionCard(
-      context,
-      title: 'Komplexe Erstellung',
-      subtitle:
-          'Wenn Vorlage oder Quick nicht reichen, kannst du hier in den vollstaendigen Karriere-Editor wechseln.',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _showAdvancedCreation,
-            onChanged: (value) {
-              setState(() => _showAdvancedCreation = value);
-            },
-            title: const Text('Komplexe Erstellung einblenden'),
-            subtitle: const Text(
-              'Zeigt die komplette manuelle Karriere-Erstellung mit Kader, Ranglisten, Regeln und Kalender.',
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (!_showAdvancedCreation)
-            const Text(
-              'Vorlage, Trainingsmodus und Quick-Tour reichen fuer die meisten Karrieren. Den kompletten Editor brauchst du nur fuer eigene Sonderregeln oder sehr freie Tour-Strukturen.',
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _buildCareerCard(
-                context,
-                careers: careers,
-                activeCareer: activeCareer,
-                templates: templates,
-                players: players,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSimpleCreationCard(BuildContext context) {
-    final selectedTemplate = _selectedTemplate();
-    final effectiveTemplate = _effectiveSimpleCreationTemplate();
-    final selectedPoolCount = _templateCreationPoolPlayers(selectedTemplate).length;
-    final targetRosterSize = _effectiveSimpleTargetRosterSize(
-      selectedPoolCount,
-    );
-    final generatedCount = max(0, targetRosterSize - selectedPoolCount);
-    final canCreate = effectiveTemplate != null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _buildSimpleCreationIntroCard(context),
-        const SizedBox(height: 16),
-        _buildTemplateSelectionCard(context),
-        const SizedBox(height: 16),
-        _buildSimpleQuickTournamentCard(context, selectedTemplate),
-        const SizedBox(height: 16),
-        _buildTemplatePoolSelector(
-          context,
-          labelText: 'Karriere-Kader',
-        ),
-        const SizedBox(height: 16),
-        _buildWizardSectionCard(
-          context,
-          title: 'Kadergroesse',
-          subtitle:
-              'Lege fest, wie gross der Karriere-Kader insgesamt sein soll. Fehlende Plaetze werden mit schwaecheren Spielern aufgefuellt.',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              TextField(
-                controller: _simpleTargetRosterSizeController,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Ziel-Kadergroesse',
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                generatedCount <= 0
-                    ? 'Der aktuelle Kader ist bereits gross genug. Es werden keine Zusatzspieler erzeugt.'
-                    : '$generatedCount Zusatzspieler werden automatisch erzeugt und bewusst schwaecher als dein ausgewaehlter Kern gehalten.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF556372),
-                    ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        _buildSimpleStartSection(
-          context,
-          selectedTemplate: selectedTemplate,
-          effectiveTemplate: effectiveTemplate,
-          selectedPoolCount: selectedPoolCount,
-          generatedCount: generatedCount,
-          targetRosterSize: targetRosterSize,
-          canCreate: canCreate,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildUnifiedCreationCard(
-    BuildContext context, {
-    required List<CareerDefinition> careers,
-    required CareerDefinition? activeCareer,
-    required List<CareerTemplate> templates,
-    required List<PlayerProfile> players,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _buildGlobalTrainingModeCard(context),
-        const SizedBox(height: 16),
-        _buildSimpleCreationCard(context),
-        const SizedBox(height: 16),
-        _buildAdvancedCreationSection(
-          context,
-          careers: careers,
-          activeCareer: activeCareer,
-          templates: templates,
-          players: players,
-        ),
-      ],
-    );
-  }
-
   Widget _buildValidationCard(BuildContext context, CareerDefinition career) {
     final issues = _collectValidationIssues(career);
     final previews = career.currentSeason.calendar
@@ -4783,9 +4206,12 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   }
 
   String _calendarItemCompactSubtitle(CareerCalendarItem item) {
-    final tierLabel = item.tier == null ? '' : 'Tier ${item.tier} | ';
+    final tierLabel = 'Tier ${item.tier} | ';
     final formatLabel = _tournamentFormatLabel(item.format);
-    return '$tierLabel$formatLabel | ${item.fieldSize} Spieler | ${item.startScore}';
+    final fieldLabel = item.format == TournamentFormat.groupStage
+        ? '${item.groupCount}x${item.playersPerGroup}'
+        : '${item.fieldSize}';
+    return '$tierLabel$formatLabel | $fieldLabel Spieler | ${item.startScore}';
   }
 
   String _calendarItemAdvancedSubtitle(
@@ -4808,18 +4234,24 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       }
     }
     final baseLabel = item.format == TournamentFormat.league
-        ? '${item.tier == null ? '' : 'Tier ${item.tier} | '}'
+        ? 'Tier ${item.tier} | '
             '${item.fieldSize} Spieler | Liga ${item.roundRobinRepeats}x | '
             '${item.pointsForWin}/${item.pointsForDraw} Punkte | '
             '${item.startScore} | Preisgeld ${item.prizePool} | '
             '$rankingsLabel'
         : item.format == TournamentFormat.leaguePlayoff
-            ? '${item.tier == null ? '' : 'Tier ${item.tier} | '}'
+            ? 'Tier ${item.tier} | '
                 '${item.fieldSize} Spieler | Liga ${item.roundRobinRepeats}x + Top ${item.playoffQualifierCount} Playoffs | '
                 '${item.pointsForWin}/${item.pointsForDraw} Punkte | '
                 '${item.startScore} | Preisgeld ${item.prizePool} | '
                 '$rankingsLabel'
-            : '${item.tier == null ? '' : 'Tier ${item.tier} | '}'
+            : item.format == TournamentFormat.groupStage
+                ? 'Tier ${item.tier} | '
+                    '${item.groupCount} Gruppen x ${item.playersPerGroup} Spieler | '
+                    '${item.pointsForWin}/${item.pointsForDraw} Punkte | '
+                    '${item.startScore} | Preisgeld ${item.prizePool} | '
+                    '$rankingsLabel'
+            : 'Tier ${item.tier} | '
                 '${item.fieldSize} Spieler | First to ${item.legsToWin} | '
                 '${item.matchMode == MatchMode.legs ? 'Legs' : 'Sets ${item.setsToWin} / Legs ${item.legsPerSet}'} | '
                 '${item.startScore} | Preisgeld ${item.prizePool} | '
@@ -4828,47 +4260,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         ? ''
         : ' | Tag-Regel ${item.tagGate!.tagName} ${item.tagGate!.minimumPlayerCount}+';
     return '$baseLabel$tagGateLabel';
-  }
-
-  Widget _buildTemplatesCard(BuildContext context, CareerDefinition career) {
-    return _buildExpandableSection(
-      context: context,
-      title: 'Vorlagen',
-      subtitle: '${_templateRepository.templates.length} gespeichert',
-      children: <Widget>[
-        TextField(
-          controller: _templateNameController,
-          decoration: const InputDecoration(labelText: 'Vorlagenname'),
-        ),
-        const SizedBox(height: 12),
-        FilledButton.tonalIcon(
-          onPressed: () => _saveCurrentCareerAsTemplate(career),
-          icon: const Icon(Icons.bookmark_add),
-          label: const Text('Aktuelle Planung als Vorlage speichern'),
-        ),
-        if (_templateRepository.templates.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 12),
-          ..._templateRepository.templates.map(
-            (template) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(template.name),
-              subtitle: Text(
-                '${template.calendar.length} Turniere | ${template.rankings.length} Ranglisten | Pool wird beim Erstellen gewaehlt',
-              ),
-              trailing: _templateRepository.isBuiltInTemplate(template.id)
-                  ? const Chip(label: Text('App'))
-                  : IconButton(
-                      onPressed: () {
-                        _templateRepository.deleteTemplate(template.id);
-                        setState(() {});
-                      },
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-            ),
-          ),
-        ],
-      ],
-    );
   }
 
   Widget _buildRankingsCard(BuildContext context, CareerDefinition career) {
@@ -4945,7 +4336,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           if (_tournamentFormData.format == TournamentFormat.league ||
-              _tournamentFormData.format == TournamentFormat.leaguePlayoff)
+              _tournamentFormData.format == TournamentFormat.leaguePlayoff ||
+              _tournamentFormData.format == TournamentFormat.groupStage)
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _expandLeagueIntoMatchdays && _editingCalendarItemId == null,
@@ -4963,7 +4355,9 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               _editingCalendarItemId == null &&
               (_tournamentFormData.format == TournamentFormat.league ||
                   _tournamentFormData.format ==
-                      TournamentFormat.leaguePlayoff)) ...<Widget>[
+                      TournamentFormat.leaguePlayoff ||
+                  _tournamentFormData.format ==
+                      TournamentFormat.groupStage)) ...<Widget>[
             const SizedBox(height: 12),
             DropdownButtonFormField<CareerLeagueSeriesQualificationMode>(
               initialValue: _leagueSeriesQualificationMode,
@@ -6096,6 +5490,49 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       return const <CareerDatabasePlayer>[];
     }
 
+    final settings = SettingsRepository.instance.settings;
+    final effectiveRadius = SettingsRepository.effectiveRadiusPercentForDisplay(
+      settings.radiusCalibrationPercent,
+    );
+    final effectiveSpread = SettingsRepository.effectiveSpreadPercentForDisplay(
+      settings.simulationSpreadPercent,
+    );
+    final minSupportedEffectiveRadius =
+        SettingsRepository.effectiveRadiusPercentForDisplay(90);
+    final maxSupportedEffectiveRadius =
+        SettingsRepository.effectiveRadiusPercentForDisplay(110);
+    final supportedEffectiveSpread =
+        SettingsRepository.effectiveSpreadPercentForDisplay(100);
+    final supportsLocalLookup = TheoResolutionLookup.usesSupportedGrid(
+      targetAverage: targetMin,
+      effectiveRadiusCalibrationPercent: effectiveRadius,
+      effectiveSimulationSpreadPercent: effectiveSpread,
+      minSupportedEffectiveRadiusCalibrationPercent:
+          minSupportedEffectiveRadius,
+      maxSupportedEffectiveRadiusCalibrationPercent:
+          maxSupportedEffectiveRadius,
+      fixedSupportedEffectiveSimulationSpreadPercent: supportedEffectiveSpread,
+    ) &&
+        TheoResolutionLookup.usesSupportedGrid(
+          targetAverage: targetMax,
+          effectiveRadiusCalibrationPercent: effectiveRadius,
+          effectiveSimulationSpreadPercent: effectiveSpread,
+          minSupportedEffectiveRadiusCalibrationPercent:
+              minSupportedEffectiveRadius,
+          maxSupportedEffectiveRadiusCalibrationPercent:
+              maxSupportedEffectiveRadius,
+          fixedSupportedEffectiveSimulationSpreadPercent:
+              supportedEffectiveSpread,
+        );
+    if (supportsLocalLookup) {
+      return _resolveTrainingModePlayersLocally(
+        poolPlayers,
+        targetMin: targetMin,
+        targetMax: targetMax,
+        progressPrefix: progressPrefix,
+      );
+    }
+
     final sortedPlayers = List<CareerDatabasePlayer>.from(poolPlayers)
       ..sort((left, right) => left.average.compareTo(right.average));
     final currentMin = sortedPlayers.first.average;
@@ -6132,7 +5569,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           'players': payloadPlayers,
           'radiusCalibrationPercent': settingsProfile.radiusCalibrationPercent,
           'simulationSpreadPercent': settingsProfile.simulationSpreadPercent,
-          'matchCount': 8,
         },
       );
 
@@ -6230,7 +5666,10 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           targetMax: targetMax,
           progressPrefix: busyMessage,
         );
-        _repository.updateDatabasePlayers(players: updatedPlayers);
+        await _applyTrainingPlayersToCareerInChunks(
+          updatedPlayers,
+          busyMessage: busyMessage,
+        );
       },
     );
     if (mounted) {
@@ -6267,9 +5706,10 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           targetMax: targetMax,
           progressPrefix: busyMessage,
         );
-        for (final player in updatedPlayers) {
-          _simpleTemplateTrainingOverrides[player.databasePlayerId] = player;
-        }
+        await _applyTrainingPlayersToTemplateOverridesInChunks(
+          updatedPlayers,
+          busyMessage: busyMessage,
+        );
       },
     );
     if (mounted) {
@@ -6295,6 +5735,62 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       return 'Trainingsmodus wird angewendet...';
     }
     return 'Trainingsmodus wird angewendet. Neue Theo-Werte ausserhalb des aktuellen Datenbankbereichs werden vorbereitet...';
+  }
+
+  Future<void> _applyTrainingPlayersToCareerInChunks(
+    List<CareerDatabasePlayer> updatedPlayers, {
+    required String busyMessage,
+  }) async {
+    if (updatedPlayers.isEmpty) {
+      return;
+    }
+    for (
+      var start = 0;
+      start < updatedPlayers.length;
+      start += _trainingApplyBatchSize
+    ) {
+      final end = min(start + _trainingApplyBatchSize, updatedPlayers.length);
+      _repository.updateDatabasePlayers(
+        players: updatedPlayers.sublist(start, end),
+      );
+      if (mounted) {
+        setState(() {
+          _busyMessage = '$busyMessage ($end/${updatedPlayers.length} Spieler)';
+          _busyProgress = end / updatedPlayers.length;
+        });
+      }
+      if (end < updatedPlayers.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    }
+  }
+
+  Future<void> _applyTrainingPlayersToTemplateOverridesInChunks(
+    List<CareerDatabasePlayer> updatedPlayers, {
+    required String busyMessage,
+  }) async {
+    if (updatedPlayers.isEmpty) {
+      return;
+    }
+    for (
+      var start = 0;
+      start < updatedPlayers.length;
+      start += _trainingApplyBatchSize
+    ) {
+      final end = min(start + _trainingApplyBatchSize, updatedPlayers.length);
+      for (final player in updatedPlayers.sublist(start, end)) {
+        _simpleTemplateTrainingOverrides[player.databasePlayerId] = player;
+      }
+      if (mounted) {
+        setState(() {
+          _busyMessage = '$busyMessage ($end/${updatedPlayers.length} Spieler)';
+          _busyProgress = end / updatedPlayers.length;
+        });
+      }
+      if (end < updatedPlayers.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    }
   }
 
   Future<void> _createOrCreateFromTemplate() async {
@@ -6804,10 +6300,14 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
                                 });
                               },
                               title: Text(player.name),
-                              subtitle: Text(
-                                '${player.theoreticalAverage.toStringAsFixed(1)} Theo Avg'
-                                '${player.tags.isEmpty ? '' : ' | ${player.tags.join(', ')}'}',
-                              ),
+                                subtitle: wrapWithTheoTooltip(
+                                  skill: player.skill,
+                                  finishingSkill: player.finishingSkill,
+                                  child: Text(
+                                    '${formatTheoValue(player.theoreticalAverage)} Theo Avg'
+                                    '${player.tags.isEmpty ? '' : ' | ${player.tags.join(', ')}'}',
+                                  ),
+                                ),
                               controlAffinity:
                                   ListTileControlAffinity.leading,
                               contentPadding: EdgeInsets.zero,
@@ -6868,14 +6368,87 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
     };
   }
 
-  int _configuredSimpleQuickEventCount({
-    required List<_SimpleQuickTourBlueprint> blueprints,
-  }) {
-    return blueprints.fold<int>(
-      0,
-      (sum, blueprint) =>
-          sum + (_simpleQuickTourConfigs[blueprint.id]?.count ?? 0),
+  int _currentSimpleQuickTournamentCount() {
+    var total = 0;
+    for (final blueprintId in _simpleQuickSelectedBlueprintIds) {
+      total += _simpleQuickTourConfigs[blueprintId]?.count ?? 0;
+    }
+    return total;
+  }
+
+  int _desiredSimpleQuickTournamentCount() {
+    final parsed = int.tryParse(
+      _simpleQuickSeasonTournamentCountController.text.trim(),
     );
+    return parsed == null || parsed <= 0 ? 0 : parsed;
+  }
+
+  void _autoBuildSimpleQuickSeasonPlan() {
+    final desiredCount = _desiredSimpleQuickTournamentCount();
+    if (desiredCount <= 0) {
+      return;
+    }
+    _ensureSimpleQuickTourConfigs();
+    final availableBlueprints = _availableSimpleQuickTourBlueprints();
+    if (availableBlueprints.isEmpty) {
+      return;
+    }
+
+    final selectedBlueprints = availableBlueprints
+        .where((entry) => _simpleQuickSelectedBlueprintIds.contains(entry.id))
+        .toList();
+    final candidateBlueprints = selectedBlueprints.isNotEmpty
+        ? selectedBlueprints
+        : availableBlueprints;
+    if (candidateBlueprints.isEmpty) {
+      return;
+    }
+
+    final nextCounts = <String, int>{
+      for (final blueprint in candidateBlueprints) blueprint.id: 0,
+    };
+    var remaining = desiredCount;
+
+    if (desiredCount >= candidateBlueprints.length) {
+      for (final blueprint in candidateBlueprints) {
+        nextCounts[blueprint.id] = 1;
+        remaining -= 1;
+      }
+    }
+
+    final weightedBlueprints = List<_SimpleQuickTourBlueprint>.from(
+      candidateBlueprints,
+    )..sort((left, right) {
+        final weightCompare = _defaultSimpleQuickCountForBlueprint(
+          right.id,
+        ).compareTo(_defaultSimpleQuickCountForBlueprint(left.id));
+        if (weightCompare != 0) {
+          return weightCompare;
+        }
+        return left.categoryName.compareTo(right.categoryName);
+      });
+
+    var cursor = 0;
+    while (remaining > 0) {
+      final blueprint = weightedBlueprints[cursor % weightedBlueprints.length];
+      nextCounts.update(blueprint.id, (count) => count + 1);
+      remaining -= 1;
+      cursor += 1;
+    }
+
+    _updateState(() {
+      for (final blueprint in candidateBlueprints) {
+        _simpleQuickSelectedBlueprintIds.add(blueprint.id);
+        final currentConfig =
+            _simpleQuickTourConfigs[blueprint.id] ??
+            _SimpleQuickTourTypeConfig(
+              count: _defaultSimpleQuickCountForBlueprint(blueprint.id),
+            );
+        _simpleQuickTourConfigs[blueprint.id] = currentConfig.copyWith(
+          count: nextCounts[blueprint.id] ?? 0,
+        );
+      }
+    });
   }
 
   CareerTemplate _templateForSimpleCreation(CareerTemplate template) {
@@ -7144,7 +6717,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
             ? configuredCustomName
             : blueprint.baseName;
     final baseId = '${blueprint.id}-${cycle + 1}';
-    final baseName = '${configuredBaseName} ${cycle + 1}';
+    final baseName = '$configuredBaseName ${cycle + 1}';
     final effectiveFieldSize = config?.fieldSizeOverride ??
         _quickFieldSizeForBlueprint(
       blueprint: blueprint,
@@ -7419,6 +6992,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       TournamentFormat.leaguePlayoff =>
         _playoffRoundCount(playoffQualifierCount) + 1,
       TournamentFormat.league => 0,
+      TournamentFormat.groupStage => 0,
     };
   }
 
@@ -7711,7 +7285,9 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
 
   _CareerRosterViewData _buildTemplatePoolViewData() {
     final availablePlayers = _computerRepository.players.map((player) {
-      final override = _simpleTemplateTrainingOverrides[player.id];
+      final override = _simpleTrainingModeEnabled
+          ? _simpleTemplateTrainingOverrides[player.id]
+          : null;
       if (override == null) {
         return player;
       }
@@ -7783,6 +7359,9 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
           .toList(),
     };
     return basePlayers.map((player) {
+      if (!_simpleTrainingModeEnabled) {
+        return player;
+      }
       return _simpleTemplateTrainingOverrides[player.databasePlayerId] ?? player;
     }).toList();
   }
@@ -8480,7 +8059,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   }
 
   void _submitCalendarItem() {
-    final fieldSize = _tournamentFormData.parsedFieldSize;
+    final fieldSize = _tournamentFormData.effectiveFieldSize;
     final tier = _tournamentFormData.parsedTier;
     final startScore = _tournamentFormData.parsedStartScore;
     final prizePool = _calculatedPrizePool();
@@ -8530,7 +8109,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         pointsForWin: _tournamentFormData.pointsForWin,
         pointsForDraw: _tournamentFormData.pointsForDraw,
         roundRobinRepeats: _tournamentFormData.roundRobinRepeats,
+        maxLeagueMatchesPerParticipant:
+            _tournamentFormData.maxLeagueMatchesPerParticipant,
         playoffQualifierCount: _tournamentFormData.playoffQualifierCount,
+        groupCount: _tournamentFormData.groupCount,
+        playersPerGroup: _tournamentFormData.playersPerGroup,
         countsForRankingIds: _selectedRankingIds.toList(),
         seedingRankingId: _seedingRankingId,
         seedCount: _seedCount,
@@ -8560,7 +8143,9 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         if (_expandLeagueIntoMatchdays &&
             (_tournamentFormData.format == TournamentFormat.league ||
                 _tournamentFormData.format ==
-                    TournamentFormat.leaguePlayoff)) {
+                    TournamentFormat.leaguePlayoff ||
+                _tournamentFormData.format ==
+                    TournamentFormat.groupStage)) {
           final leagueMatchdayCount = _leagueMatchdayCount(
             fieldSize: fieldSize,
             repeats: _tournamentFormData.roundRobinRepeats,
@@ -8592,7 +8177,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               pointsForWin: _tournamentFormData.pointsForWin,
               pointsForDraw: _tournamentFormData.pointsForDraw,
               roundRobinRepeats: _tournamentFormData.roundRobinRepeats,
+              maxLeagueMatchesPerParticipant:
+                  _tournamentFormData.maxLeagueMatchesPerParticipant,
               playoffQualifierCount: _tournamentFormData.playoffQualifierCount,
+              groupCount: _tournamentFormData.groupCount,
+              playersPerGroup: _tournamentFormData.playersPerGroup,
               countsForRankingIds: _selectedRankingIds.toList(),
               seedingRankingId: _seedingRankingId,
               seedCount: _seedCount,
@@ -8638,7 +8227,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               pointsForWin: _tournamentFormData.pointsForWin,
               pointsForDraw: _tournamentFormData.pointsForDraw,
               roundRobinRepeats: _tournamentFormData.roundRobinRepeats,
+              maxLeagueMatchesPerParticipant:
+                  _tournamentFormData.maxLeagueMatchesPerParticipant,
               playoffQualifierCount: _tournamentFormData.playoffQualifierCount,
+              groupCount: _tournamentFormData.groupCount,
+              playersPerGroup: _tournamentFormData.playersPerGroup,
               countsForRankingIds: _selectedRankingIds.toList(),
               seedingRankingId: _seedingRankingId,
               seedCount: _seedCount,
@@ -8684,7 +8277,11 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
               pointsForWin: _tournamentFormData.pointsForWin,
               pointsForDraw: _tournamentFormData.pointsForDraw,
               roundRobinRepeats: _tournamentFormData.roundRobinRepeats,
+              maxLeagueMatchesPerParticipant:
+                  _tournamentFormData.maxLeagueMatchesPerParticipant,
               playoffQualifierCount: _tournamentFormData.playoffQualifierCount,
+              groupCount: _tournamentFormData.groupCount,
+              playersPerGroup: _tournamentFormData.playersPerGroup,
               countsForRankingIds: _selectedRankingIds.toList(),
               seedingRankingId: _seedingRankingId,
               seedCount: _seedCount,
@@ -8867,21 +8464,6 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
         : career.careerTagDefinitions.first.name;
     _tournamentTagGateMinimumController.clear();
     _tournamentOccursWhenTagGateMet = true;
-    setState(() {});
-  }
-
-  void _saveCurrentCareerAsTemplate(CareerDefinition career) {
-    _templateRepository.saveTemplate(
-      name: _templateNameController.text.isEmpty
-          ? '${career.name} Vorlage'
-          : _templateNameController.text,
-      careerTagDefinitions:
-          List<CareerTagDefinition>.from(career.careerTagDefinitions),
-      seasonTagRules: List<CareerSeasonTagRule>.from(career.seasonTagRules),
-      rankings: List<CareerRankingDefinition>.from(career.rankings),
-      calendar: List<CareerCalendarItem>.from(career.currentSeason.calendar),
-    );
-    _templateNameController.clear();
     setState(() {});
   }
 
@@ -9161,7 +8743,15 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
   void _syncCareerContext(CareerDefinition? activeCareer) {
     if (activeCareer == null) {
       _lastCareerId = null;
+      _editingTemplateDraftCareerId = null;
+      _editingTemplateId = null;
       return;
+    }
+
+    if (_editingTemplateDraftCareerId != null &&
+        activeCareer.id != _editingTemplateDraftCareerId) {
+      _editingTemplateDraftCareerId = null;
+      _editingTemplateId = null;
     }
 
     if (_lastCareerId != activeCareer.id) {
@@ -9347,7 +8937,8 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
 
   bool get _usesLeaguePositionPrizeSetup {
     return _tournamentFormData.format == TournamentFormat.league ||
-        _tournamentFormData.format == TournamentFormat.leaguePlayoff;
+        _tournamentFormData.format == TournamentFormat.leaguePlayoff ||
+        _tournamentFormData.format == TournamentFormat.groupStage;
   }
 
   void _syncKnockoutPrizeValues() {
@@ -9375,7 +8966,7 @@ class _CareerSetupScreenState extends State<CareerSetupScreen> {
       _leaguePositionPrizeValues = <int>[];
       return;
     }
-    final neededLength = (_tournamentFormData.parsedFieldSize ?? 0).clamp(0, 128);
+    final neededLength = (_tournamentFormData.effectiveFieldSize ?? 0).clamp(0, 128);
     if (neededLength <= 0) {
       _leaguePositionPrizeValues = <int>[];
       return;

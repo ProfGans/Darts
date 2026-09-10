@@ -3383,7 +3383,7 @@ class CheckoutPlanner {
         !penultimate.isBull &&
         last.isDouble &&
         !last.isBull) {
-      return penultimate.baseValue == last.baseValue ? 28 : 18;
+      return penultimate.baseValue == last.baseValue ? 52 : 36;
     }
 
     return 0;

@@ -4,6 +4,7 @@ import '../../data/repositories/computer_repository.dart';
 import '../../data/repositories/player_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../domain/x01/x01_models.dart';
+import '../widgets/theo_display.dart';
 import 'bob27_match_screen.dart';
 import 'cricket_match_screen.dart';
 import 'game_mode_models.dart';
@@ -744,9 +745,14 @@ class _MatchSetupScreenState extends State<MatchSetupScreen> {
                                       ...availableComputers.map(
                                         (computer) => DropdownMenuItem<String>(
                                           value: computer.id,
-                                          child: Text(
-                                            '${computer.name} (${computer.theoreticalAverage.toStringAsFixed(1)})',
-                                          ),
+                                            child: wrapWithTheoTooltip(
+                                              skill: computer.skill,
+                                              finishingSkill:
+                                                  computer.finishingSkill,
+                                              child: Text(
+                                                '${computer.name} (${formatTheoValue(computer.theoreticalAverage)})',
+                                              ),
+                                            ),
                                         ),
                                       ),
                                       DropdownMenuItem<String>(

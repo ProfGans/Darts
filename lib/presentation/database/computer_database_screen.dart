@@ -7,6 +7,7 @@ import '../../data/export/file_export_service.dart';
 import '../../data/models/computer_player.dart';
 import '../../data/repositories/computer_repository.dart';
 import '../../data/storage/app_storage.dart';
+import '../widgets/theo_display.dart';
 
 enum _PlayerSortOption {
   theoreticalAverage,
@@ -119,7 +120,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _theoreticalAverageController =
-      TextEditingController(text: '60.0');
+      TextEditingController(text: '60.00');
   final TextEditingController _skillController = TextEditingController();
   final TextEditingController _finishingSkillController = TextEditingController();
   final TextEditingController _birthDateController = TextEditingController();
@@ -434,7 +435,7 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
     setState(() {
       _editingId = null;
       _nameController.clear();
-      _theoreticalAverageController.text = '60.0';
+      _theoreticalAverageController.text = '60.00';
       _skillController.clear();
       _finishingSkillController.clear();
       _birthDateController.clear();
@@ -447,9 +448,9 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
   void _edit(ComputerPlayer player) {
     setState(() {
       _editingId = player.id;
-      _nameController.text = player.name;
-      _theoreticalAverageController.text =
-          player.theoreticalAverage.toStringAsFixed(1);
+        _nameController.text = player.name;
+        _theoreticalAverageController.text =
+          formatTheoValue(player.theoreticalAverage);
       _skillController.text = player.skill.toString();
       _finishingSkillController.text = player.finishingSkill.toString();
       _birthDateController.text =
@@ -1253,10 +1254,14 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
                     spacing: 12,
                     runSpacing: 12,
                     children: <Widget>[
-                      _StatisticTile(
-                        label: 'Theo',
-                        value: player.theoreticalAverage.toStringAsFixed(1),
-                      ),
+                        _StatisticTile(
+                          label: 'Theo',
+                          value: formatTheoValue(player.theoreticalAverage),
+                          tooltip: buildTheoTooltipMessage(
+                            skill: player.skill,
+                            finishingSkill: player.finishingSkill,
+                          ),
+                        ),
                       _StatisticTile(
                         label: 'Real Average',
                         value: realAverage,
@@ -1449,10 +1454,14 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(
-                  'Theo Average: ${player.theoreticalAverage.toStringAsFixed(1)}',
-                  style: theme.textTheme.titleMedium,
-                ),
+                  wrapWithTheoTooltip(
+                    skill: player.skill,
+                    finishingSkill: player.finishingSkill,
+                    child: Text(
+                      'Theo Average: ${formatTheoValue(player.theoreticalAverage)}',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 12,
@@ -1749,9 +1758,13 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               runSpacing: 8,
               children: <Widget>[
                 _SimpleInfoChip(label: sourceLabel),
-                _SimpleInfoChip(
-                  label: 'Theo ${player.theoreticalAverage.toStringAsFixed(1)}',
-                ),
+                  _SimpleInfoChip(
+                    label: 'Theo ${formatTheoValue(player.theoreticalAverage)}',
+                    tooltip: buildTheoTooltipMessage(
+                      skill: player.skill,
+                      finishingSkill: player.finishingSkill,
+                    ),
+                  ),
                 _SimpleInfoChip(
                   label: 'Real ${player.average.toStringAsFixed(1)}',
                 ),
@@ -1945,8 +1958,8 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
               Text(
                 customTheoPreview == null
                     ? 'Abgeleiteter Theo Average: -'
-                    : 'Abgeleiteter Theo Average: ${customTheoPreview.toStringAsFixed(1)}',
-              ),
+                    : 'Abgeleiteter Theo Average: ${formatTheoValue(customTheoPreview)}',
+                ),
             ] else
               TextField(
                 controller: _theoreticalAverageController,
@@ -2860,14 +2873,18 @@ class _ComputerDatabaseScreenState extends State<ComputerDatabaseScreen> {
           ),
         if (_visibleColumns.contains('source')) DataCell(Text(sourceLabel)),
         if (_visibleColumns.contains('theo'))
-          DataCell(
-            Text(
-              player.theoreticalAverage.toStringAsFixed(1),
-              style: const TextStyle(
-                decoration: TextDecoration.underline,
+            DataCell(
+              wrapWithTheoTooltip(
+                skill: player.skill,
+                finishingSkill: player.finishingSkill,
+                child: Text(
+                  formatTheoValue(player.theoreticalAverage),
+                  style: const TextStyle(
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
               ),
-            ),
-            onTap: () => _showTheoSkillValues(player),
+              onTap: () => _showTheoSkillValues(player),
           ),
         if (_visibleColumns.contains('real'))
           DataCell(Text(player.average.toStringAsFixed(1))),
@@ -2946,17 +2963,19 @@ class _StatisticTile extends StatelessWidget {
   const _StatisticTile({
     required this.label,
     required this.value,
+    this.tooltip,
   });
 
   final String label;
   final String value;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 150,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
+    final content = Container(
+        width: 150,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -2970,25 +2989,43 @@ class _StatisticTile extends StatelessWidget {
         ],
       ),
     );
+    if (tooltip == null || tooltip!.trim().isEmpty) {
+      return content;
+    }
+    return Tooltip(
+      message: tooltip!,
+      waitDuration: const Duration(milliseconds: 250),
+      child: content,
+    );
   }
 }
 
 class _SimpleInfoChip extends StatelessWidget {
   const _SimpleInfoChip({
     required this.label,
+    this.tooltip,
   });
 
   final String label;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label),
+    final content = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(label),
+    );
+    if (tooltip == null || tooltip!.trim().isEmpty) {
+      return content;
+    }
+    return Tooltip(
+      message: tooltip!,
+      waitDuration: const Duration(milliseconds: 250),
+      child: content,
     );
   }
 }
@@ -3009,7 +3046,7 @@ class _CompactPlayerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = <String>[
-      'Theo ${player.theoreticalAverage.toStringAsFixed(1)}',
+      'Theo ${formatTheoValue(player.theoreticalAverage)}',
       'Real ${player.average.toStringAsFixed(1)}',
       if (player.nationality != null && player.nationality!.trim().isNotEmpty)
         player.nationality!,
@@ -3066,13 +3103,17 @@ class _CompactPlayerRow extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    meta.join('  |  '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF556372),
-                        ),
+                  wrapWithTheoTooltip(
+                    skill: player.skill,
+                    finishingSkill: player.finishingSkill,
+                    child: Text(
+                      meta.join('  |  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF556372),
+                          ),
+                    ),
                   ),
                   if (player.tags.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 4),

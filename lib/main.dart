@@ -44,6 +44,15 @@ Future<void> main() async {
     rethrow;
   }
   runApp(const DartFlutterApp());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(
+      SimulationService.instance.startColdBootPreloadIfNeeded().catchError((
+        Object error,
+      ) {
+        AppDebug.instance.warning('Warmup', 'Preboot-Fehler: $error');
+      }),
+    );
+  });
   unawaited(
     SimulationService.instance.startWarmupIfNeeded().catchError((Object error) {
       AppDebug.instance.error('Warmup', error.toString());

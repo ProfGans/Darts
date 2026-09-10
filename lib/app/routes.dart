@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../presentation/career/career_detail_screen.dart';
 import '../presentation/career/career_setup_screen.dart';
-import '../presentation/camera/board_camera_screen.dart';
+import '../presentation/community/community_management_screen.dart';
 import '../presentation/tools/checkout_calculator_screen.dart';
 import '../presentation/database/computer_database_screen.dart';
 import '../presentation/match/game_mode_selection_screen.dart';
@@ -10,6 +10,7 @@ import '../presentation/main_menu/main_menu_screen.dart';
 import '../presentation/simulator/bot_match_simulator_screen.dart';
 import '../presentation/players/player_profiles_screen.dart';
 import '../presentation/settings/settings_screen.dart';
+import '../presentation/tournament/tournament_hub_screen.dart';
 import '../presentation/tournament/tournament_bracket_screen.dart';
 import '../presentation/tournament/tournament_setup_screen.dart';
 
@@ -17,13 +18,14 @@ class AppRoutes {
   static const home = '/';
   static const gameModes = '/match/modes';
   static const checkoutCalculator = '/tools/checkout-calculator';
-  static const boardRecognitionTester = '/tools/board-recognition-tester';
   static const botSimulator = '/bot-simulator';
   static const playerProfiles = '/players';
+  static const communities = '/communities';
   static const computerDatabase = '/database';
   static const settings = '/settings';
   static const tournamentSetup = '/tournament/setup';
   static const tournamentBracket = '/tournament/bracket';
+  static const tournamentHub = '/tournament';
   static const careerHub = '/career';
   static const careerSetup = '/career/setup';
   static const careerDetail = '/career/detail';
@@ -32,14 +34,12 @@ class AppRoutes {
     home: (_) => const MainMenuScreen(),
     gameModes: (_) => const GameModeSelectionScreen(),
     checkoutCalculator: (_) => const CheckoutCalculatorScreen(),
-    boardRecognitionTester: (_) => const BoardCameraScreen(
-      isBullOff: false,
-      testerMode: true,
-    ),
     botSimulator: (_) => const BotMatchSimulatorScreen(),
     playerProfiles: (_) => const PlayerProfilesScreen(),
+    communities: (_) => const CommunityManagementScreen(),
     computerDatabase: (_) => const ComputerDatabaseScreen(),
     settings: (_) => const SettingsScreen(),
+    tournamentHub: (_) => const TournamentHubScreen(),
     tournamentSetup: (_) => const TournamentSetupScreen(),
     tournamentBracket: (_) => const TournamentBracketScreen(),
     careerHub: (_) => const MainMenuScreen(

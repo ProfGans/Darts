@@ -1,0 +1,138 @@
+Planung: Dart-Turnierverwaltungssoftware
+Stand: 2026-05-14
+
+1. Projektziel
+Die Software soll vor allem fuer Vereinsabende genutzt werden.
+Sie soll helfen, Trainingstage abwechslungsreicher, strukturierter und individueller zu gestalten.
+Langfristig soll daraus eine flexible Turnier- und Trainingsverwaltungssoftware fuer Dart entstehen.
+
+2. Grundidee
+Im ersten Schritt steht die reine Verwaltung im Vordergrund:
+- Spieler erfassen
+- Turniere oder Trainingsformate anlegen
+- Paarungen erzeugen
+- Ergebnisse eintragen
+- Tabellen, Spielplaene oder Turnierbaeume anzeigen
+
+Erweiterte Dart-spezifische Statistiken sollen erst spaeter folgen.
+Die Turnierverwaltung soll in die bestehende App integriert werden.
+Geplant ist ein neuer Hauptreiter fuer den Bereich Turnierverwaltung.
+
+3. Zielgruppe
+Hauptzielgruppe:
+- Dartvereine
+- Turnierleiter bei Vereinsabenden
+- Trainingsabende mit wechselnden Formaten
+
+Moegliche spaetere Zielgruppen:
+- Kleine lokale Turniere
+- Ligaspieltage
+- Oeffentliche Veranstaltungen
+
+4. Produktvision
+Eine flexible Dart-Turnier- und Trainingsverwaltungssoftware fuer Vereinsabende,
+mit der unterschiedliche Spiel- und Turnierformate organisiert, durchgefuehrt
+und ausgewertet werden koennen.
+Wichtig ist dabei auch eine Online-Funktionalitaet, damit die Software
+langfristig geraeteuebergreifend und gemeinsam nutzbar werden kann.
+Die Turnierverwaltung soll also nicht nur lokal funktionieren, sondern
+bewusst auch online nutzbar sein.
+
+5. Bisher festgehaltene Anforderungen
+5.1 Einsatzbereich
+- Hauptsaechlich fuer Vereinsabende
+- Fokus auf abwechslungsreiche Trainingsgestaltung
+
+5.2 Turnierarten
+- Langfristig soll eine sehr grosse Bandbreite unterstuetzt werden
+- Die genaue Reihenfolge der Formate muss noch priorisiert werden
+
+5.3 Spielerverwaltung
+- Erweiterte Spielerfunktionen sind denkbar
+- Muss nicht alles in Version 1 enthalten sein
+
+5.4 Match- und Turnierlogik
+- Ist auf jeden Fall erforderlich
+- Paarungen und Fortschritt sollen sauber verwaltet werden
+
+5.5 Anzeige und Ausgabe
+- Ist auf jeden Fall erforderlich
+- Uebersichten wie Tabellen, Turnierbaum und Spielplan sind wichtig
+
+5.6 Dart-spezifische Spielstatistiken
+- Erst nach der stabilen Verwaltungsbasis
+- Spaeter als Erweiterung innerhalb der bestehenden App pruefen
+
+5.7 Benutzerrollen
+- Unterschiedliche Rollen werden benoetigt
+
+5.8 Technik
+- Flutter ist klar bevorzugt
+- Mehrplattformfaehigkeit ist ein wichtiges Ziel
+- Die Turnierverwaltung wird als neuer Hauptreiter in die bestehende App integriert
+- Online-Funktionalitaet ist ein Pflichtbestandteil der Turnierverwaltung
+- Mehrgeraete-Nutzung soll moeglich sein
+- Daten-Synchronisation soll moeglich sein
+- Turniere sollen online teilbar sein
+- Zuschaueransichten auf anderen Geraeten sind gewuenscht
+- Benutzerkonten und Login sind vorgesehen
+
+6. Empfohlene Entwicklungsphasen
+Phase 1: Kernverwaltung
+- Neuer Hauptreiter fuer die Turnierverwaltung in der bestehenden App
+- Spieler anlegen und verwalten
+- Turnier oder Abend anlegen
+- Modus auswaehlen
+- Paarungen automatisch erzeugen
+- Ergebnisse eintragen
+- Tabellen / KO-Baum / Uebersicht anzeigen
+- Grundlegende Benutzerrollen
+- Online-Grundfunktionalitaet fuer die Turnierverwaltung vorsehen
+
+Phase 2: Trainingsabend-Logik
+- Mehrere Formate fuer einen Abend
+- Flexible Rundenmodelle
+- Wechselnde Paarungen
+- Punktesystem fuer den Abend
+- Individuelle Trainingsmodi
+
+Phase 3: Erweiterung
+- Dart-spezifische Statistiken
+- Spielmodi wie 301 / 501 / 701
+- Checkout-Hinweise
+- Averages und weitere Kennzahlen
+- Cloud / Sync / Mehrgeraete-Nutzung
+- Erweiterte Online-Funktionen und Komfortfunktionen
+
+7. Offene Kernfragen fuer die naechste Planung
+- Welche 3 Turniermodi muessen in Version 1 unbedingt enthalten sein?
+- Sollen Trainingsabende als normales Turnier oder als eigener Modus behandelt werden?
+- Welche Benutzerrollen werden konkret benoetigt?
+- Welche Online-Funktionen muessen direkt in Version 1 enthalten sein?
+- Welche Daten muss ein Spielerprofil mindestens enthalten?
+
+7.1 Gewuenschte Online-Funktionen
+- Mehrere Geraete sollen auf dieselbe Turnierverwaltung zugreifen koennen
+- Turniere sollen online geteilt werden koennen
+- Daten sollen zwischen Geraeten synchronisiert werden
+- Zuschauer sollen Ansichten auf anderen Geraeten sehen koennen
+- Benutzerkonten und Login sollen moeglich sein
+
+8. Erste Vermutung fuer Version 1
+Moeglicher Fokus:
+- Integration als neuer Hauptreiter in die bestehende App
+- Einfache Bedienung fuer Vereinsabende
+- Online nutzbar
+- Architektur so anlegen, dass lokale und online synchronisierte Nutzung sauber zusammenpassen
+- Schnell neue Spieler anlegen
+- Turniermodus auswaehlen
+- Paarungen automatisch berechnen
+- Ergebnisse schnell erfassen
+- Uebersicht fuer Turnierleiter und Anzeige fuer Mitspieler / Zuschauer
+
+9. Notizen
+- Entscheidung: Die Turnierverwaltung wird nicht als getrennte App geplant, sondern als neuer Hauptreiter in das bestehende Programm integriert.
+- Wichtig: Online-Funktionalitaet ist ausdruecklich gewuenscht und fester Bestandteil der Turnierverwaltung.
+- Hier koennen spaeter konkrete Turniermodi eingetragen werden
+- Hier koennen auch Ideen fuer Trainingsformate gesammelt werden
+- Spaeter sollte aus dieser Datei ein echtes Anforderungskonzept entstehen

@@ -166,6 +166,8 @@ class ComputerRepository extends ChangeNotifier {
   static const _storageKey = 'computer_players';
   static const _theoreticalAverageCacheKey = 'computer_theoretical_average_cache';
   static const _theoreticalAverageCacheVersion = 2;
+  static const _resolutionCacheStorageKey = 'computer_skill_resolution_cache';
+  static const _resolutionCacheVersion = 1;
   static const _bundledTheoreticalAverageCacheAssetPath =
       'assets/data/bundled_theoretical_average_cache.json';
   static const int _bundledTheoSeedSampleCount = 24;
@@ -213,6 +215,7 @@ class ComputerRepository extends ChangeNotifier {
   double _theoreticalRefreshProgress = 0;
   String _theoreticalRefreshLabel = '';
   Timer? _theoreticalAverageCachePersistTimer;
+  Timer? _resolutionCachePersistTimer;
 
   List<ComputerPlayer> get players =>
       List<ComputerPlayer>.unmodifiable(_players);
@@ -237,6 +240,7 @@ class ComputerRepository extends ChangeNotifier {
     _primeTheoreticalAverageCacheFromBundledDefaults(bundledJson);
     await _loadBundledTheoreticalAverageCache();
     await _loadTheoreticalAverageCache();
+    await _loadResolutionCache();
     final storedJson = await AppStorage.instance.readJsonMap(_storageKey);
     final json = _shouldUseBundledDefaults(storedJson)
         ? (bundledJson ?? storedJson)
@@ -406,6 +410,41 @@ class ComputerRepository extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadResolutionCache() async {
+    final payload = await AppStorage.instance.readJsonMap(
+      _resolutionCacheStorageKey,
+    );
+    if (payload == null) {
+      return;
+    }
+    final version = (payload['version'] as num?)?.toInt() ?? 0;
+    if (version != _resolutionCacheVersion) {
+      return;
+    }
+    final values = payload['values'];
+    if (values is! Map) {
+      return;
+    }
+    for (final entry in values.entries) {
+      final value = entry.value;
+      if (value is! Map) {
+        continue;
+      }
+      final map = value.cast<String, dynamic>();
+      final skill = (map['skill'] as num?)?.toInt();
+      final finishingSkill = (map['finishingSkill'] as num?)?.toInt();
+      final theoreticalAverage = (map['theoreticalAverage'] as num?)?.toDouble();
+      if (skill == null || finishingSkill == null || theoreticalAverage == null) {
+        continue;
+      }
+      _resolutionCache[entry.key.toString()] = ComputerSkillResolution(
+        skill: skill.clamp(1, 1000),
+        finishingSkill: finishingSkill.clamp(1, 1000),
+        theoreticalAverage: theoreticalAverage.clamp(0, 180).toDouble(),
+      );
+    }
+  }
+
   void _primeTheoreticalAverageCacheFromBundledDefaults(
     Map<String, dynamic>? bundledJson,
   ) {
@@ -446,6 +485,16 @@ class ComputerRepository extends ChangeNotifier {
     );
   }
 
+  void _scheduleResolutionCachePersist() {
+    _resolutionCachePersistTimer?.cancel();
+    _resolutionCachePersistTimer = Timer(
+      const Duration(milliseconds: 250),
+      () {
+        unawaited(_persistResolutionCache());
+      },
+    );
+  }
+
   Future<void> _persistTheoreticalAverageCache() {
     return AppStorage.instance.writeJson(
       _theoreticalAverageCacheKey,
@@ -454,6 +503,23 @@ class ComputerRepository extends ChangeNotifier {
         'values': <String, dynamic>{
           for (final entry in _theoreticalAverageCache.entries)
             entry.key: entry.value.toJson(),
+        },
+      },
+    );
+  }
+
+  Future<void> _persistResolutionCache() {
+    return AppStorage.instance.writeJson(
+      _resolutionCacheStorageKey,
+      <String, dynamic>{
+        'version': _resolutionCacheVersion,
+        'values': <String, dynamic>{
+          for (final entry in _resolutionCache.entries)
+            entry.key: <String, dynamic>{
+              'skill': entry.value.skill,
+              'finishingSkill': entry.value.finishingSkill,
+              'theoreticalAverage': entry.value.theoreticalAverage,
+            },
         },
       },
     );
@@ -883,6 +949,7 @@ class ComputerRepository extends ChangeNotifier {
     final lookupResolution = _resolveSkillsFromLookupGrid(target);
     if (lookupResolution != null) {
       _resolutionCache[cacheKey] = lookupResolution;
+      _scheduleResolutionCachePersist();
       return lookupResolution;
     }
     final bestEqual = _findBestEqualCandidate(target);
@@ -893,6 +960,7 @@ class ComputerRepository extends ChangeNotifier {
         ? bestSplit.toResolution()
         : bestEqual.toResolution();
     _resolutionCache[cacheKey] = resolution;
+    _scheduleResolutionCachePersist();
     return resolution;
   }
 
@@ -908,6 +976,7 @@ class ComputerRepository extends ChangeNotifier {
     final lookupResolution = _resolveSkillsFromLookupGrid(target);
     if (lookupResolution != null) {
       _resolutionCache[cacheKey] = lookupResolution;
+      _scheduleResolutionCachePersist();
       return lookupResolution;
     }
     if (_players.isEmpty) {
@@ -925,6 +994,7 @@ class ComputerRepository extends ChangeNotifier {
         target >= lastPlayer.theoreticalAverage) {
       final resolution = resolveSkillsForTheoreticalAverage(target);
       _resolutionCache[cacheKey] = resolution;
+      _scheduleResolutionCachePersist();
       return resolution;
     }
 
@@ -953,6 +1023,7 @@ class ComputerRepository extends ChangeNotifier {
         theoreticalAverage: target,
       );
       _resolutionCache[cacheKey] = resolution;
+      _scheduleResolutionCachePersist();
       return resolution;
     }
 
@@ -973,6 +1044,7 @@ class ComputerRepository extends ChangeNotifier {
       theoreticalAverage: target,
     );
     _resolutionCache[cacheKey] = resolution;
+    _scheduleResolutionCachePersist();
     return resolution;
   }
 

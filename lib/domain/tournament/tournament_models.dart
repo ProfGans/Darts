@@ -8,12 +8,14 @@ enum TournamentFormat {
   knockout,
   league,
   leaguePlayoff,
+  groupStage,
 }
 
 enum TournamentRoundStage {
   knockout,
   league,
   playoff,
+  group,
 }
 
 enum TournamentParticipantType {
@@ -24,6 +26,172 @@ enum TournamentParticipantType {
 enum TournamentMatchStatus {
   pending,
   completed,
+}
+
+class TournamentPhaseDefinition {
+  const TournamentPhaseDefinition({
+    required this.phaseNumber,
+    this.tournaments = const <TournamentPhaseTournamentDefinition>[
+      TournamentPhaseTournamentDefinition(
+        tournamentNumber: 1,
+        format: TournamentFormat.knockout,
+      ),
+    ],
+  });
+
+  final int phaseNumber;
+  final List<TournamentPhaseTournamentDefinition> tournaments;
+  TournamentFormat get primaryFormat =>
+      tournaments.isEmpty ? TournamentFormat.knockout : tournaments.first.format;
+
+  int get tournamentCount => tournaments.length;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'phaseNumber': phaseNumber,
+      'tournaments': tournaments.map((entry) => entry.toJson()).toList(),
+    };
+  }
+
+  static TournamentPhaseDefinition fromJson(Map<String, dynamic> json) {
+    final parsedTournaments =
+        (json['tournaments'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map(
+              (entry) => TournamentPhaseTournamentDefinition.fromJson(
+                entry.cast<String, dynamic>(),
+              ),
+            )
+            .toList();
+    final parsedFormats =
+        (json['tournamentFormats'] as List<dynamic>? ?? const <dynamic>[])
+            .map(
+              (entry) => TournamentFormat.values.byName(
+                entry as String? ?? TournamentFormat.knockout.name,
+              ),
+            )
+            .toList();
+    final legacyFormat = json['format'] as String?;
+    return TournamentPhaseDefinition(
+      phaseNumber: (json['phaseNumber'] as num?)?.toInt() ?? 1,
+      tournaments: parsedTournaments.isNotEmpty
+          ? parsedTournaments
+          : parsedFormats.isNotEmpty
+              ? parsedFormats
+                  .asMap()
+                  .entries
+                  .map(
+                    (entry) => TournamentPhaseTournamentDefinition(
+                      tournamentNumber: entry.key + 1,
+                      format: entry.value,
+                    ),
+                  )
+                  .toList()
+              : <TournamentPhaseTournamentDefinition>[
+                  TournamentPhaseTournamentDefinition(
+                    tournamentNumber: 1,
+                    format: TournamentFormat.values.byName(
+                      legacyFormat ?? TournamentFormat.knockout.name,
+                    ),
+                  ),
+                ],
+    );
+  }
+}
+
+class TournamentPhaseTournamentDefinition {
+  const TournamentPhaseTournamentDefinition({
+    required this.tournamentNumber,
+    required this.format,
+    this.qualificationRules = const <TournamentQualificationRuleDefinition>[],
+  });
+
+  final int tournamentNumber;
+  final TournamentFormat format;
+  final List<TournamentQualificationRuleDefinition> qualificationRules;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'tournamentNumber': tournamentNumber,
+      'format': format.name,
+      'qualificationRules':
+          qualificationRules.map((entry) => entry.toJson()).toList(),
+    };
+  }
+
+  static TournamentPhaseTournamentDefinition fromJson(
+    Map<String, dynamic> json,
+  ) {
+    final parsedRules =
+        (json['qualificationRules'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map(
+              (entry) => TournamentQualificationRuleDefinition.fromJson(
+                entry.cast<String, dynamic>(),
+              ),
+            )
+            .toList();
+    final legacyQualifierCount = (json['qualifierCount'] as num?)?.toInt() ?? 0;
+    final legacyTargetPhaseNumber =
+        (json['targetPhaseNumber'] as num?)?.toInt();
+    final legacyTargetTournamentNumber =
+        (json['targetTournamentNumber'] as num?)?.toInt();
+    return TournamentPhaseTournamentDefinition(
+      tournamentNumber: (json['tournamentNumber'] as num?)?.toInt() ?? 1,
+      format: TournamentFormat.values.byName(
+        json['format'] as String? ?? TournamentFormat.knockout.name,
+      ),
+      qualificationRules: parsedRules.isNotEmpty
+          ? parsedRules
+          : (legacyQualifierCount > 0 &&
+                  legacyTargetPhaseNumber != null &&
+                  legacyTargetTournamentNumber != null)
+              ? <TournamentQualificationRuleDefinition>[
+                  TournamentQualificationRuleDefinition(
+                    startPlacement: 1,
+                    endPlacement: legacyQualifierCount,
+                    targetPhaseNumber: legacyTargetPhaseNumber,
+                    targetTournamentNumber: legacyTargetTournamentNumber,
+                  ),
+                ]
+              : const <TournamentQualificationRuleDefinition>[],
+    );
+  }
+}
+
+class TournamentQualificationRuleDefinition {
+  const TournamentQualificationRuleDefinition({
+    required this.startPlacement,
+    required this.endPlacement,
+    required this.targetPhaseNumber,
+    required this.targetTournamentNumber,
+  });
+
+  final int startPlacement;
+  final int endPlacement;
+  final int targetPhaseNumber;
+  final int targetTournamentNumber;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'startPlacement': startPlacement,
+      'endPlacement': endPlacement,
+      'targetPhaseNumber': targetPhaseNumber,
+      'targetTournamentNumber': targetTournamentNumber,
+    };
+  }
+
+  static TournamentQualificationRuleDefinition fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return TournamentQualificationRuleDefinition(
+      startPlacement: (json['startPlacement'] as num?)?.toInt() ?? 1,
+      endPlacement: (json['endPlacement'] as num?)?.toInt() ?? 1,
+      targetPhaseNumber: (json['targetPhaseNumber'] as num?)?.toInt() ?? 1,
+      targetTournamentNumber:
+          (json['targetTournamentNumber'] as num?)?.toInt() ?? 1,
+    );
+  }
 }
 
 class TournamentParticipant {
@@ -83,6 +251,19 @@ class TournamentParticipant {
 class TournamentDefinition {
   const TournamentDefinition({
     required this.name,
+    this.communityId,
+    this.communityName,
+    this.phases = const <TournamentPhaseDefinition>[
+      TournamentPhaseDefinition(
+        phaseNumber: 1,
+        tournaments: <TournamentPhaseTournamentDefinition>[
+          TournamentPhaseTournamentDefinition(
+            tournamentNumber: 1,
+            format: TournamentFormat.knockout,
+          ),
+        ],
+      ),
+    ],
     this.game = TournamentGame.x01,
     this.format = TournamentFormat.knockout,
     required this.fieldSize,
@@ -97,11 +278,17 @@ class TournamentDefinition {
     this.pointsForWin = 2,
     this.pointsForDraw = 1,
     this.roundRobinRepeats = 1,
+    this.maxLeagueMatchesPerParticipant = 0,
     this.playoffQualifierCount = 4,
+    this.groupCount = 2,
+    this.playersPerGroup = 4,
     required this.includeHumanPlayer,
   });
 
   final String name;
+  final String? communityId;
+  final String? communityName;
+  final List<TournamentPhaseDefinition> phases;
   final TournamentGame game;
   final TournamentFormat format;
   final int fieldSize;
@@ -116,7 +303,10 @@ class TournamentDefinition {
   final int pointsForWin;
   final int pointsForDraw;
   final int roundRobinRepeats;
+  final int maxLeagueMatchesPerParticipant;
   final int playoffQualifierCount;
+  final int groupCount;
+  final int playersPerGroup;
   final bool includeHumanPlayer;
 
   int distanceForRound(int roundNumber) {
@@ -130,6 +320,9 @@ class TournamentDefinition {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'name': name,
+      'communityId': communityId,
+      'communityName': communityName,
+      'phases': phases.map((entry) => entry.toJson()).toList(),
       'game': game.name,
       'format': format.name,
       'fieldSize': fieldSize,
@@ -144,20 +337,46 @@ class TournamentDefinition {
       'pointsForWin': pointsForWin,
       'pointsForDraw': pointsForDraw,
       'roundRobinRepeats': roundRobinRepeats,
+      'maxLeagueMatchesPerParticipant': maxLeagueMatchesPerParticipant,
       'playoffQualifierCount': playoffQualifierCount,
+      'groupCount': groupCount,
+      'playersPerGroup': playersPerGroup,
       'includeHumanPlayer': includeHumanPlayer,
     };
   }
 
   static TournamentDefinition fromJson(Map<String, dynamic> json) {
+    final parsedFormat = TournamentFormat.values.byName(
+      json['format'] as String? ?? TournamentFormat.knockout.name,
+    );
+    final parsedPhases = (json['phases'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              TournamentPhaseDefinition.fromJson(entry.cast<String, dynamic>()),
+        )
+        .toList();
     return TournamentDefinition(
       name: json['name'] as String,
+      communityId: json['communityId'] as String?,
+      communityName: json['communityName'] as String?,
+      phases: parsedPhases.isEmpty
+          ? <TournamentPhaseDefinition>[
+              TournamentPhaseDefinition(
+                phaseNumber: 1,
+                tournaments: <TournamentPhaseTournamentDefinition>[
+                  TournamentPhaseTournamentDefinition(
+                    tournamentNumber: 1,
+                    format: parsedFormat,
+                  ),
+                ],
+              ),
+            ]
+          : parsedPhases,
       game: TournamentGame.values.byName(
         json['game'] as String? ?? TournamentGame.x01.name,
       ),
-      format: TournamentFormat.values.byName(
-        json['format'] as String? ?? TournamentFormat.knockout.name,
-      ),
+      format: parsedFormat,
       fieldSize: (json['fieldSize'] as num).toInt(),
       matchMode: MatchMode.values.byName(
         json['matchMode'] as String? ?? MatchMode.legs.name,
@@ -180,8 +399,12 @@ class TournamentDefinition {
       pointsForWin: (json['pointsForWin'] as num?)?.toInt() ?? 2,
       pointsForDraw: (json['pointsForDraw'] as num?)?.toInt() ?? 1,
       roundRobinRepeats: (json['roundRobinRepeats'] as num?)?.toInt() ?? 1,
+      maxLeagueMatchesPerParticipant:
+          (json['maxLeagueMatchesPerParticipant'] as num?)?.toInt() ?? 0,
       playoffQualifierCount:
           (json['playoffQualifierCount'] as num?)?.toInt() ?? 4,
+      groupCount: (json['groupCount'] as num?)?.toInt() ?? 2,
+      playersPerGroup: (json['playersPerGroup'] as num?)?.toInt() ?? 4,
       includeHumanPlayer: json['includeHumanPlayer'] as bool? ?? false,
     );
   }
@@ -568,12 +791,16 @@ class TournamentRound {
     required this.title,
     required this.matches,
     this.stage = TournamentRoundStage.knockout,
+    this.groupNumber,
+    this.groupName,
   });
 
   final int roundNumber;
   final String title;
   final List<TournamentMatch> matches;
   final TournamentRoundStage stage;
+  final int? groupNumber;
+  final String? groupName;
 
   bool get isCompleted =>
       matches.isNotEmpty &&
@@ -585,6 +812,8 @@ class TournamentRound {
       'title': title,
       'matches': matches.map((entry) => entry.toJson()).toList(),
       'stage': stage.name,
+      'groupNumber': groupNumber,
+      'groupName': groupName,
     };
   }
 
@@ -595,6 +824,8 @@ class TournamentRound {
       stage: TournamentRoundStage.values.byName(
         json['stage'] as String? ?? TournamentRoundStage.knockout.name,
       ),
+      groupNumber: (json['groupNumber'] as num?)?.toInt(),
+      groupName: json['groupName'] as String?,
       matches: (json['matches'] as List<dynamic>? ?? const <dynamic>[])
           .map(
             (entry) => TournamentMatch.fromJson(
@@ -631,6 +862,29 @@ class TournamentBracket {
   List<TournamentRound> get playoffRounds => rounds
       .where((round) => round.stage == TournamentRoundStage.playoff)
       .toList();
+  List<TournamentRound> get groupRounds => rounds
+      .where((round) => round.stage == TournamentRoundStage.group)
+      .toList();
+
+  int get totalMatchCount => rounds.fold<int>(
+        0,
+        (sum, round) => sum + round.matches.length,
+      );
+
+  int get completedMatchCount => rounds.fold<int>(
+        0,
+        (sum, round) =>
+            sum +
+            round.matches.where((match) => match.status == TournamentMatchStatus.completed).length,
+      );
+
+  double get progressValue {
+    final total = totalMatchCount;
+    if (total <= 0) {
+      return 0;
+    }
+    return completedMatchCount / total;
+  }
 
   TournamentRoundStage stageForRound(int roundNumber) {
     for (final round in rounds) {
@@ -663,6 +917,13 @@ class TournamentBracket {
       final table = standings;
       return table.isEmpty ? null : table.first.participant;
     }
+    if (definition.format == TournamentFormat.groupStage) {
+      if (groupedStandings.length != 1) {
+        return null;
+      }
+      final table = groupedStandings.first.standings;
+      return table.isEmpty ? null : table.first.participant;
+    }
     final finalRounds = definition.format == TournamentFormat.leaguePlayoff
         ? playoffRounds
         : rounds;
@@ -690,6 +951,13 @@ class TournamentBracket {
       final table = standings;
       return table.length < 2 ? null : table[1].participant;
     }
+    if (definition.format == TournamentFormat.groupStage) {
+      if (groupedStandings.length != 1) {
+        return null;
+      }
+      final table = groupedStandings.first.standings;
+      return table.length < 2 ? null : table[1].participant;
+    }
     final finalRounds = definition.format == TournamentFormat.leaguePlayoff
         ? playoffRounds
         : rounds;
@@ -711,13 +979,65 @@ class TournamentBracket {
   }
 
   List<TournamentStanding> get standings {
+    if (definition.format == TournamentFormat.groupStage) {
+      return groupedStandings
+          .expand((section) => section.standings)
+          .toList(growable: false);
+    }
+    return _buildStandingsForRounds(
+      participants: participants,
+      rounds: leagueRounds,
+    );
+  }
+
+  List<TournamentStandingSection> get groupedStandings {
+    if (groupRounds.isEmpty) {
+      return const <TournamentStandingSection>[];
+    }
+    final groups = <String, List<TournamentRound>>{};
+    final groupNumbers = <String, int?>{};
+    for (final round in groupRounds) {
+      final key = round.groupName ?? 'Gruppe';
+      groups.putIfAbsent(key, () => <TournamentRound>[]).add(round);
+      groupNumbers[key] = round.groupNumber;
+    }
+    final sections = <TournamentStandingSection>[];
+    for (final entry in groups.entries) {
+      final participantsForGroup = _participantsForRounds(entry.value);
+      sections.add(
+        TournamentStandingSection(
+          groupName: entry.key,
+          groupNumber: groupNumbers[entry.key],
+          standings: _buildStandingsForRounds(
+            participants: participantsForGroup,
+            rounds: entry.value,
+          ),
+        ),
+      );
+    }
+    sections.sort((left, right) {
+      final leftNumber = left.groupNumber ?? 1 << 20;
+      final rightNumber = right.groupNumber ?? 1 << 20;
+      final numberCompare = leftNumber.compareTo(rightNumber);
+      if (numberCompare != 0) {
+        return numberCompare;
+      }
+      return left.groupName.compareTo(right.groupName);
+    });
+    return sections;
+  }
+
+  List<TournamentStanding> _buildStandingsForRounds({
+    required List<TournamentParticipant> participants,
+    required List<TournamentRound> rounds,
+  }) {
     final byId = <String, TournamentStandingBuilder>{
       for (final participant in participants)
         participant.id: TournamentStandingBuilder(participant),
     };
     final headToHead = <String, Map<String, TournamentHeadToHeadRecord>>{};
 
-    for (final round in leagueRounds) {
+    for (final round in rounds) {
       for (final match in round.matches) {
         final result = match.result;
         final playerA = match.playerA;
@@ -838,6 +1158,21 @@ class TournamentBracket {
     return table;
   }
 
+  List<TournamentParticipant> _participantsForRounds(List<TournamentRound> rounds) {
+    final byId = <String, TournamentParticipant>{};
+    for (final round in rounds) {
+      for (final match in round.matches) {
+        if (match.playerA != null) {
+          byId[match.playerA!.id] = match.playerA!;
+        }
+        if (match.playerB != null) {
+          byId[match.playerB!.id] = match.playerB!;
+        }
+      }
+    }
+    return byId.values.toList(growable: false);
+  }
+
   List<TournamentParticipant> losersForRound(int roundNumber) {
     if (definition.format == TournamentFormat.league) {
       return const <TournamentParticipant>[];
@@ -928,6 +1263,18 @@ class TournamentStanding {
 
   int get legDifference => legsFor - legsAgainst;
   int get setDifference => setsFor - setsAgainst;
+}
+
+class TournamentStandingSection {
+  const TournamentStandingSection({
+    required this.groupName,
+    required this.standings,
+    this.groupNumber,
+  });
+
+  final String groupName;
+  final int? groupNumber;
+  final List<TournamentStanding> standings;
 }
 
 class TournamentStandingBuilder {

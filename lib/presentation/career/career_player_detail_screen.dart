@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/repositories/career_repository.dart';
 import '../../domain/career/career_models.dart';
 import '../../domain/career/career_statistics.dart';
+import '../widgets/theo_display.dart';
 
 class CareerPlayerDetailScreen extends StatefulWidget {
   const CareerPlayerDetailScreen({
@@ -176,10 +177,12 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                   children: <Widget>[
-                    _PlayerHeaderCard(
-                      history: history,
-                      careerTheoAverage: careerPlayer?.average,
-                    ),
+                      _PlayerHeaderCard(
+                        history: history,
+                        careerTheoAverage: careerPlayer?.average,
+                        skill: careerPlayer?.skill,
+                        finishingSkill: careerPlayer?.finishingSkill,
+                      ),
                     const SizedBox(height: 16),
                     _FilterCard(
                       filterMode: _filterMode,
@@ -312,14 +315,18 @@ class _CareerPlayerDetailScreenState extends State<CareerPlayerDetailScreen> {
   }
 }
 
-class _PlayerHeaderCard extends StatelessWidget {
-  const _PlayerHeaderCard({
-    required this.history,
-    required this.careerTheoAverage,
-  });
+  class _PlayerHeaderCard extends StatelessWidget {
+    const _PlayerHeaderCard({
+      required this.history,
+      required this.careerTheoAverage,
+      this.skill,
+      this.finishingSkill,
+    });
 
-  final CareerPlayerHistorySummary history;
-  final double? careerTheoAverage;
+    final CareerPlayerHistorySummary history;
+    final double? careerTheoAverage;
+    final int? skill;
+    final int? finishingSkill;
 
   @override
   Widget build(BuildContext context) {
@@ -343,10 +350,14 @@ class _PlayerHeaderCard extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: <Widget>[
-                  _HistoryTag(
-                    label:
-                        'Karriere Theo ${careerTheoAverage!.toStringAsFixed(1)}',
-                  ),
+                      _HistoryTag(
+                        label:
+                          'Karriere Theo ${formatTheoValue(careerTheoAverage!)}',
+                        tooltip: buildTheoTooltipMessage(
+                          skill: skill,
+                          finishingSkill: finishingSkill,
+                        ),
+                      ),
                 ],
               ),
             ],
@@ -687,10 +698,11 @@ class _MatchHistoryEntryCard extends StatelessWidget {
                 _HistoryTag(label: historyEntry.scoreText),
               _HistoryTag(label: 'Avg ${historyEntry.average.toStringAsFixed(1)}'),
               if (historyEntry.opponentTheoAverage != null)
-                _HistoryTag(
-                  label:
-                      'Gegner Theo ${historyEntry.opponentTheoAverage!.toStringAsFixed(1)}',
-                ),
+                  _HistoryTag(
+                    label:
+                      'Gegner Theo ${formatTheoValue(historyEntry.opponentTheoAverage!)}',
+                    tooltip: buildTheoTooltipMessage(),
+                  ),
             ],
           ),
         ],
@@ -748,19 +760,29 @@ class _HistoryEntryCard extends StatelessWidget {
 class _HistoryTag extends StatelessWidget {
   const _HistoryTag({
     required this.label,
+    this.tooltip,
   });
 
   final String label;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label),
+    final content = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(label),
+      );
+    if (tooltip == null || tooltip!.trim().isEmpty) {
+      return content;
+    }
+    return Tooltip(
+      message: tooltip!,
+      waitDuration: const Duration(milliseconds: 250),
+      child: content,
     );
   }
 }

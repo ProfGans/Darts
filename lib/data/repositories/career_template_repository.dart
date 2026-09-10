@@ -120,6 +120,62 @@ class CareerTemplateRepository extends ChangeNotifier {
     unawaited(_persist());
   }
 
+  CareerTemplate duplicateTemplate({
+    required CareerTemplate source,
+    String? name,
+  }) {
+    final trimmed = (name ?? '${source.name} Kopie').trim();
+    final template = CareerTemplate(
+      id: 'template-${DateTime.now().microsecondsSinceEpoch}',
+      name: trimmed.isEmpty ? '${source.name} Kopie' : trimmed,
+      participantMode: source.participantMode,
+      playerProfileId: source.playerProfileId,
+      replaceWeakestPlayerWithHuman: source.replaceWeakestPlayerWithHuman,
+      careerTagDefinitions:
+          List<CareerTagDefinition>.from(source.careerTagDefinitions),
+      seasonTagRules: List<CareerSeasonTagRule>.from(source.seasonTagRules),
+      rankings: List<CareerRankingDefinition>.from(source.rankings),
+      calendar: List<CareerCalendarItem>.from(source.calendar),
+    );
+    _templates.insert(0, template);
+    notifyListeners();
+    unawaited(_persist());
+    return template;
+  }
+
+  void updateTemplate({
+    required String templateId,
+    required String name,
+    List<CareerTagDefinition> careerTagDefinitions =
+        const <CareerTagDefinition>[],
+    List<CareerSeasonTagRule> seasonTagRules =
+        const <CareerSeasonTagRule>[],
+    required List<CareerRankingDefinition> rankings,
+    required List<CareerCalendarItem> calendar,
+  }) {
+    if (isBuiltInTemplate(templateId)) {
+      return;
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    final index = _templates.indexWhere((entry) => entry.id == templateId);
+    if (index < 0) {
+      return;
+    }
+    _templates[index] = CareerTemplate(
+      id: templateId,
+      name: trimmed,
+      careerTagDefinitions: careerTagDefinitions,
+      seasonTagRules: seasonTagRules,
+      rankings: rankings,
+      calendar: calendar,
+    );
+    notifyListeners();
+    unawaited(_persist());
+  }
+
   void deleteTemplate(String templateId) {
     if (isBuiltInTemplate(templateId)) {
       return;

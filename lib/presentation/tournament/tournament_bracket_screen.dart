@@ -97,6 +97,7 @@ class TournamentBracketScreen extends StatelessWidget {
                           ),
                   ],
                 if (bracket.definition.format == TournamentFormat.league ||
+                    bracket.definition.format == TournamentFormat.groupStage ||
                     bracket.definition.format ==
                         TournamentFormat.leaguePlayoff) ...<Widget>[
                   const SizedBox(height: 12),
@@ -198,11 +199,22 @@ class _SummaryCard extends StatelessWidget {
                   ? 'Turnierbaum'
                   : bracket.definition.format == TournamentFormat.leaguePlayoff
                       ? 'Liga und Playoff-Baum'
-                      : 'Ligaansicht',
+                      : bracket.definition.format == TournamentFormat.groupStage
+                          ? 'Gruppenphase'
+                          : 'Ligaansicht',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: const Color(0xFF5D7285),
                   ),
             ),
+            if ((bracket.definition.communityName ?? '').isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                'Community: ${bracket.definition.communityName}',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF5D7285),
+                    ),
+              ),
+            ],
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -218,12 +230,18 @@ class _SummaryCard extends StatelessWidget {
                       'Liga ${bracket.definition.roundRobinRepeats}x',
                     TournamentFormat.leaguePlayoff =>
                       'Liga+Playoff Top ${bracket.definition.playoffQualifierCount}',
+                    TournamentFormat.groupStage =>
+                      '${bracket.definition.groupCount} Gruppen',
                     TournamentFormat.knockout =>
                       bracket.definition.matchMode == MatchMode.legs
                           ? 'Legs ${bracket.definition.legsToWin}'
                           : 'Sets ${bracket.definition.setsToWin}',
                   },
                 ),
+                if (bracket.definition.phases.isNotEmpty)
+                  _CompactInfoChip(
+                    label: '${bracket.definition.phases.length} Phasen',
+                  ),
                 if (bracket.definition.format != TournamentFormat.knockout)
                   _CompactInfoChip(
                     label:
@@ -234,6 +252,25 @@ class _SummaryCard extends StatelessWidget {
                 if (seededParticipants.isNotEmpty)
                   _CompactInfoChip(label: '${seededParticipants.length} gesetzt'),
               ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                minHeight: 10,
+                value: bracket.progressValue,
+                backgroundColor: const Color(0xFFE8EEF4),
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  Color(0xFF2563EB),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Turnierfortschritt: ${bracket.completedMatchCount}/${bracket.totalMatchCount} Spiele abgeschlossen',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF5D7285),
+                  ),
             ),
           ],
         ),
@@ -368,6 +405,24 @@ class _ActionsCard extends StatelessWidget {
               icon: const Icon(Icons.fast_forward_rounded),
               label: const Text('Rest simulieren'),
             ),
+            if (repository.canStartLeaguePlayoffs) ...<Widget>[
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                onPressed: repository.startLeaguePlayoffs,
+                icon: const Icon(Icons.account_tree_outlined),
+                label: const Text('Playoffs starten'),
+              ),
+            ],
+            if (repository.canStartNextFlowPhase) ...<Widget>[
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                onPressed: repository.startNextFlowPhase,
+                icon: const Icon(Icons.arrow_forward_rounded),
+                label: Text(
+                  repository.nextFlowStartLabel ?? 'Naechste Phase starten',
+                ),
+              ),
+            ],
             if (repository.isCareerTournament) ...<Widget>[
               const SizedBox(height: 8),
               FilledButton.tonalIcon(
@@ -625,6 +680,55 @@ class _StandingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (bracket.definition.format == TournamentFormat.groupStage) {
+      final grouped = bracket.groupedStandings;
+      return Card(
+        child: ExpansionTile(
+          initiallyExpanded: true,
+          title: Text('Gruppen', style: Theme.of(context).textTheme.titleMedium),
+          subtitle: Text('${grouped.length} Gruppen'),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          children: grouped
+              .asMap()
+              .entries
+              .map(
+                (groupEntry) => Padding(
+                  padding: EdgeInsets.only(
+                    bottom: groupEntry.key == grouped.length - 1 ? 0 : 14,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        groupEntry.value.groupName,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...groupEntry.value.standings.asMap().entries.map(
+                        (entry) => Padding(
+                          padding: EdgeInsets.only(
+                            bottom: entry.key ==
+                                    groupEntry.value.standings.length - 1
+                                ? 0
+                                : 8,
+                          ),
+                          child: _StandingTile(
+                            rank: entry.key + 1,
+                            standing: entry.value,
+                            showSetDifference: showSetDifference,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
     return Card(
       child: ExpansionTile(
         initiallyExpanded: true,
@@ -713,6 +817,8 @@ class _MatchTile extends StatelessWidget {
       TournamentMatchStatus.pending => match.isReady ? 'Offen' : 'Wartet auf Gegner',
     };
     final repository = TournamentRepository.instance;
+    final canLaunchPlayableMatch =
+        _humanParticipant(match) != null && _computerParticipant(match) != null;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -749,14 +855,23 @@ class _MatchTile extends StatelessWidget {
               match.isReady &&
               match.status == TournamentMatchStatus.pending) ...<Widget>[
             const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: () {
-                repository.simulateRemainingCpuMatchesInRound(match.roundNumber);
-                _playMatch(context);
-              },
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('Mein Match spielen'),
-            ),
+            if (canLaunchPlayableMatch) ...<Widget>[
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  repository.simulateRemainingCpuMatchesInRound(match.roundNumber);
+                  _playMatch(context);
+                },
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Mein Match spielen'),
+              ),
+            ] else ...<Widget>[
+              Text(
+                'Mehrere menschliche Teilnehmer werden hier direkt per Ergebnis eingetragen.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF5D7285),
+                    ),
+              ),
+            ],
             if (match.playerA != null) ...<Widget>[
               const SizedBox(height: 8),
               OutlinedButton(
@@ -771,7 +886,8 @@ class _MatchTile extends StatelessWidget {
                 child: Text('${match.playerB!.name} gewinnt'),
               ),
             ],
-            if (roundStage == TournamentRoundStage.league) ...<Widget>[
+            if (roundStage == TournamentRoundStage.league ||
+                roundStage == TournamentRoundStage.group) ...<Widget>[
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () {
@@ -798,11 +914,11 @@ class _MatchTile extends StatelessWidget {
   }
 
   void _playMatch(BuildContext context) {
-    if (!match.isReady || !match.isHumanMatch) {
+    final human = _humanParticipant(match);
+    final bot = _computerParticipant(match);
+    if (!match.isReady || !match.isHumanMatch || human == null || bot == null) {
       return;
     }
-    final human = match.playerA?.isHuman ?? false ? match.playerA! : match.playerB!;
-    final bot = match.playerA?.isHuman ?? false ? match.playerB! : match.playerA!;
     final bracket = TournamentRepository.instance.currentBracket!;
     final definition = bracket.definition;
     Navigator.of(context).push(
@@ -859,6 +975,26 @@ class _MatchTile extends StatelessWidget {
       return definition.distanceForRound(bracket.stageRoundIndex(match.roundNumber));
     }
     return definition.distanceForRound(match.roundNumber);
+  }
+
+  TournamentParticipant? _humanParticipant(TournamentMatch match) {
+    if (match.playerA?.isHuman ?? false) {
+      return match.playerA;
+    }
+    if (match.playerB?.isHuman ?? false) {
+      return match.playerB;
+    }
+    return null;
+  }
+
+  TournamentParticipant? _computerParticipant(TournamentMatch match) {
+    if (match.playerA != null && !(match.playerA!.isHuman)) {
+      return match.playerA;
+    }
+    if (match.playerB != null && !(match.playerB!.isHuman)) {
+      return match.playerB;
+    }
+    return null;
   }
 }
 

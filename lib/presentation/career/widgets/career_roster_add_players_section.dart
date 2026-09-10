@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/computer_player.dart';
 import '../../../domain/career/career_models.dart';
+import '../../widgets/theo_display.dart';
 
 class CareerRosterAddPlayersSection extends StatelessWidget {
   const CareerRosterAddPlayersSection({
@@ -131,10 +132,14 @@ class CareerRosterAddPlayersSection extends StatelessWidget {
                         value: selectedDatabasePlayerIds.contains(player.id),
                         onChanged: (_) => onTogglePlayerSelection(player.id),
                         title: Text(player.name),
-                        subtitle: Text(
-                          '${player.theoreticalAverage.toStringAsFixed(1)} Avg'
-                          '${player.tags.isEmpty ? '' : ' | ${player.tags.join(', ')}'}',
-                        ),
+                          subtitle: wrapWithTheoTooltip(
+                            skill: player.skill,
+                            finishingSkill: player.finishingSkill,
+                            child: Text(
+                              '${formatTheoValue(player.theoreticalAverage)} Avg'
+                              '${player.tags.isEmpty ? '' : ' | ${player.tags.join(', ')}'}',
+                            ),
+                          ),
                         controlAffinity: ListTileControlAffinity.leading,
                         contentPadding: EdgeInsets.zero,
                       ),

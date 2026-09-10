@@ -1210,7 +1210,10 @@ class CareerCalendarItem {
     this.pointsForWin = 2,
     this.pointsForDraw = 1,
     this.roundRobinRepeats = 1,
+    this.maxLeagueMatchesPerParticipant = 0,
     this.playoffQualifierCount = 4,
+    this.groupCount = 2,
+    this.playersPerGroup = 4,
     required this.countsForRankingIds,
     this.seedingRankingId,
     this.seedCount = 0,
@@ -1252,7 +1255,10 @@ class CareerCalendarItem {
   final int pointsForWin;
   final int pointsForDraw;
   final int roundRobinRepeats;
+  final int maxLeagueMatchesPerParticipant;
   final int playoffQualifierCount;
+  final int groupCount;
+  final int playersPerGroup;
   final List<String> countsForRankingIds;
   final String? seedingRankingId;
   final int seedCount;
@@ -1345,7 +1351,10 @@ class CareerCalendarItem {
     int? pointsForWin,
     int? pointsForDraw,
     int? roundRobinRepeats,
+    int? maxLeagueMatchesPerParticipant,
     int? playoffQualifierCount,
+    int? groupCount,
+    int? playersPerGroup,
     List<String>? countsForRankingIds,
     String? seedingRankingId,
     bool clearSeedingRankingId = false,
@@ -1394,7 +1403,11 @@ class CareerCalendarItem {
       pointsForWin: pointsForWin ?? this.pointsForWin,
       pointsForDraw: pointsForDraw ?? this.pointsForDraw,
       roundRobinRepeats: roundRobinRepeats ?? this.roundRobinRepeats,
+      maxLeagueMatchesPerParticipant:
+          maxLeagueMatchesPerParticipant ?? this.maxLeagueMatchesPerParticipant,
       playoffQualifierCount: playoffQualifierCount ?? this.playoffQualifierCount,
+      groupCount: groupCount ?? this.groupCount,
+      playersPerGroup: playersPerGroup ?? this.playersPerGroup,
       countsForRankingIds: countsForRankingIds ?? this.countsForRankingIds,
       seedingRankingId: clearSeedingRankingId
           ? null
@@ -1449,7 +1462,10 @@ class CareerCalendarItem {
       'pointsForWin': pointsForWin,
       'pointsForDraw': pointsForDraw,
       'roundRobinRepeats': roundRobinRepeats,
+      'maxLeagueMatchesPerParticipant': maxLeagueMatchesPerParticipant,
       'playoffQualifierCount': playoffQualifierCount,
+      'groupCount': groupCount,
+      'playersPerGroup': playersPerGroup,
       'countsForRankingIds': countsForRankingIds,
       'seedingRankingId': seedingRankingId,
       'seedCount': seedCount,
@@ -1515,8 +1531,12 @@ class CareerCalendarItem {
       pointsForWin: (json['pointsForWin'] as num?)?.toInt() ?? 2,
       pointsForDraw: (json['pointsForDraw'] as num?)?.toInt() ?? 1,
       roundRobinRepeats: (json['roundRobinRepeats'] as num?)?.toInt() ?? 1,
+      maxLeagueMatchesPerParticipant:
+          (json['maxLeagueMatchesPerParticipant'] as num?)?.toInt() ?? 0,
       playoffQualifierCount:
           (json['playoffQualifierCount'] as num?)?.toInt() ?? 4,
+      groupCount: (json['groupCount'] as num?)?.toInt() ?? 2,
+      playersPerGroup: (json['playersPerGroup'] as num?)?.toInt() ?? 4,
       countsForRankingIds:
           (json['countsForRankingIds'] as List<dynamic>? ?? const <dynamic>[])
               .cast<String>(),

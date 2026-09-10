@@ -412,8 +412,8 @@ class BackgroundTaskRunner extends ChangeNotifier {
     final requestedProfiles =
         ((payload['profilesById'] as Map?) ?? const <Object?, Object?>{})
             .cast<Object?, Object?>()
-            .keys
-            .map((entry) => entry.toString())
+            .values
+            .map(_simulationProfileSignatureFromObject)
             .toSet();
     final missingProfiles = requestedProfiles
         .where((entry) => !_warmedSimulationProfileKeys.contains(entry))
@@ -557,6 +557,7 @@ class BackgroundTaskRunner extends ChangeNotifier {
     try {
       await completer.future;
       _persistentSimulationTablesLoaded = true;
+      _simulationMatchPathWarmed = true;
       AppDebug.instance.info('Trace', 'Persistente Simulationstabellen geladen');
     } finally {
       await receiveSub.cancel();
@@ -863,8 +864,9 @@ Future<Map<String, Object?>> _prepareSimulationCachesInWorker({
     if (value is! Map) {
       continue;
     }
-    warmedProfiles.add(entry.key.toString());
-    profiles.add(_deserializeBotProfile(value.cast<String, dynamic>()));
+    final profile = _deserializeBotProfile(value.cast<String, dynamic>());
+    warmedProfiles.add(_profileSignature(profile));
+    profiles.add(profile);
   }
   await state.engine.prepareCommonSimulationCaches(
     profiles: profiles,
@@ -882,6 +884,24 @@ Future<Map<String, Object?>> _prepareSimulationCachesInWorker({
     'matchPathWarmed': true,
     'deterministicTables': state.engine.exportDeterministicWarmupTables(),
   };
+}
+
+String _simulationProfileSignatureFromObject(Object? value) {
+  if (value is Map) {
+    return _profileSignature(
+      _deserializeBotProfile(value.cast<String, dynamic>()),
+    );
+  }
+  return value.toString();
+}
+
+String _profileSignature(BotProfile profile) {
+  return [
+    profile.skill,
+    profile.finishingSkill,
+    profile.radiusCalibrationPercent,
+    profile.simulationSpreadPercent,
+  ].join(':');
 }
 
 double _runTheoAverageEstimateInWorker({
@@ -1085,9 +1105,11 @@ Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
       (payload['radiusCalibrationPercent'] as num?)?.toInt() ?? 92;
   final simulationSpreadPercent =
       (payload['simulationSpreadPercent'] as num?)?.toInt() ?? 115;
-  final matchCount = (payload['matchCount'] as num?)?.toInt() ?? 8;
 
   final estimatedAverageCache = <String, double>{};
+  final resolutionCacheByTarget = <double, _TrainingResolutionCandidate>{};
+  final lookupCache = <String, TheoLookupResolution>{};
+  final fastEstimator = BotEngine(recordPerformanceLogs: false);
   final results = <Object?>[];
 
   for (var index = 0; index < entries.length; index += 1) {
@@ -1095,12 +1117,18 @@ Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
     final playerId = (entry['id'] as String?) ?? 'unknown';
     final targetAverage =
         ((entry['targetAverage'] as num?)?.toDouble() ?? 0).clamp(0, 180);
-    final resolution = await _resolveTrainingTargetAverageInWorker(
-      estimatedAverageCache: estimatedAverageCache,
-      targetAverage: targetAverage.toDouble(),
-      radiusCalibrationPercent: radiusCalibrationPercent,
-      simulationSpreadPercent: simulationSpreadPercent,
-      matchCount: matchCount,
+    final normalizedTargetAverage =
+        ((targetAverage.toDouble() * 10).round() / 10).clamp(0, 180).toDouble();
+    final resolution = resolutionCacheByTarget.putIfAbsent(
+      normalizedTargetAverage,
+      () => _resolveTrainingTargetAverageInWorker(
+        estimatedAverageCache: estimatedAverageCache,
+        lookupCache: lookupCache,
+        fastEstimator: fastEstimator,
+        targetAverage: normalizedTargetAverage,
+        radiusCalibrationPercent: radiusCalibrationPercent,
+        simulationSpreadPercent: simulationSpreadPercent,
+      ),
     );
     results.add(<String, Object?>{
       'id': playerId,
@@ -1108,26 +1136,28 @@ Future<List<Object?>> _runTrainingPoolResolutionWithSimulator({
       'finishingSkill': resolution.finishingSkill,
       'theoreticalAverage': resolution.theoreticalAverage,
     });
-    sendPort.send(<String, Object?>{
-      'type': 'progress',
-      'label':
-          'Trainingsmodus wird angewendet... (${index + 1}/${entries.length} Spieler)',
-      'progress': entries.isEmpty ? 1.0 : (index + 1) / entries.length,
-    });
+    final processedCount = index + 1;
+    if (processedCount == entries.length || processedCount % 4 == 0) {
+      sendPort.send(<String, Object?>{
+        'type': 'progress',
+        'label':
+            'Trainingsmodus wird angewendet... ($processedCount/${entries.length} Spieler)',
+        'progress': entries.isEmpty ? 1.0 : processedCount / entries.length,
+      });
+    }
   }
 
   return results;
 }
 
-Future<_TrainingResolutionCandidate> _resolveTrainingTargetAverageInWorker({
+_TrainingResolutionCandidate _resolveTrainingTargetAverageInWorker({
   required Map<String, double> estimatedAverageCache,
+  required Map<String, TheoLookupResolution> lookupCache,
+  required BotEngine fastEstimator,
   required double targetAverage,
   required int radiusCalibrationPercent,
   required int simulationSpreadPercent,
-  required int matchCount,
-}) async {
-  final fastEstimator = BotEngine(recordPerformanceLogs: false);
-  final lookupCache = <String, TheoLookupResolution>{};
+}) {
   final minSupportedEffectiveRadius =
       SettingsRepository.effectiveRadiusPercentForDisplay(90);
   final maxSupportedEffectiveRadius =
@@ -1149,7 +1179,6 @@ Future<_TrainingResolutionCandidate> _resolveTrainingTargetAverageInWorker({
         finishingSkill,
         radiusCalibrationPercent,
         simulationSpreadPercent,
-        matchCount,
       ].join(':');
       final cached = estimatedAverageCache[cacheKey];
       if (cached != null) {
@@ -1203,6 +1232,7 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
   final profileEntries = ((payload['profilesById'] as Map?) ?? const <Object?, Object?>{})
       .cast<Object?, Object?>();
   final includeHumanMatches = payload['includeHumanMatches'] as bool? ?? false;
+  final fastMode = payload['fastMode'] as bool? ?? false;
   final bracket = TournamentBracket.fromJson(
     bracketPayload.cast<String, dynamic>(),
   );
@@ -1217,7 +1247,7 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
   }
 
   engine.resetPerformanceTotals();
-  if (!engine.commonSimulationCachesPrepared) {
+  if (!fastMode && !engine.commonSimulationCachesPrepared) {
     await engine.prepareCommonSimulationCaches(
       profiles: profilesById.values,
       onProgress: (label, progress) {
@@ -1238,7 +1268,9 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
 
   sendPort.send(<String, Object?>{
     'type': 'progress',
-    'label': 'Turnier wird simuliert: ${bracket.definition.name} (0/$totalMatches Matches)',
+    'label': fastMode
+        ? 'Turnier wird schnell simuliert: ${bracket.definition.name} (0/$totalMatches Matches)'
+        : 'Turnier wird simuliert: ${bracket.definition.name} (0/$totalMatches Matches)',
     'progress': totalMatches == 0 ? null : 0.0,
   });
 
@@ -1257,6 +1289,7 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
           ),
       includeHumanMatches: includeHumanMatches,
       maxMatches: batchSize,
+      fastMode: fastMode,
     );
     if (!batch.madeProgress) {
       break;
@@ -1267,7 +1300,7 @@ Future<Map<String, Object?>> _runTournamentSimulationWithEngine({
     sendPort.send(<String, Object?>{
       'type': 'progress',
       'label':
-          'Turnier wird simuliert: ${workingBracket.definition.name} ($completedMatches/$totalMatches Matches)',
+          '${fastMode ? 'Turnier wird schnell simuliert' : 'Turnier wird simuliert'}: ${workingBracket.definition.name} ($completedMatches/$totalMatches Matches)',
       'progress': totalMatches == 0
           ? null
           : (completedMatches / totalMatches).clamp(0.0, 1.0).toDouble(),

@@ -7,6 +7,24 @@ import '../../data/export/file_export_service.dart';
 import '../../data/models/player_profile.dart';
 import '../../data/repositories/player_repository.dart';
 
+class _PlayerTrainingFormData {
+  const _PlayerTrainingFormData({
+    required this.type,
+    required this.resultValue,
+    required this.resultUnit,
+    this.customLabel,
+    this.average,
+    this.notes,
+  });
+
+  final PlayerTrainingType type;
+  final String? customLabel;
+  final double resultValue;
+  final PlayerTrainingValueUnit resultUnit;
+  final double? average;
+  final String? notes;
+}
+
 class PlayerProfilesScreen extends StatefulWidget {
   const PlayerProfilesScreen({super.key});
 
@@ -19,6 +37,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
   final FileExportService _fileExportService = createFileExportService();
 
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _birthDateController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
   final TextEditingController _favoriteDoubleController =
       TextEditingController();
@@ -37,6 +56,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _birthDateController.dispose();
     _ageController.dispose();
     _favoriteDoubleController.dispose();
     _hatedDoubleController.dispose();
@@ -60,6 +80,42 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
   String _formatDate(DateTime value) {
     final local = value.toLocal();
     return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}.${local.year}';
+  }
+
+  DateTime? _parseBirthDate(String rawValue) {
+    final trimmed = rawValue.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final iso = DateTime.tryParse(trimmed);
+    if (iso != null) {
+      return DateTime(iso.year, iso.month, iso.day);
+    }
+    final parts = trimmed.split(RegExp(r'[./-]'));
+    if (parts.length != 3) {
+      return null;
+    }
+    final first = int.tryParse(parts[0]);
+    final second = int.tryParse(parts[1]);
+    final third = int.tryParse(parts[2]);
+    if (first == null || second == null || third == null) {
+      return null;
+    }
+    if (parts[0].length == 4) {
+      return DateTime.tryParse(
+        '${first.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${third.toString().padLeft(2, '0')}',
+      );
+    }
+    return DateTime.tryParse(
+      '${third.toString().padLeft(4, '0')}-${second.toString().padLeft(2, '0')}-${first.toString().padLeft(2, '0')}',
+    );
+  }
+
+  String _formatBirthDate(DateTime? value) {
+    if (value == null) {
+      return '';
+    }
+    return _formatDate(value);
   }
 
   void _showMessage(String message) {
@@ -86,6 +142,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
       _selectedNationality = null;
       _selectedSource = PlayerProfileSource.manual;
       _nameController.clear();
+      _birthDateController.clear();
       _ageController.clear();
       _favoriteDoubleController.clear();
       _hatedDoubleController.clear();
@@ -100,7 +157,8 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
       _selectedNationality = player.nationality;
       _selectedSource = player.source;
       _nameController.text = player.name;
-      _ageController.text = player.age?.toString() ?? '';
+      _birthDateController.text = _formatBirthDate(player.birthDate);
+      _ageController.text = player.birthDate == null ? player.age?.toString() ?? '' : '';
       _favoriteDoubleController.text = player.favoriteDouble ?? '';
       _hatedDoubleController.text = player.hatedDouble ?? '';
       _notesController.text = player.notes ?? '';
@@ -110,11 +168,17 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
 
   void _submit() {
     final age = int.tryParse(_ageController.text.trim());
+    final birthDateText = _birthDateController.text.trim();
+    final birthDate = _parseBirthDate(birthDateText);
     if (_nameController.text.trim().isEmpty) {
       return;
     }
     if (age != null && (age < 10 || age > 100)) {
       _showMessage('Alter bitte zwischen 10 und 100 eingeben.');
+      return;
+    }
+    if (birthDateText.isNotEmpty && birthDate == null) {
+      _showMessage('Geburtsdatum bitte als TT.MM.JJJJ oder JJJJ-MM-TT eingeben.');
       return;
     }
     final trimmedDisplayName = _displayNameController.text.trim();
@@ -125,6 +189,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
         name: _nameController.text,
         nationality: _selectedNationality,
         age: age,
+        birthDate: birthDate,
         favoriteDouble: _favoriteDoubleController.text,
         hatedDouble: _hatedDoubleController.text,
         tags: const <String>[],
@@ -142,6 +207,7 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
         name: _nameController.text,
         nationality: _selectedNationality,
         age: age,
+        birthDate: birthDate,
         favoriteDouble: _favoriteDoubleController.text,
         hatedDouble: _hatedDoubleController.text,
         tags: existing.tags,
@@ -543,6 +609,23 @@ class _PlayerProfilesScreenState extends State<PlayerProfilesScreen> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        controller: _birthDateController,
+                        decoration: const InputDecoration(
+                          labelText: 'Geburtsdatum optional',
+                          hintText: 'TT.MM.JJJJ',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _ageController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Alter optional',
+                          helperText: 'Wird nur genutzt, wenn kein Geburtsdatum gesetzt ist.',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
                         controller: _favoriteDoubleController,
                         decoration: const InputDecoration(
                           labelText: 'Lieblingsdoppel optional',
@@ -753,8 +836,14 @@ class _PlayerProfileDetailsPageState extends State<_PlayerProfileDetailsPage> {
                     if (currentPlayer.isFavorite) const Chip(label: Text('Favorit')),
                     if (currentPlayer.isProtected)
                       const Chip(label: Text('Geschuetzt')),
-                    if (currentPlayer.age != null)
-                      Chip(label: Text('Alter ${currentPlayer.age}')),
+                    if (currentPlayer.birthDate != null)
+                      Chip(
+                        label: Text(
+                          'Geboren ${widget.formatDate(currentPlayer.birthDate!)}',
+                        ),
+                      ),
+                    if (currentPlayer.effectiveAge != null)
+                      Chip(label: Text('Alter ${currentPlayer.effectiveAge}')),
                     ...currentPlayer.tags.map((tag) => Chip(label: Text(tag))),
                   ],
                 ),
@@ -1296,18 +1385,20 @@ class _PlayerTrainingPage extends StatefulWidget {
 class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
   final PlayerRepository _repository = PlayerRepository.instance;
 
-  final TextEditingController _modeController = TextEditingController();
-  final TextEditingController _scoreController = TextEditingController();
+  final TextEditingController _customLabelController = TextEditingController();
+  final TextEditingController _resultValueController = TextEditingController();
   final TextEditingController _averageController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  PlayerTrainingType _selectedTrainingType = PlayerTrainingType.x01;
+  PlayerTrainingValueUnit _selectedTrainingUnit = PlayerTrainingValueUnit.points;
 
   bool get _suppressAccessibilityUpdates =>
       defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   void dispose() {
-    _modeController.dispose();
-    _scoreController.dispose();
+    _customLabelController.dispose();
+    _resultValueController.dispose();
     _averageController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -1316,6 +1407,64 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
   String _formatDateTime(DateTime value) {
     final local = value.toLocal();
     return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}.${local.year} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  double? _parseDouble(String rawValue) {
+    final normalized = rawValue.trim().replaceAll(',', '.');
+    return double.tryParse(normalized);
+  }
+
+  PlayerTrainingValueUnit _defaultUnitForType(PlayerTrainingType type) {
+    return switch (type) {
+      PlayerTrainingType.x01 => PlayerTrainingValueUnit.points,
+      PlayerTrainingType.scoring => PlayerTrainingValueUnit.points,
+      PlayerTrainingType.doubles => PlayerTrainingValueUnit.hits,
+      PlayerTrainingType.checkout => PlayerTrainingValueUnit.percent,
+      PlayerTrainingType.cricket => PlayerTrainingValueUnit.marks,
+      PlayerTrainingType.bob27 => PlayerTrainingValueUnit.points,
+      PlayerTrainingType.custom => PlayerTrainingValueUnit.count,
+    };
+  }
+
+  _PlayerTrainingFormData? _buildTrainingFormData() {
+    final resultValue = _parseDouble(_resultValueController.text);
+    final average = _parseDouble(_averageController.text);
+    final customLabel = _customLabelController.text.trim();
+    if (resultValue == null) {
+      return null;
+    }
+    if (_selectedTrainingType == PlayerTrainingType.custom &&
+        customLabel.isEmpty) {
+      return null;
+    }
+    return _PlayerTrainingFormData(
+      type: _selectedTrainingType,
+      customLabel: customLabel.isEmpty ? null : customLabel,
+      resultValue: resultValue,
+      resultUnit: _selectedTrainingUnit,
+      average: average,
+      notes: _notesController.text.trim().isEmpty ? null : _notesController.text,
+    );
+  }
+
+  void _clearTrainingForm() {
+    _customLabelController.clear();
+    _resultValueController.clear();
+    _averageController.clear();
+    _notesController.clear();
+    setState(() {
+      _selectedTrainingType = PlayerTrainingType.x01;
+      _selectedTrainingUnit = _defaultUnitForType(_selectedTrainingType);
+    });
   }
 
   @override
@@ -1337,14 +1486,77 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                TextField(
-                  controller: _modeController,
-                  decoration: const InputDecoration(labelText: 'Trainingsmodus'),
+                DropdownButtonFormField<PlayerTrainingType>(
+                  key: ValueKey<String>('training-type-${_selectedTrainingType.name}'),
+                  initialValue: _selectedTrainingType,
+                  decoration: const InputDecoration(labelText: 'Trainingsart'),
+                  items: PlayerTrainingType.values
+                      .map(
+                        (type) => DropdownMenuItem<PlayerTrainingType>(
+                          value: type,
+                          child: Text(type.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _selectedTrainingType = value;
+                      _selectedTrainingUnit = _defaultUnitForType(value);
+                    });
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _scoreController,
-                  decoration: const InputDecoration(labelText: 'Ergebnis / Punkte'),
+                  controller: _customLabelController,
+                  decoration: InputDecoration(
+                    labelText: _selectedTrainingType == PlayerTrainingType.custom
+                        ? 'Bezeichnung'
+                        : 'Bezeichnung optional',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextField(
+                        controller: _resultValueController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Ergebniswert',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<PlayerTrainingValueUnit>(
+                        key: ValueKey<String>(
+                          'training-unit-${_selectedTrainingUnit.name}',
+                        ),
+                        initialValue: _selectedTrainingUnit,
+                        decoration: const InputDecoration(labelText: 'Einheit'),
+                        items: PlayerTrainingValueUnit.values
+                            .map(
+                              (unit) =>
+                                  DropdownMenuItem<PlayerTrainingValueUnit>(
+                                value: unit,
+                                child: Text(unit.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() => _selectedTrainingUnit = value);
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1360,24 +1572,27 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: () {
-                    if (_modeController.text.trim().isEmpty ||
-                        _scoreController.text.trim().isEmpty) {
+                    final formData = _buildTrainingFormData();
+                    if (formData == null) {
+                      _showMessage(
+                        _selectedTrainingType == PlayerTrainingType.custom
+                            ? 'Bitte Trainingsbezeichnung und Ergebniswert eingeben.'
+                            : 'Bitte einen gueltigen Ergebniswert eingeben.',
+                      );
                       return;
                     }
                     _repository.recordTrainingSession(
                       playerId: player.id,
-                      mode: _modeController.text,
-                      scoreLabel: _scoreController.text,
-                      average: double.tryParse(
-                        _averageController.text.trim().replaceAll(',', '.'),
+                      session: PlayerTrainingSessionDraft(
+                        type: formData.type,
+                        customLabel: formData.customLabel,
+                        resultValue: formData.resultValue,
+                        resultUnit: formData.resultUnit,
+                        average: formData.average,
+                        notes: formData.notes,
                       ),
-                      notes: _notesController.text,
                     );
-                    _modeController.clear();
-                    _scoreController.clear();
-                    _averageController.clear();
-                    _notesController.clear();
-                    setState(() {});
+                    _clearTrainingForm();
                   },
                   child: const Text('Training speichern'),
                 ),
@@ -1406,13 +1621,17 @@ class _PlayerTrainingPageState extends State<_PlayerTrainingPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: <Widget>[
                                   Text(
-                                    '${entry.mode} - ${entry.scoreLabel}',
+                                    '${entry.title} - ${entry.resultSummary}',
                                     style: theme.textTheme.titleSmall,
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
                                     '${_formatDateTime(entry.playedAt)}${entry.average == null ? '' : ' - Avg ${entry.average!.toStringAsFixed(1)}'}${entry.equipmentName == null ? '' : ' - ${entry.equipmentName}'}',
                                   ),
+                                  if ((entry.notes ?? '').isNotEmpty) ...<Widget>[
+                                    const SizedBox(height: 4),
+                                    Text(entry.notes!),
+                                  ],
                                 ],
                               ),
                             ),
